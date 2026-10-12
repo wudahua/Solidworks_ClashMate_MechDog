@@ -13,12 +13,14 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
 from sw_mcp.bridge import Bridge, CadError
 from sw_mcp.jobs import Jobs
+from sw_mcp.artifacts import Artifacts
 
 ROOT = Path(__file__).resolve().parent
 bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
+artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = MCPServer("SolidWorks Motion", version="0.4.0-alpha.1", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；添加单一恒速驱动时先 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = MCPServer("SolidWorks Motion", version="0.4.0-alpha.2", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 
 def packed(data, error=False):
@@ -29,7 +31,7 @@ async def call(operation, **params):
     try:
         return packed({"ok": True, "result": await asyncio.to_thread(bridge.request, operation, **params)})
     except CadError as exc:
-        return packed({"ok": False, "error": {"code": exc.code, "message": str(exc), "restoration_status": exc.restoration_status, "assertion": "inconclusive"}}, True)
+        return packed({"ok": False, "error": {"code": exc.code, "message": str(exc), "restoration_status": exc.restoration_status, "diagnostics": exc.diagnostics, "assertion": "inconclusive"}}, True)
 
 
 def enqueue(operation, params):
@@ -48,8 +50,12 @@ async def get_environment() -> CallToolResult:
 @mcp.tool()
 async def import_assembly(path: str, configuration: str = "") -> CallToolResult:
     """复制已保存 SLDASM 和依赖、在副本重定向引用并登记。源文件有未保存修改则拒绝。异步返回 job_id。"""
-    if not Path(path).is_absolute() or Path(path).suffix.lower() != ".sldasm":
-        raise ToolError("提供已保存 .SLDASM 的绝对路径。")
+    if not Path(path).is_absolute():
+        raise ToolError("路径必须是绝对路径。")
+    if Path(path).suffix.lower() != ".sldasm":
+        raise ToolError(f"仅支持 .SLDASM 装配文件；收到 {Path(path).suffix or '无扩展名'}。")
+    if not Path(path).is_file():
+        raise ToolError("装配文件不存在或无法读取，请核对路径。")
     return enqueue("import_assembly", {"path": path, "configuration": configuration})
 
 
@@ -78,9 +84,11 @@ async def preflight_motion(model_id: str, study: str = "") -> CallToolResult:
 
 
 @mcp.tool()
-async def list_drive_candidates(model_id: str) -> CallToolResult:
-    """返回持久组件 ID、圆柱轴/平面法向候选。添加驱动前由用户选择，不自动补配合。"""
-    return await call("list_drive_candidates", model_id=model_id)
+async def list_drive_candidates(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal"] = "", limit: int = 20, cursor: str = "") -> CallToolResult:
+    """分页读取几何驱动候选；可按组件及几何类型过滤。limit 1–50；使用 next_cursor 继续，模型改变后重新查询。"""
+    if not 1 <= limit <= 50:
+        raise ToolError("limit 须在 1–50。")
+    return await call("list_drive_candidates", model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor)
 
 
 @mcp.tool()
@@ -135,8 +143,32 @@ async def replay_motion_frame(run_id: str, frame: int) -> CallToolResult:
 
 @mcp.tool()
 async def create_model_checkpoint(model_id: str) -> CallToolResult:
-    """在初始时刻快照该副本全部 CAD 文件、配置、算例设置和组件姿态。"""
+    """快照副本全部 CAD 文件、配置、全部算例时间及激活状态和组件姿态；不自动归零。"""
     return await call("create_model_checkpoint", model_id=model_id)
+
+
+@mcp.tool()
+async def reset_study_time(model_id: str, study: str) -> CallToolResult:
+    """显式把所选算例归零并保存副本；先建立回滚检查点，旧运行结果失效。隔离期间不允许此操作。"""
+    return await call("reset_study_time", model_id=model_id, study=study)
+
+
+@mcp.tool()
+async def get_run_artifacts(run_id: str) -> CallToolResult:
+    """离线读取保存的求解摘要，恢复失败或重启后仍可调用；不证明当前 CAD 状态或结果物理精度。"""
+    try:
+        return packed(await asyncio.to_thread(artifacts.summary, run_id))
+    except (ValueError, OSError, KeyError) as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@mcp.tool()
+async def read_run_poses(run_id: str, component_id: str = "", frame_start: int = 0, limit: int = 20, cursor: str = "") -> CallToolResult:
+    """分页读取已保存的姿态 CSV，不调用 COM；未知恢复状态下可用。数据有效性与当前模型状态分别标示。"""
+    try:
+        return packed(await asyncio.to_thread(artifacts.poses, run_id, component_id, frame_start, limit, cursor))
+    except (ValueError, OSError, KeyError) as exc:
+        raise ToolError(str(exc)) from exc
 
 
 @mcp.tool()

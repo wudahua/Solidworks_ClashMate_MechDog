@@ -2,7 +2,9 @@
 
 SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.0-alpha.1`：让 AI 在本机 SolidWorks 中导入已保存装配的隔离副本、检查运动准备状态、复用 Motion Analysis 算例或添加一个恒速驱动，然后求解、导出曲线和回放截图。
+`v0.4.0-alpha.2` 修复试用版：让 AI 在本机 SolidWorks 中导入已保存装配的隔离副本、检查运动准备状态、复用 Motion Analysis 算例或添加一个恒速驱动，然后求解、导出曲线和回放截图。
+
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.0-alpha.2.md)。
 
 这是供试用的运动仿真首版。已有有效配合的刚体机构是目标输入；没有配合的装配需要先由设计者完成运动约束。尚未完成“大部分机械装配均可用”的样本覆盖验收。
 
@@ -34,7 +36,7 @@ SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidwo
 
 ## 安装
 
-解压到有写权限的目录，避免直接放在 Program Files。所有运行结果和隔离副本保存在安装目录的 `runs/` 与 `experiments/`。
+解压到有写权限的短路径，例如 `C:\MCP\ClashMate`，避免直接放在 Program Files。所有运行结果和隔离副本保存在安装目录的 `runs/` 与 `experiments/`；很长的安装路径或CAD文件名可能触及Windows路径长度限制。
 
 ```powershell
 # 在解压后的项目目录执行；PythonPath 填自己的 Python 路径。
@@ -95,13 +97,15 @@ Get-Process SLDWORKS | Select-Object Id, ProcessName
 | get_environment / list_models | 环境与登记模型 |
 | import_assembly / inspect_model | 副本导入、组件与顶层配合 |
 | preflight_motion / list_motion_studies | 准备检查与算例清单 |
-| list_drive_candidates | 几何候选和持久引用 ID |
+| list_drive_candidates | 按组件、几何类型过滤的分页候选和持久引用 ID；默认20项、最多50项 |
 | create_motion_study / convert_motion_study | 创建单一恒速驱动 / 显式转换类型 |
 | run_motion_study / get_job | 异步求解与缓存进度 |
 | get_motion_summary / export_motion_curve | 结果有效性检查与 CSV |
 | replay_motion_frame | 核验采样帧并导出截图 |
 | create_model_checkpoint / restore_model_checkpoint | 整套副本检查点与恢复 |
 | get_recovery_state | 不进入 COM 的请求状态查询 |
+| reset_study_time | 显式归零所选算例；先建立回滚检查点，旧结果失效 |
+| get_run_artifacts / read_run_poses | 离线摘要与分页姿态；恢复失败、执行器重启后仍可读取保存文件 |
 
 ## 限制与恢复
 
@@ -112,6 +116,16 @@ Get-Process SLDWORKS | Select-Object Id, ProcessName
 超时意味着结果未知，不能解释为求解已停止，也不能强行并行重试。等待真实响应或查询恢复状态。执行器确认结束后，使用**同一模型**此前保存的 checkpoint_id 恢复；旧 run_id 必须重新求解。默认绑定原 SolidWorks PID，旧实例确实退出时才可显式允许替代实例。恢复会关闭该登记副本及其依赖文档，不关闭用户其他文件。
 
 在首次导入登记完成前中断，可能尚无完整检查点可自动恢复；保留日志和副本，不手动把未知请求记录改成 idle。这个边界以及客户端断开后的实例寿命、独立机器安装，需要继续扩大验证。
+
+求解会保存登记副本的操作前状态并快照全部副本文件，结束后重开副本，核验全部算例的时间、类型、输出设置、激活状态及组件姿态。仅设置时间条不足以证明恢复成功。成功结果的曲线读取已保存姿态；回放会重新求解并与已保存采样帧对照。求解原生数据的完整采集、状态恢复和物理验证范围分别报告，周期运动应检查整个时间区间。
+
+在 revision 34.0.0 的额外边界实测中，激活算例停在非输出帧时刻曾导致原生采样阻塞。因此本版在求解或回放前拒绝该状态，返回 `ACTIVE_TIME_NOT_FRAME_ALIGNED`，需先显式调用 `reset_study_time`。这与未激活算例中保存的非零时间不同，后者仍按快照完整保留；不会把全部算例无条件归零。
+
+失败任务也保留 `solve.json`；完整采集时保留姿态 CSV 和哈希。离线接口中的 `current_model_validity=not_checked_offline` 表示没有核查当前模型，不得把历史数据当作当前设计的有效结果。`inconclusive` 仍表示未完成验证。源文件与组件配置名称原样保留，`默认` 和 `Default` 是不同的配置标识。
+
+官方恢复入口为 `.venv\Scripts\python.exe scripts\recover.py inspect`，此命令不调用 COM。普通恢复用 `restore --model-id <id> --checkpoint-id <id> --solidworks-pid <pid>`；旧实例确认退出时才使用 `--allow-replacement-session`。先停用本目录的 MCP 服务，命令行与服务不能同时持有执行器。
+
+历史日志缺失 SolidWorks PID 时，不能直接放行或删除日志。操作者须确认 CAD 空闲、旧操作已经结束、旧执行器已退出，并核对实际实例及受影响模型；运行 `inspect` 获取当前日志 SHA-256 后，才可使用 `reconcile-missing-identity --model-id <id> --checkpoint-id <id> --solidworks-pid <pid> --journal-sha256 <hash> --confirm-operation-ended`。该命令保留原日志审计副本，将记录继续保持为 unknown，只有指定模型的检查点恢复核验成功后才解除隔离。**AI 不得自动替操作者确认旧操作已经结束。** 身份不明、旧执行器存活、日志变化或没有有效检查点时仍拒绝恢复。
 
 ## 示例与测试
 
