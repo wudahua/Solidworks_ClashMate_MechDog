@@ -14,10 +14,11 @@ from pathlib import Path
 
 
 class CadError(RuntimeError):
-    def __init__(self, code: str, message: str, restoration_status: str = "unknown", diagnostics: dict | None = None):
+    def __init__(self, code: str, message: str, restoration_status: str = "unknown", diagnostics: dict | None = None, document_context_restoration_status: str = "not_required"):
         self.code = code
         self.restoration_status = restoration_status
         self.diagnostics = diagnostics or {}
+        self.document_context_restoration_status = document_context_restoration_status
         super().__init__(message)
 
 
@@ -39,6 +40,8 @@ class Bridge:
         self._journal_path = root / "runs" / "executor-state.json"
         self._owner_id = uuid.uuid4().hex
         self._lease = None
+        self._reader_thread = None
+        self._ever_dispatched = False
 
     def _acquire_lease(self):
         """OS releases the journal lease if its Python owner crashes."""
@@ -134,11 +137,25 @@ class Bridge:
         self._acquire_lease()
         if self._process is not None:
             if self._process.poll() is not None:
-                raise CadError("EXECUTOR_LOST", "执行器已退出；确认 SolidWorks 状态后重启 MCP 服务。")
-            if not self._startup.done():
-                raise CadError("COM_CONNECTION_PENDING", "执行器尚未确认 COM 连接完成，不接受 CAD 操作。")
-            self._validate_hello(self._startup.result())
-            return
+                if not self._retryable_startup_failure():
+                    raise CadError("EXECUTOR_LOST", "执行器已退出；确认 SolidWorks 状态后重启 MCP 服务。")
+                if self._reader_thread is not None:
+                    self._reader_thread.join(timeout=1)
+                    if self._reader_thread.is_alive():
+                        raise CadError("COM_CONNECTION_PENDING", "旧启动响应仍在结束；请稍后重试连接。", "not_required")
+                for stream in (self._process.stdin, self._process.stdout):
+                    if stream is not None:
+                        stream.close()
+                if self._log is not None:
+                    self._log.close()
+                self._process = None
+                self._startup = concurrent.futures.Future()
+                self._reader_thread = None
+            else:
+                if not self._startup.done():
+                    raise CadError("COM_CONNECTION_PENDING", "执行器尚未确认 COM 连接完成，不接受 CAD 操作。")
+                self._validate_hello(self._startup.result())
+                return
         exe = self.root / "executor" / "bin" / "SwExecutor.exe"
         if not exe.is_file():
             raise CadError("EXECUTOR_NOT_BUILT", "先运行 executor/build.ps1 编译执行器。")
@@ -149,12 +166,27 @@ class Bridge:
             stderr=self._log, text=True, encoding="utf-8", bufsize=1,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        threading.Thread(target=self._read, daemon=True, name="cad-responses").start()
+        self._reader_thread = threading.Thread(target=self._read, daemon=True, name="cad-responses")
+        self._reader_thread.start()
         try:
             hello = self._startup.result(timeout=20)
         except concurrent.futures.TimeoutError as exc:
             raise CadError("COM_CONNECTION_TIMEOUT", "未能连接桌面会话中的 SolidWorks；检查软件状态及执行器会话。") from exc
         self._validate_hello(hello)
+
+    def _retryable_startup_failure(self):
+        """Retry only an explicit no-session handshake, before any request dispatch."""
+        if self._ever_dispatched or self._pending or self._quarantined_request or self.recovery_state()["recovery_required"]:
+            return False
+        if not self._startup.done() or self._startup.cancelled():
+            return False
+        try:
+            hello = self._startup.result()
+        except Exception:
+            return False
+        return (isinstance(hello, dict) and hello.get("protocol_version") == 1 and hello.get("ready") is False
+                and isinstance(hello.get("error"), dict)
+                and hello["error"].get("code") in {"COM_SESSION_NOT_FOUND", "COM_SESSION_UNAVAILABLE"})
 
     def reconcile_missing_identity(self, *, model_id: str, checkpoint_id: str, solidworks_pid: int, journal_sha256: str, operation_ended_confirmed: bool):
         """Manual CLI only: bind unknown identity, then verify a real checkpoint restore."""
@@ -278,13 +310,14 @@ class Bridge:
                     except (OSError, ValueError, AttributeError):
                         pass
                 wire = json.dumps({"id": request_id, "op": operation, "params": params}) + "\n"
+                self._ever_dispatched = True
                 self._journal({"status": "active", "owner_id": self._owner_id, "dispatch_state": "dispatching", "request_id": request_id, "operation": operation, "params": params,
                                "model_id": model_id,
                                "executor_pid": self._process.pid, "solidworks_pid": self._startup.result().get("process_id"),
                                "recovering": recovering, "previous_state": state if recovering else None})
                 self._process.stdin.write(wire)
                 self._process.stdin.flush()
-                deadline = self.motion_scan_timeout if operation in {"check_interference_during_motion", "run_parameter_search", "diagnose_gear_phase", "import_assembly", "run_user_study", "restore_model_checkpoint"} else self.timeout
+                deadline = self.motion_scan_timeout if operation in {"check_interference_during_motion", "run_parameter_search", "diagnose_gear_phase", "import_assembly", "run_user_study", "replay_motion_frame", "restore_model_checkpoint"} else self.timeout
                 response = future.result(timeout=deadline)
             except concurrent.futures.TimeoutError as exc:
                 with self._state_lock:
@@ -299,7 +332,7 @@ class Bridge:
                 raise CadError("EXECUTOR_LOST", "无法与执行器通信；请确认 SolidWorks 状态。") from exc
             if not response.get("ok"):
                 error = response.get("error", {})
-                raise CadError(error.get("code", "CAD_ERROR"), error.get("message", "CAD operation failed"), error.get("restoration_status", "unknown"), error.get("diagnostics"))
+                raise CadError(error.get("code", "CAD_ERROR"), error.get("message", "CAD operation failed"), error.get("restoration_status", "unknown"), error.get("diagnostics"), error.get("document_context_restoration_status", "not_required"))
             result = response["result"]
             if replacement:
                 result = {**result, "recovery_session": {"previous_solidworks_pid": state.get("solidworks_pid"), "current_solidworks_pid": self._startup.result().get("process_id"), "replacement": True}}
@@ -315,3 +348,6 @@ class Bridge:
         if self._lease is not None:
             self._lease.close()
             self._lease = None
+        if self._log is not None:
+            self._log.close()
+            self._log = None

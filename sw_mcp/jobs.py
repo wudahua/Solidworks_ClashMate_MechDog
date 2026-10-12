@@ -50,13 +50,35 @@ class Jobs:
             result = self.bridge.request(job["operation"], **job["params"])
         except CadError as exc:
             update = {"status": "timed_out" if exc.code == "CAD_TIMEOUT" else "executor_lost" if exc.code == "EXECUTOR_LOST" else "failed",
-                      "error": {"code": exc.code, "message": str(exc), "assertion": "inconclusive", "restoration_status": exc.restoration_status, "diagnostics": exc.diagnostics}}
+                      "error": {"code": exc.code, "message": str(exc), "assertion": "inconclusive", "restoration_status": exc.restoration_status, "document_context_restoration_status": exc.document_context_restoration_status, "diagnostics": exc.diagnostics}}
         except Exception as exc:
             update = {"status": "failed", "error": {"code": "SERVICE_ERROR", "message": str(exc), "assertion": "inconclusive"}}
         else:
             update = {"status": "succeeded", "result": result}
         with self._lock:
             job.update(update, finished_at=time.time())
+            progress_file = self.root / "runs" / "progress" / f"{job_id}.json"
+            previous = {}
+            try:
+                value = json.loads(progress_file.read_text(encoding="utf-8"))
+                if value.get("job_id") == job_id:
+                    previous = value
+            except (OSError, ValueError, AttributeError):
+                pass
+            terminal = {**previous, "job_id": job_id, "stage": job["status"], "terminal": True,
+                        "last_native_stage": previous.get("stage"), "updated_at": time.time(),
+                        "cad_operation_finished": job["status"] == "succeeded" or (
+                            job["status"] == "failed" and job.get("error", {}).get("restoration_status") in {"restored", "not_required"}
+                            and job["error"]["code"] != "EXECUTOR_PROTOCOL_ERROR")}
+            if "run_id" in job["params"]:
+                terminal["run_id"] = job["params"]["run_id"]
+            if "error" in job:
+                terminal["error_code"] = job["error"]["code"]
+            progress_file.parent.mkdir(parents=True, exist_ok=True)
+            temporary = progress_file.with_suffix(".service.tmp")
+            temporary.write_text(json.dumps(terminal, ensure_ascii=False), encoding="utf-8")
+            temporary.replace(progress_file)
+            job["progress"] = terminal
             self._persist(job)
 
     def get(self, job_id: str) -> dict:
@@ -68,7 +90,7 @@ class Jobs:
         progress = self.root / "runs" / "progress" / f"{job_id}.json"
         try:
             value = json.loads(progress.read_text(encoding="utf-8"))
-            if value.get("job_id") == job_id:
+            if job["status"] in {"queued", "running"} and value.get("job_id") == job_id:
                 job["progress"] = value
         except (OSError, ValueError):
             pass
