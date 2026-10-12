@@ -16,6 +16,7 @@ public partial class Cad {
     public readonly ISldWorks Sw;
     public readonly string Root;
     public string LastOperationRestoration="not_required";
+    public string LastContextRestoration="not_required";
     public static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 16777216 };
     const string Tutorial = @"C:\Users\Public\Documents\SOLIDWORKS\SOLIDWORKS 2026\samples\tutorial\advdrawings\";
     [DllImport("ole32.dll")]static extern int GetRunningObjectTable(int reserved,out IRunningObjectTable table);

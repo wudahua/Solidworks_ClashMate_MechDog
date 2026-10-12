@@ -37,11 +37,12 @@ public partial class Cad {
         public bool Restored;
         public double RestoreDelta;
         public Dictionary<string,double[]> InitialPoses {get{return original;}}
+        public string DocumentPath {get{return expectedPath;}}
         public Scope(Cad owner,string path,string studyName) {
-            cad=owner;owner.LastOperationRestoration="pending"; previous=(IModelDoc2)owner.Sw.ActiveDoc;
+            cad=owner;owner.LastContextRestoration="pending"; previous=(IModelDoc2)owner.Sw.ActiveDoc;
             previousTitle=previous==null?null:previous.GetTitle();previousPath=previous==null?null:previous.GetPathName();targetStudyName=studyName;
             try {
-                owner.LastOperationRestoration="pending";
+                owner.LastContextRestoration="pending";
                 Log("SCOPE_OPEN_BEGIN "+path);
                 int e=0,w=0; Doc=(IModelDoc2)owner.Sw.OpenDoc6(path,2,1,"",ref e,ref w);
                 if(Doc==null||e!=0) throw new Exception("ASSEMBLY_OPEN_FAILED "+e);
@@ -55,11 +56,11 @@ public partial class Cad {
                 var manager=(IMotionStudyManager)Doc.Extension.GetMotionStudyManager();
                 foreach(string name in Names(manager)) { var s=(IMotionStudy)manager.GetMotionStudy(name); if(s.IsActive){originalStudy=name;originalActiveTime=s.GetTime();} }
                 if(studyName!=null) {
-                    owner.LastOperationRestoration="pending";
                     if(registered!=null)ownedSnapshot=new OwnedMotionSnapshot(owner,registered,Doc);
                     original=Transforms(Doc);
                     Study=(IMotionStudy)manager.GetMotionStudy(studyName);
                     if(Study==null) throw new Exception("STUDY_NOT_FOUND");
+                    owner.LastOperationRestoration="pending";
                     OriginalTime=Study.GetTime(); Study.Activate();
                 }
             } catch(Exception failure) { try{Dispose();}catch(Exception rollback){owner.LastOperationRestoration="unknown";throw new CadFault("RESTORATION_FAILED","打开或激活失败，且无法核验原窗口恢复。",new{original_error=failure.ToString(),rollback_error=rollback.ToString()});}if(failure is COMException)owner.LastOperationRestoration="unknown";throw; }
@@ -84,14 +85,32 @@ public partial class Cad {
                 } else Restored=true;
             } catch(Exception e){restoreCause=e;Restored=false;} finally {
                 try{if(previousTitle!=null) {var active=(IModelDoc2)cad.Sw.ActiveDoc;if(active==null||!string.Equals(active.GetPathName(),previousPath,StringComparison.OrdinalIgnoreCase)){int e=0;var activated=cad.Sw.ActivateDoc3(previousTitle,false,0,ref e);if(activated==null||e!=0)Restored=false;}}}catch(Exception e){restoreCause=e;Restored=false;}
-                cad.LastOperationRestoration=Restored?"restored":"unknown";
+                cad.LastContextRestoration=Restored?"restored":"unknown";
+                if(Study!=null&&original!=null||!Restored)cad.LastOperationRestoration=Restored?"restored":"unknown";
                 if(!Restored)throw new CadFault("RESTORATION_FAILED","无法确认完整状态已恢复。",new{maximum_transform_delta=RestoreDelta,state_difference=ownedSnapshot==null?null:ownedSnapshot.Diagnostics,cause=restoreCause==null?null:restoreCause.ToString()});
             }
         }
     }
     static string[] Names(IMotionStudyManager mgr) { return ((object[])mgr.GetMotionStudyNames()).Cast<string>().ToArray(); }
     static Dictionary<string,double[]> Transforms(IModelDoc2 d) { return ((object[])((IAssemblyDoc)d).GetComponents(false)).Cast<IComponent2>().Where(c=>!c.IsSuppressed()).ToDictionary(c=>c.Name2,c=>(double[])c.GetTotalTransform(false).ArrayData); }
-    string Fingerprint(IModelDoc2 doc) {
+    string Fingerprint(IModelDoc2 doc,string knownPath=null) {
+        string path=knownPath;
+        for(int attempt=0;;attempt++) {
+            try{
+                string actualPath=doc.GetPathName();if(path==null)path=actualPath;
+                if(!string.Equals(path,actualPath,StringComparison.OrdinalIgnoreCase))throw new Exception("SESSION_CONFLICT: fingerprint document identity changed");
+                return FingerprintCore(doc);
+            }
+            catch(COMException e) {
+                if(path==null||attempt>=2||(e.HResult!=unchecked((int)0x80010100)&&e.HResult!=unchecked((int)0x80010001)&&e.HResult!=unchecked((int)0x8001010A)))throw;
+                Log("FINGERPRINT_READ_RETRY "+(attempt+1)+" hresult="+e.HResult);
+                Application.DoEvents();System.Threading.Thread.Sleep(100);
+                doc=(IModelDoc2)Sw.GetOpenDocumentByName(path);
+                if(doc==null)throw;
+            }
+        }
+    }
+    string FingerprintCore(IModelDoc2 doc) {
         var paths=((object[])((IAssemblyDoc)doc).GetComponents(false)).Cast<IComponent2>().Select(c=>c.GetPathName()).Concat(new[]{doc.GetPathName()}).Distinct().OrderBy(p=>p).ToArray();
         using(var sha=SHA256.Create()) {
             var lines=new List<string>();
@@ -133,7 +152,7 @@ public partial class Cad {
         var scope=new Scope(this,PathFor(assembly),studyName); Run run=null;
         double maxPositionError=0,maxCrankError=0;
         try {
-            Fingerprint(scope.Doc); // Reject external dependencies before writing solver settings or rebuilding.
+            Fingerprint(scope.Doc,scope.DocumentPath); // Reject external dependencies before writing solver settings or rebuilding.
             if(!scope.Doc.EditRebuild3()) throw new Exception("REBUILD_FAILED");
             scope.Study.Activate();
             if(scope.Study.StudyType!=4)scope.Study.StudyType=4;
@@ -176,7 +195,7 @@ public partial class Cad {
             if(assembly=="parameter_trial"&&poses[Obstacle(scope.Doc).Name2].Any(p=>p.Zip(Pose(parameterValueMm/1000,0,0,0),(a,b)=>Math.Abs(a-b)).Max()>1e-8))throw new Exception("PARAMETER_NOT_APPLIED_TO_SOLVER");
             if(maxPositionError>1e-5||maxCrankError>1e-4) throw new Exception("TRAJECTORY_VALIDATION_FAILED position_m="+maxPositionError+" angle_rad="+maxCrankError);
             if(result.IsOutOfDate()) throw new Exception("RESULTS_STALE");
-            run=new Run { Id=runId,Assembly=assembly,EditVersion=assembly=="parameter_trial"?parameterVersion:0,Path=scope.Doc.GetPathName(),Study=studyName,Fingerprint=Fingerprint(scope.Doc),Duration=duration,Fps=fps,Directory=dir,Times=times,Poses=poses };
+            run=new Run { Id=runId,Assembly=assembly,EditVersion=assembly=="parameter_trial"?parameterVersion:0,Path=scope.Doc.GetPathName(),Study=studyName,Fingerprint=Fingerprint(scope.Doc,scope.DocumentPath),Duration=duration,Fps=fps,Directory=dir,Times=times,Poses=poses };
         } finally { scope.Dispose(); }
         if(!scope.Restored) throw new Exception("RESTORATION_FAILED delta="+scope.RestoreDelta);
         runs.Add(runId,run);
@@ -187,7 +206,7 @@ public partial class Cad {
     }
     Run GetRun(string id) { Run r; if(!runs.TryGetValue(id,out r)) throw new Exception("RUN_NOT_FOUND_OR_EXECUTOR_RESTARTED");if(r.Generic)GetUserModel(r.Assembly);ConfigureModel(r.Assembly);if(r.Assembly=="gear_phase"&&r.ModelRoot!=null)pumpRootOverride=r.ModelRoot;return r; }
     void ValidateRun(Run r,Scope scope) {
-        if(r.Generic&&r.EditVersion!=GetUserModel(r.Assembly).Revision||r.Assembly=="parameter_trial"&&r.EditVersion!=parameterVersion||Fingerprint(scope.Doc)!=r.Fingerprint) throw new Exception("MODEL_REVISION_CHANGED");
+        if(r.Generic&&r.EditVersion!=GetUserModel(r.Assembly).Revision||r.Assembly=="parameter_trial"&&r.EditVersion!=parameterVersion||Fingerprint(scope.Doc,scope.DocumentPath)!=r.Fingerprint) throw new Exception("MODEL_REVISION_CHANGED");
         var result=(IMotionStudyResults)scope.Study.GetResults(4);
         if(result==null||result.IsOutOfDate()) throw new Exception("RESULTS_STALE");
         if(Math.Abs(scope.Study.GetDuration()-r.Duration)>1e-8||((IMotionStudyProperties)scope.Study.GetProperties(4)).GetFrameRate()!=r.Fps) throw new Exception("STUDY_SETTINGS_CHANGED");
@@ -280,6 +299,7 @@ public partial class Cad {
     }
     public object Dispatch(Dictionary<string,object> request) {
         LastOperationRestoration="not_required";
+        LastContextRestoration="not_required";
         string op=(string)request["op"];var p=(Dictionary<string,object>)request["params"];
         activeJobId=p.ContainsKey("job_id")?(string)p["job_id"]:null;
         switch(op) {
@@ -289,7 +309,7 @@ public partial class Cad {
             case "inspect_model": return InspectUserModel((string)p["model_id"]);
             case "list_motion_studies": return UserStudies((string)p["model_id"]);
             case "preflight_motion": return PreflightUserMotion((string)p["model_id"],p.ContainsKey("study")?(string)p["study"]:null);
-            case "list_drive_candidates": return UserDriveCandidates((string)p["model_id"],p.ContainsKey("component_id")?(string)p["component_id"]:"",p.ContainsKey("kind")?(string)p["kind"]:"",p.ContainsKey("limit")?Convert.ToInt32(p["limit"]):20,p.ContainsKey("cursor")?(string)p["cursor"]:null);
+            case "list_drive_candidates": return UserDriveCandidates((string)p["model_id"],p.ContainsKey("component_id")?(string)p["component_id"]:"",p.ContainsKey("kind")?(string)p["kind"]:"",p.ContainsKey("limit")?Convert.ToInt32(p["limit"]):20,p.ContainsKey("cursor")?(string)p["cursor"]:null,p.ContainsKey("group_faces")?Convert.ToBoolean(p["group_faces"]):true);
             case "create_motion_study": return CreateUserStudy((string)p["model_id"],(string)p["study"],(string)p["component_id"],(string)p["entity_id"],(string)p["motor_type"],Convert.ToDouble(p["speed"]),Convert.ToBoolean(p["reverse_direction"]));
             case "convert_motion_study": return ConvertUserStudy((string)p["model_id"],(string)p["study"]);
             case "run_user_study": return RunUserStudy((string)p["model_id"],(string)p["study"],Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"]);

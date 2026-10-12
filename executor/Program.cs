@@ -8,7 +8,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 class Program {
-    static object Error(Exception e,string restoration="not_required") {
+    static object Error(Exception e,string restoration="not_required",string contextRestoration="not_required") {
         var fault=e as CadFault;string code=fault==null?e.Message.Split(':')[0].Split(' ')[0]:fault.Code;
         if(e is COMException) code="COM_CALL_FAILED";
         else if(e is IOException) code="FILE_ACCESS_FAILED";
@@ -34,7 +34,13 @@ class Program {
         messages["DRIVE_ENTITY_STALE"]="驱动参考已过期；请重新查询驱动候选。";
         messages["CANDIDATE_CURSOR_STALE"]="候选分页游标已过期；模型或配置已改变，请从第一页重新查询。";
         messages["ACTIVE_TIME_NOT_FRAME_ALIGNED"]="激活算例停在非输出帧时刻；请先显式 reset_study_time 归零，再求解或回放。";
-        return new {code=code,message=messages.ContainsKey(code)?messages[code]:fault==null?"执行器拒绝："+code+"；"+e.Message:fault.Message,assertion="inconclusive",restoration_status=restoration,diagnostics=new{details=fault==null?null:fault.Diagnostics,native_message=e.Message,hresult=e.HResult}};
+        messages["COM_SESSION_NOT_FOUND"]="未找到指定或已启动的 SolidWorks 实例；启动软件并核对 PID 后重试连接。";
+        messages["COM_SESSION_UNAVAILABLE"]="SolidWorks 实例尚未提供可用 COM 会话；确认启动完成后重试连接。";
+        messages["DRIVE_ENTITY_NOT_FOUND"]="驱动引用未在当前模型中登记；请重新 list_drive_candidates 选择候选并核对 entity_id。";
+        messages["NATIVE_TIME_AXIS_MISMATCH"]="原生结果时间轴与请求采样网格不一致；请查看时间轴诊断，未采集姿态或判定通过。";
+        messages["MOTION_RESULTS_INCOMPLETE"]="原生求解没有提供覆盖请求时段的结果；请检查所选驱动是否与配合相容，并查看求解诊断。";
+        string fallback="执行器拒绝请求（"+code+"）；请查看 diagnostics 中的原生诊断。";
+        return new {code=code,message=messages.ContainsKey(code)?messages[code]:fault==null?fallback:fault.Message,assertion="inconclusive",restoration_status=restoration,document_context_restoration_status=contextRestoration,diagnostics=new{details=fault==null?null:fault.Diagnostics,native_message=e.Message,hresult=e.HResult}};
     }
     [STAThread] static int Main(string[] args) {
         Console.OutputEncoding=new UTF8Encoding(false);
@@ -62,7 +68,7 @@ class Program {
                 string line; if(!queue.TryTake(out line,20)) {Application.DoEvents();continue;}
                 string id=null;
                 try {var req=Cad.Json.Deserialize<Dictionary<string,object>>(line);id=(string)req["id"];var result=cad.Dispatch(req);Console.WriteLine(Cad.Json.Serialize(new {id=id,ok=true,result=result}));}
-                catch(Exception e) {Cad.Log(e.ToString());Console.WriteLine(Cad.Json.Serialize(new { id=id,ok=false,error=Error(e,cad.LastOperationRestoration) }));}
+                catch(Exception e) {Cad.Log(e.ToString());Console.WriteLine(Cad.Json.Serialize(new { id=id,ok=false,error=Error(e,cad.LastOperationRestoration,cad.LastContextRestoration) }));}
                 Console.Out.Flush();Application.DoEvents();
             }
             return 0;
