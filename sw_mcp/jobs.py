@@ -50,7 +50,7 @@ class Jobs:
             result = self.bridge.request(job["operation"], **job["params"])
         except CadError as exc:
             update = {"status": "timed_out" if exc.code == "CAD_TIMEOUT" else "executor_lost" if exc.code == "EXECUTOR_LOST" else "failed",
-                      "error": {"code": exc.code, "message": str(exc), "assertion": "inconclusive", "restoration_status": exc.restoration_status}}
+                      "error": {"code": exc.code, "message": str(exc), "assertion": "inconclusive", "restoration_status": exc.restoration_status, "diagnostics": exc.diagnostics}}
         except Exception as exc:
             update = {"status": "failed", "error": {"code": "SERVICE_ERROR", "message": str(exc), "assertion": "inconclusive"}}
         else:

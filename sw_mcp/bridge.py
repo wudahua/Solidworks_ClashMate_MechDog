@@ -9,13 +9,15 @@ import os
 import time
 import ctypes
 import re
+import hashlib
 from pathlib import Path
 
 
 class CadError(RuntimeError):
-    def __init__(self, code: str, message: str, restoration_status: str = "unknown"):
+    def __init__(self, code: str, message: str, restoration_status: str = "unknown", diagnostics: dict | None = None):
         self.code = code
         self.restoration_status = restoration_status
+        self.diagnostics = diagnostics or {}
         super().__init__(message)
 
 
@@ -35,6 +37,45 @@ class Bridge:
         self._log = None
         self._journal_lock = threading.Lock()
         self._journal_path = root / "runs" / "executor-state.json"
+        self._owner_id = uuid.uuid4().hex
+        self._lease = None
+
+    def _acquire_lease(self):
+        """OS releases the journal lease if its Python owner crashes."""
+        if self._lease is not None:
+            return
+        directory = self.root / "runs"
+        directory.mkdir(parents=True, exist_ok=True)
+        lease = (directory / "executor-owner.lock").open("a+b")
+        if lease.seek(0, 2) == 0:
+            lease.write(b"0")
+            lease.flush()
+        lease.seek(0)
+        try:
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(lease.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            lease.close()
+            raise CadError("MCP_OWNER_ALREADY_RUNNING", "本安装目录已有 MCP 服务持有请求日志；请先停用该服务。", "not_required") from exc
+        self._lease = lease
+
+    @staticmethod
+    def _validate_hello(hello):
+        if not isinstance(hello, dict):
+            raise CadError("PROTOCOL_MISMATCH", "执行器握手格式不匹配。", "not_required")
+        if hello.get("error"):
+            error = hello["error"]
+            raise CadError(error.get("code", "COM_CONNECTION_FAILED"), error.get("message", "COM connection failed"), "not_required", error.get("diagnostics"))
+        if hello.get("protocol_version") != 1 or hello.get("ready") is not True:
+            raise CadError("PROTOCOL_MISMATCH", "执行器版本不匹配。", "not_required")
+        pid = hello.get("process_id")
+        if type(pid) is not int or pid <= 0:
+            raise CadError("COM_IDENTITY_MISSING", "执行器未提供有效 SolidWorks PID；请求没有发送。", "not_required")
+        return hello
 
     def recovery_state(self) -> dict:
         with self._journal_lock:
@@ -51,7 +92,7 @@ class Bridge:
     def _journal(self, state):
         with self._journal_lock:
             self._journal_path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = self._journal_path.with_suffix(".tmp")
+            temporary = self._journal_path.with_name(self._journal_path.name + "." + uuid.uuid4().hex + ".tmp")
             temporary.write_text(json.dumps({**state, "updated_at": time.time()}, ensure_ascii=False, indent=2), encoding="utf-8")
             temporary.replace(self._journal_path)
 
@@ -90,12 +131,13 @@ class Bridge:
             return "available"
 
     def _start(self):
+        self._acquire_lease()
         if self._process is not None:
             if self._process.poll() is not None:
                 raise CadError("EXECUTOR_LOST", "执行器已退出；确认 SolidWorks 状态后重启 MCP 服务。")
             if not self._startup.done():
                 raise CadError("COM_CONNECTION_PENDING", "执行器尚未确认 COM 连接完成，不接受 CAD 操作。")
-            self._startup.result()
+            self._validate_hello(self._startup.result())
             return
         exe = self.root / "executor" / "bin" / "SwExecutor.exe"
         if not exe.is_file():
@@ -112,11 +154,45 @@ class Bridge:
             hello = self._startup.result(timeout=20)
         except concurrent.futures.TimeoutError as exc:
             raise CadError("COM_CONNECTION_TIMEOUT", "未能连接桌面会话中的 SolidWorks；检查软件状态及执行器会话。") from exc
-        if hello.get("error"):
-            error = hello["error"]
-            raise CadError(error.get("code", "COM_CONNECTION_FAILED"), error.get("message", "COM connection failed"))
-        if hello.get("protocol_version") != 1 or not hello.get("ready"):
-            raise CadError("PROTOCOL_MISMATCH", "执行器版本不匹配。")
+        self._validate_hello(hello)
+
+    def reconcile_missing_identity(self, *, model_id: str, checkpoint_id: str, solidworks_pid: int, journal_sha256: str, operation_ended_confirmed: bool):
+        """Manual CLI only: bind unknown identity, then verify a real checkpoint restore."""
+        if operation_ended_confirmed is not True:
+            raise CadError("MANUAL_RECONCILIATION_REQUIRED", "须由操作者确认旧操作已经结束；不能以超时或通信失败替代该确认。")
+        with self._lock:
+            self._acquire_lease()
+            raw = self._journal_path.read_bytes()
+            if hashlib.sha256(raw).hexdigest() != journal_sha256.lower():
+                raise CadError("RECOVERY_JOURNAL_CHANGED", "请求日志已经改变，请重新检查，不能覆盖新记录。")
+            state = self.recovery_state()
+            if not state["recovery_required"] or type(state.get("solidworks_pid")) is int and state["solidworks_pid"] > 0:
+                raise CadError("RECONCILIATION_NOT_APPLICABLE", "仅允许核对历史缺失 SolidWorks PID 的隔离记录。")
+            old_executor = state.get("executor_pid")
+            if type(old_executor) is not int or old_executor <= 0 or self._pid_alive(old_executor):
+                raise CadError("PREVIOUS_EXECUTOR_ALIVE", "旧执行器仍存活或身份无法核实，不允许人工绑定。")
+            target = state.get("model_id") or state.get("params", {}).get("model_id")
+            if target and target != model_id:
+                raise CadError("RECOVERY_MODEL_MISMATCH", "必须恢复故障记录中的同一模型。")
+            if not re.fullmatch(r"user_[a-f0-9]{32}", model_id) or not re.fullmatch(r"[a-f0-9]{32}", checkpoint_id):
+                raise CadError("INVALID_CHECKPOINT_ID", "必须指定登记模型和有效检查点。")
+            model_folder = self.root / "experiments" / "user_assemblies" / model_id[5:]
+            model = json.loads((model_folder / "model.json").read_text(encoding="utf-8"))
+            checkpoint = json.loads((model_folder / "checkpoints" / checkpoint_id / "checkpoint.json").read_text(encoding="utf-8"))
+            if model.get("Id") != model_id or checkpoint.get("model_id") != model_id:
+                raise CadError("RECOVERY_MODEL_MISMATCH", "检查点不属于指定登记模型。")
+            self._start()  # Native global mutex also rejects another installation's executor.
+            hello = self._validate_hello(self._startup.result())
+            if type(solidworks_pid) is not int or hello["process_id"] != solidworks_pid:
+                raise CadError("RECOVERY_SESSION_MISMATCH", "已连接 SolidWorks PID 与操作者核对的实例不同。")
+            archive = self.root / "runs" / "recovery-audit" / (journal_sha256 + ".json")
+            archive.parent.mkdir(parents=True, exist_ok=True)
+            if not archive.exists():
+                archive.write_bytes(raw)
+            self._journal({**state, "status": "unknown", "model_id": model_id, "solidworks_pid": solidworks_pid,
+                           "manual_identity_reconciliation": {"operation_ended_confirmed_by_operator": True, "previous_journal_sha256": journal_sha256, "previous_journal_archive": str(archive), "observed_solidworks_pid": hello["process_id"], "checkpoint_id": checkpoint_id}})
+        # Do not set idle. Only the verified restore response can lift quarantine.
+        return self.request("restore_model_checkpoint", model_id=model_id, checkpoint_id=checkpoint_id)
 
     def _read(self):
         try:
@@ -132,8 +208,11 @@ class Bridge:
                     if request_id == self._quarantined_request:
                         self._quarantined_request = None
                 state = self.recovery_state()
-                if request_id == state.get("request_id"):
+                if request_id == state.get("request_id") and state.get("owner_id") == self._owner_id:
                     restoration = response.get("error", {}).get("restoration_status", "not_required")
+                    if response.get("error", {}).get("code") == "COM_CALL_FAILED" and restoration == "not_required":
+                        restoration = "unknown"
+                        response["error"]["restoration_status"] = "unknown"
                     if response.get("ok") and isinstance(response.get("result"), dict):
                         value = response["result"]
                         restoration = value.get("restoration_status", value.get("restoration", {}).get("status", "not_required"))
@@ -158,6 +237,7 @@ class Bridge:
 
     def request(self, operation: str, **params):
         with self._lock:
+            self._acquire_lease()
             if self.cad_operation_state == "unknown_after_timeout":
                 raise CadError("CAD_BUSY_AFTER_TIMEOUT", "上次调用超时，尚未确认 CAD 操作结束；暂不接受新 CAD 调用。")
             state = self.recovery_state()
@@ -175,6 +255,9 @@ class Bridge:
                 if not owned_idle and self._pid_alive(state.get("executor_pid")):
                     raise CadError("PREVIOUS_EXECUTOR_ALIVE", "前一执行器仍存活或身份无法核实，拒绝并行恢复。")
             self._start()
+            hello = self._validate_hello(self._startup.result())
+            if recovering and (type(state.get("solidworks_pid")) is not int or state["solidworks_pid"] <= 0):
+                raise CadError("RECOVERY_IDENTITY_MISSING", "历史记录缺少 SolidWorks 身份；请使用 scripts/recover.py 诊断并按官方流程核对，不能直接放行替代会话。", diagnostics={"previous_state": state})
             replacement = recovering and self._startup.result().get("process_id") != state.get("solidworks_pid")
             if replacement:
                 if not params.get("allow_replacement_session"):
@@ -194,11 +277,12 @@ class Bridge:
                         model_id = json.loads((self.root / "runs" / run_id / "solve.json").read_text(encoding="utf-8")).get("model_id")
                     except (OSError, ValueError, AttributeError):
                         pass
-                self._journal({"status": "active", "request_id": request_id, "operation": operation, "params": params,
+                wire = json.dumps({"id": request_id, "op": operation, "params": params}) + "\n"
+                self._journal({"status": "active", "owner_id": self._owner_id, "dispatch_state": "dispatching", "request_id": request_id, "operation": operation, "params": params,
                                "model_id": model_id,
                                "executor_pid": self._process.pid, "solidworks_pid": self._startup.result().get("process_id"),
                                "recovering": recovering, "previous_state": state if recovering else None})
-                self._process.stdin.write(json.dumps({"id": request_id, "op": operation, "params": params}) + "\n")
+                self._process.stdin.write(wire)
                 self._process.stdin.flush()
                 deadline = self.motion_scan_timeout if operation in {"check_interference_during_motion", "run_parameter_search", "diagnose_gear_phase", "import_assembly", "run_user_study", "restore_model_checkpoint"} else self.timeout
                 response = future.result(timeout=deadline)
@@ -209,10 +293,13 @@ class Bridge:
                         self._quarantined_request = request_id
                 raise CadError("CAD_TIMEOUT", "调用超时；这不代表 SolidWorks 求解已停止。") from exc
             except (BrokenPipeError, OSError) as exc:
+                state_after = self.recovery_state()
+                if state_after.get("request_id") == request_id and state_after.get("status") == "active":
+                    self._journal({**state_after, "status": "unknown", "communication_failure": type(exc).__name__})
                 raise CadError("EXECUTOR_LOST", "无法与执行器通信；请确认 SolidWorks 状态。") from exc
             if not response.get("ok"):
                 error = response.get("error", {})
-                raise CadError(error.get("code", "CAD_ERROR"), error.get("message", "CAD operation failed"), error.get("restoration_status", "unknown"))
+                raise CadError(error.get("code", "CAD_ERROR"), error.get("message", "CAD operation failed"), error.get("restoration_status", "unknown"), error.get("diagnostics"))
             result = response["result"]
             if replacement:
                 result = {**result, "recovery_session": {"previous_solidworks_pid": state.get("solidworks_pid"), "current_solidworks_pid": self._startup.result().get("process_id"), "replacement": True}}
@@ -225,3 +312,6 @@ class Bridge:
                 self._process.stdin.close()
             except OSError:
                 pass
+        if self._lease is not None:
+            self._lease.close()
+            self._lease = None
