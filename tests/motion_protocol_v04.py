@@ -23,6 +23,11 @@ async def main(model_id):
             error = await client.call_tool(name, params)
             assert error.is_error
         report["invalid_requests_rejected"] = 3
+        for name in ("get_run_artifacts", "read_run_poses"):
+            response = await client.call_tool(name, {"run_id": "0"*32})
+            assert response.is_error and response.structured_content["error"]["code"] == "RUN_NOT_FOUND"
+            assert str(ROOT) not in response.structured_content["error"]["message"]
+        report["offline_missing_run_errors_verified"] = True
         if model_id:
             environment = await client.call_tool("get_environment", {})
             assert not environment.is_error
@@ -39,6 +44,8 @@ async def main(model_id):
                 assert time.monotonic()-started < 90
                 await asyncio.sleep(.2)
             assert job["status"] == "succeeded", job
+            assert job["progress"]["terminal"] and job["progress"]["stage"] == "succeeded"
+            assert job["progress"]["cad_operation_finished"]
             assert job["result"]["run_id"] == job_id
             summary = await client.call_tool("get_motion_summary", {"run_id": job_id})
             assert not summary.is_error

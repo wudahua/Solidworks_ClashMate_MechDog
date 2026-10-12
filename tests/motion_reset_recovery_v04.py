@@ -8,7 +8,7 @@ from sw_mcp.artifacts import Artifacts
 
 def main(model,checkpoint):
     os.environ['SW_MCP_FAULT_TESTS']='1';bridge=Bridge(ROOT);artifacts=Artifacts(ROOT)
-    report={'all_passed':False,'cases':[]};output=ROOT/'runs/motion-reset-recovery-v04-alpha2.json'
+    report={'all_passed':False,'cases':[]};output=ROOT/'runs/motion-reset-recovery-v04-alpha3.json'
     def record(name,value):
         report['cases'].append({'name':name,'passed':True,'evidence':value});output.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8');print(name,'PASS',flush=True)
     def states():

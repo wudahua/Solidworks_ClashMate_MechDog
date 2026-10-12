@@ -16,7 +16,7 @@ from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from sw_mcp.bridge import Bridge,CadError
-from sw_mcp.artifacts import Artifacts
+from sw_mcp.artifacts import Artifacts,ArtifactError
 from sw_mcp.jobs import Jobs
 
 class ReliabilityTests(unittest.TestCase):
@@ -143,5 +143,76 @@ class ReliabilityTests(unittest.TestCase):
         path.write_text(path.read_text(encoding='utf-8')+'\n',encoding='utf-8')
         with self.assertRaises(ValueError):artifacts.poses(identifier)
         with self.assertRaises(ValueError):artifacts.summary('../other')
+
+    def test_legacy_csv_is_readable_but_has_no_historical_integrity_claim(self):
+        identifier,path=self.artifact();(path.parent/'solve.json').unlink()
+        before=path.read_bytes();artifacts=Artifacts(self.root)
+        summary=artifacts.summary(identifier);page=artifacts.poses(identifier,limit=1)
+        self.assertEqual(summary['manifest_status'],'absent')
+        self.assertEqual(summary['artifact_integrity'],'hash_not_recorded')
+        self.assertEqual(page['result_validity'],'inconclusive')
+        self.assertEqual(page['restoration_status'],'unknown')
+        self.assertEqual(path.read_bytes(),before)
+        self.assertFalse((path.parent/'solve.json').exists())
+
+    def test_missing_run_manifest_and_poses_have_distinct_errors(self):
+        artifacts=Artifacts(self.root)
+        with self.assertRaises(ArtifactError) as error:artifacts.summary('f'*32)
+        self.assertEqual(error.exception.code,'RUN_NOT_FOUND')
+        folder=self.root/'runs'/('f'*32);folder.mkdir(parents=True)
+        with self.assertRaises(ArtifactError) as error:artifacts.summary('f'*32)
+        self.assertEqual(error.exception.code,'MANIFEST_MISSING')
+        identifier,path=self.artifact();path.unlink()
+        with self.assertRaises(ArtifactError) as error:artifacts.poses(identifier)
+        self.assertEqual(error.exception.code,'POSES_MISSING')
+        self.assertNotIn(str(self.root),str(error.exception))
+
+    def test_corrupt_manifest_cannot_fall_back_to_legacy_csv(self):
+        identifier,path=self.artifact();(path.parent/'solve.json').write_text('{bad',encoding='utf-8')
+        with self.assertRaises(ArtifactError) as error:Artifacts(self.root).summary(identifier)
+        self.assertEqual(error.exception.code,'MANIFEST_INVALID')
+
+    def test_legacy_csv_rejects_nonfinite_values_beyond_first_page(self):
+        identifier,path=self.artifact();(path.parent/'solve.json').unlink()
+        path.write_text(path.read_text(encoding='utf-8').replace('0.015','nan'),encoding='utf-8')
+        with self.assertRaises(ArtifactError) as error:Artifacts(self.root).poses(identifier,limit=1)
+        self.assertEqual(error.exception.code,'POSES_INVALID')
+
+    def test_startup_retry_requires_explicit_no_session_and_no_prior_dispatch(self):
+        bridge=self.bridge({'protocol_version':1,'ready':False,'error':{'code':'COM_SESSION_NOT_FOUND'}})
+        self.assertTrue(bridge._retryable_startup_failure())
+        bridge._ever_dispatched=True
+        self.assertFalse(bridge._retryable_startup_failure())
+        bridge._ever_dispatched=False;bridge._journal({'status':'unknown'})
+        self.assertFalse(bridge._retryable_startup_failure())
+        other=self.bridge({'protocol_version':1,'ready':False,'error':{'code':'EXECUTOR_ALREADY_RUNNING'}})
+        self.assertFalse(other._retryable_startup_failure())
+
+    def test_dead_failed_startup_reconnects_but_ready_executor_loss_does_not(self):
+        bridge=self.bridge({'protocol_version':1,'ready':False,'error':{'code':'COM_SESSION_NOT_FOUND'}})
+        bridge._process.poll=lambda:1;bridge._process.stdout=StringIO()
+        bridge._reader_thread=SimpleNamespace(join=lambda timeout:None,is_alive=lambda:False)
+        (self.root/'executor/bin').mkdir(parents=True);(self.root/'executor/bin/SwExecutor.exe').write_bytes(b'not executed')
+        process=SimpleNamespace(pid=900002,poll=lambda:None,stdin=StringIO(),stdout=StringIO())
+        def hello():bridge._startup.set_result({'protocol_version':1,'ready':True,'process_id':22})
+        with patch('sw_mcp.bridge.subprocess.Popen',return_value=process),patch('sw_mcp.bridge.threading.Thread',return_value=SimpleNamespace(start=hello)):
+            bridge._start()
+        self.assertIs(bridge._process,process)
+        process.poll=lambda:1
+        with self.assertRaises(CadError) as error:bridge._start()
+        self.assertEqual(error.exception.code,'EXECUTOR_LOST')
+
+    def test_finished_job_progress_is_terminal_and_late_native_progress_cannot_replace_it(self):
+        class Failure:
+            cad_operation_state='unknown_after_timeout'
+            def request(self,*args,**kwargs):raise CadError('CAD_TIMEOUT','still unknown')
+        jobs=Jobs(Failure(),self.root);submitted=jobs.submit('run_user_study',{})
+        jobs._pool.shutdown(wait=True)
+        progress=self.root/'runs/progress'/(submitted['job_id']+'.json')
+        job=jobs.get(submitted['job_id'])
+        self.assertEqual(job['progress']['stage'],'timed_out')
+        self.assertFalse(job['progress']['cad_operation_finished'])
+        progress.write_text(json.dumps({'job_id':submitted['job_id'],'stage':'native_calculate'}),encoding='utf-8')
+        self.assertEqual(jobs.get(submitted['job_id'])['progress']['stage'],'timed_out')
 
 if __name__=='__main__':unittest.main()

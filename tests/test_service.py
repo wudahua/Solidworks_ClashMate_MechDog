@@ -235,7 +235,8 @@ class ServiceTests(unittest.TestCase):
                 bridge.close()
                 bridge._process.wait(timeout=2)
                 bridge._process.stdout.close()
-                bridge._log.close()
+                if bridge._log is not None:
+                    bridge._log.close()
 
 
     def test_replacement_session_requires_explicit_flag_and_dead_old_solidworks(self):
