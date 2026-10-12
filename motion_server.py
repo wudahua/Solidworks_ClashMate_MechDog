@@ -13,14 +13,14 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
 from sw_mcp.bridge import Bridge, CadError
 from sw_mcp.jobs import Jobs
-from sw_mcp.artifacts import Artifacts
+from sw_mcp.artifacts import Artifacts, ArtifactError
 
 ROOT = Path(__file__).resolve().parent
 bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = MCPServer("SolidWorks Motion", version="0.4.0-alpha.2", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = MCPServer("SolidWorks Motion", version="0.4.0-alpha.3", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 
 def packed(data, error=False):
@@ -31,7 +31,7 @@ async def call(operation, **params):
     try:
         return packed({"ok": True, "result": await asyncio.to_thread(bridge.request, operation, **params)})
     except CadError as exc:
-        return packed({"ok": False, "error": {"code": exc.code, "message": str(exc), "restoration_status": exc.restoration_status, "diagnostics": exc.diagnostics, "assertion": "inconclusive"}}, True)
+        return packed({"ok": False, "error": {"code": exc.code, "message": str(exc), "restoration_status": exc.restoration_status, "document_context_restoration_status": exc.document_context_restoration_status, "diagnostics": exc.diagnostics, "assertion": "inconclusive"}}, True)
 
 
 def enqueue(operation, params):
@@ -84,11 +84,11 @@ async def preflight_motion(model_id: str, study: str = "") -> CallToolResult:
 
 
 @mcp.tool()
-async def list_drive_candidates(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal"] = "", limit: int = 20, cursor: str = "") -> CallToolResult:
-    """分页读取几何驱动候选；可按组件及几何类型过滤。limit 1–50；使用 next_cursor 继续，模型改变后重新查询。"""
+async def list_drive_candidates(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal"] = "", limit: int = 20, cursor: str = "", group_faces: bool = True) -> CallToolResult:
+    """分页读取几何驱动候选；默认按组件及同一轴线/平面位置分组，group_faces=False可查看逐面候选。limit 1–50；修改筛选或分组后重新查询。"""
     if not 1 <= limit <= 50:
         raise ToolError("limit 须在 1–50。")
-    return await call("list_drive_candidates", model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor)
+    return await call("list_drive_candidates", model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor, group_faces=group_faces)
 
 
 @mcp.tool()
@@ -158,8 +158,10 @@ async def get_run_artifacts(run_id: str) -> CallToolResult:
     """离线读取保存的求解摘要，恢复失败或重启后仍可调用；不证明当前 CAD 状态或结果物理精度。"""
     try:
         return packed(await asyncio.to_thread(artifacts.summary, run_id))
+    except ArtifactError as exc:
+        return packed({"ok": False, "error": {"code": exc.code, "message": str(exc), "assertion": "inconclusive", "restoration_status": "not_required"}}, True)
     except (ValueError, OSError, KeyError) as exc:
-        raise ToolError(str(exc)) from exc
+        raise ToolError(str(exc) if isinstance(exc, ValueError) else "结果文件无法读取；请核对文件格式和访问权限。") from exc
 
 
 @mcp.tool()
@@ -167,8 +169,10 @@ async def read_run_poses(run_id: str, component_id: str = "", frame_start: int =
     """分页读取已保存的姿态 CSV，不调用 COM；未知恢复状态下可用。数据有效性与当前模型状态分别标示。"""
     try:
         return packed(await asyncio.to_thread(artifacts.poses, run_id, component_id, frame_start, limit, cursor))
+    except ArtifactError as exc:
+        return packed({"ok": False, "error": {"code": exc.code, "message": str(exc), "assertion": "inconclusive", "restoration_status": "not_required"}}, True)
     except (ValueError, OSError, KeyError) as exc:
-        raise ToolError(str(exc)) from exc
+        raise ToolError(str(exc) if isinstance(exc, ValueError) else "姿态文件无法读取；请核对文件格式和访问权限。") from exc
 
 
 @mcp.tool()

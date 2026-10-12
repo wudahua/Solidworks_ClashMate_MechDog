@@ -2,11 +2,11 @@
 
 SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.0-alpha.2` 修复试用版：让 AI 在本机 SolidWorks 中导入已保存装配的隔离副本、检查运动准备状态、复用 Motion Analysis 算例或添加一个恒速驱动，然后求解、导出曲线和回放截图。
+`v0.4.0-alpha.3` 修复试用版：让 AI 在本机 SolidWorks 中导入已保存装配的隔离副本、检查运动准备状态、复用 Motion Analysis 算例或添加一个恒速驱动，然后求解、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.0-alpha.2.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.0-alpha.3.md)。
 
-这是供试用的运动仿真首版。已有有效配合的刚体机构是目标输入；没有配合的装配需要先由设计者完成运动约束。尚未完成“大部分机械装配均可用”的样本覆盖验收。
+这是供试用的运动仿真版本。已有有效配合的刚体机构是目标输入；没有配合的装配需要先由设计者完成运动约束。尚未完成“大部分机械装配均可用”的样本覆盖验收。
 
 ## 能做什么
 
@@ -80,7 +80,7 @@ Get-Process SLDWORKS | Select-Object Id, ProcessName
 2. 调用 `get_environment`，确认 revision 与 Motion 使用条件。
 3. 调用 `import_assembly`，传入 `.SLDASM` 绝对路径和可选配置。返回 job_id 后用 `get_job` 等待完成，保存结果中的 model_id 和 checkpoint_id。
 4. 调用 `inspect_model`、`preflight_motion`、`list_motion_studies`。
-5. 已有 Motion Analysis：直接选算例。已有动画/Basic Motion：明确请求 `convert_motion_study`。没有驱动：调用 `list_drive_candidates`，由用户选择组件、参考实体、速度与方向，再 `create_motion_study`。
+5. 已有 Motion Analysis：直接选算例。已有动画/Basic Motion：明确请求 `convert_motion_study`。没有驱动：调用 `list_drive_candidates`，由用户选择组件、参考实体、速度与方向，再 `create_motion_study`。创建结果返回实际时长、帧率和算例状态。
 6. 调用 `run_motion_study`，用 `get_job` 查询。成功结果包含 run_id、时间轴验证和驱动验证范围。复用已有算例时不声称已独立证明物理结果。
 7. 调用 `export_motion_curve` 或 `replay_motion_frame`。run_id 仅在当前执行器会话有效；文件导出会保留。
 
@@ -97,7 +97,7 @@ Get-Process SLDWORKS | Select-Object Id, ProcessName
 | get_environment / list_models | 环境与登记模型 |
 | import_assembly / inspect_model | 副本导入、组件与顶层配合 |
 | preflight_motion / list_motion_studies | 准备检查与算例清单 |
-| list_drive_candidates | 按组件、几何类型过滤的分页候选和持久引用 ID；默认20项、最多50项 |
+| list_drive_candidates | 按组件、几何类型过滤的分页候选和持久引用 ID；默认按同一轴线/平面位置分组，20项、最多50项 |
 | create_motion_study / convert_motion_study | 创建单一恒速驱动 / 显式转换类型 |
 | run_motion_study / get_job | 异步求解与缓存进度 |
 | get_motion_summary / export_motion_curve | 结果有效性检查与 CSV |
@@ -119,9 +119,23 @@ Get-Process SLDWORKS | Select-Object Id, ProcessName
 
 求解会保存登记副本的操作前状态并快照全部副本文件，结束后重开副本，核验全部算例的时间、类型、输出设置、激活状态及组件姿态。仅设置时间条不足以证明恢复成功。成功结果的曲线读取已保存姿态；回放会重新求解并与已保存采样帧对照。求解原生数据的完整采集、状态恢复和物理验证范围分别报告，周期运动应检查整个时间区间。
 
+回放核验分别报告平移差异（米）与相对旋转角差异（弧度），默认阈值为 `1e-7 m` 与 `1e-6 rad`。旧 `maximum_pose_difference` 保留为兼容诊断，不再把它当作长度。阈值只用于重新求解的采样姿态对照，不代表模型、受力或接触精度认证；超阈值仍拒绝截图。回放包含重新求解，采用与求解相同的600秒执行器等待预算，超时仍不代表CAD停止。
+
+`Calculate()` 返回成功不足以证明结果覆盖请求时段。原生结果只有初始时刻或提前结束时返回 `MOTION_RESULTS_INCOMPLETE`；长度或采样网格不符返回 `NATIVE_TIME_AXIS_MISMATCH`。诊断含实际点数、首尾时间、步长、偏差和结果载体，完整时间轴保存在该任务目录的 `time-axis.json`。不要用放宽容差或生成伪时间点来绕过。真实夹具旋转驱动曾收到原生“不相容冗余约束导致仿真停止”的提示，需核对模型和驱动相容性；工具不自动修改配合。
+
+驱动候选默认 `group_faces=True`，按组件及轴线/平面位置分组，保留最大面积面作为代表，并返回 `equivalent_face_count`、`reference_point_global_m` 和 `raw_candidate_count`。方向相同但位置不同的轴线保留为不同候选。设为False可查看逐面候选；切换分组会使旧游标失效。只能使用该模型已查询并登记的entity_id；缺失引用需重新查询，不能把其他模型或旧副本的ID直接复制过来。
+
+任务进度在结束后具有 `terminal=True` 和最终stage，并保留 `last_native_stage`。`timed_out`、`executor_lost` 的 `cad_operation_finished=False` 表示没有确认CAD操作结束。错误中的 `document_context_restoration_status` 单独说明活动窗口恢复；`restoration_status` 描述模型/算例恢复，读取候选的窗口恢复不再暗示模型执行过检查点恢复。
+
 在 revision 34.0.0 的额外边界实测中，激活算例停在非输出帧时刻曾导致原生采样阻塞。因此本版在求解或回放前拒绝该状态，返回 `ACTIVE_TIME_NOT_FRAME_ALIGNED`，需先显式调用 `reset_study_time`。这与未激活算例中保存的非零时间不同，后者仍按快照完整保留；不会把全部算例无条件归零。
 
 失败任务也保留 `solve.json`；完整采集时保留姿态 CSV 和哈希。离线接口中的 `current_model_validity=not_checked_offline` 表示没有核查当前模型，不得把历史数据当作当前设计的有效结果。`inconclusive` 仍表示未完成验证。源文件与组件配置名称原样保留，`默认` 和 `Default` 是不同的配置标识。
+
+alpha.1等历史任务只有CSV时，可以受限读取并标记 `manifest_status=absent`、`artifact_integrity=hash_not_recorded`、`restoration_status=unknown`、`result_validity=inconclusive`；当前计算的文件哈希只用于分页一致性，不证明历史结果正确。损坏的现有清单不会被自动替换。不存在的任务、缺清单、缺CSV和文件损坏分别返回明确错误。
+
+首次连接时未找到SolidWorks，且握手明确失败、没有派发任何CAD请求时，启动软件后可在同一MCP会话重试。已经连接后的执行器丢失、超时、协议异常或恢复隔离均不采用这条重连路径。
+
+指纹读取对指定RPC暂时失败可重新获取已打开文档，最多读取3次。此规则只覆盖指纹读取，不重复保存、求解或恢复写操作；最终读取仍失败时维持未知状态和隔离。
 
 官方恢复入口为 `.venv\Scripts\python.exe scripts\recover.py inspect`，此命令不调用 COM。普通恢复用 `restore --model-id <id> --checkpoint-id <id> --solidworks-pid <pid>`；旧实例确认退出时才使用 `--allow-replacement-session`。先停用本目录的 MCP 服务，命令行与服务不能同时持有执行器。
 
