@@ -1,0 +1,311 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+using SolidWorks.Interop.sldworks;
+using SolidWorks.Interop.swmotionstudy;
+
+public partial class Cad {
+    class Run {
+        public string Id,Path,Study,Fingerprint,Directory,Assembly,ModelRoot;
+        public int EditVersion;
+        public bool Generic;
+        public Dictionary<string,string> ComponentNames;
+        public double Duration;
+        public int Fps;
+        public Dictionary<string,double[][]> Poses;
+        public double[] Times;
+    }
+    readonly Dictionary<string,Run> runs=new Dictionary<string,Run>();
+    string PathFor(string assembly) {ConfigureModel(assembly);if(assembly=="gear_pump"||assembly=="gear_phase")return PumpPath;if(assembly=="parameter_trial"){if(parameterPath==null)throw new Exception("EXPERIMENT_NOT_REGISTERED");return parameterPath;}if(assembly!="clear"&&assembly!="obstacle")throw new Exception("UNSUPPORTED_ASSEMBLY");return Path.Combine(Fixture,"slider_crank_"+assembly+".sldasm");}
+    class Scope : IDisposable {
+        Cad cad; IModelDoc2 previous;
+        public IModelDoc2 Doc;
+        public IMotionStudy Study;
+        public double OriginalTime;
+        string originalStudy;
+        double originalActiveTime;
+        string expectedPath,expectedConfiguration;
+        Dictionary<string,double[]> original;
+        public bool Restored;
+        public double RestoreDelta;
+        public Scope(Cad owner,string path,string studyName) {
+            cad=owner; previous=(IModelDoc2)owner.Sw.ActiveDoc;
+            try {
+                int e=0,w=0; Doc=(IModelDoc2)owner.Sw.OpenDoc6(path,2,1,"",ref e,ref w);
+                if(Doc==null||e!=0) throw new Exception("ASSEMBLY_OPEN_FAILED "+e);
+                if(!Doc.GetPathName().Equals(Path.GetFullPath(path),StringComparison.OrdinalIgnoreCase))throw new Exception("ASSEMBLY_OPEN_PATH_MISMATCH");
+                var registered=owner.userModels.Values.FirstOrDefault(m=>m.Path.Equals(path,StringComparison.OrdinalIgnoreCase));
+                if(registered!=null&&!string.IsNullOrEmpty(registered.Configuration)&&Doc.ConfigurationManager.ActiveConfiguration.Name!=registered.Configuration)throw new Exception("MODEL_CONFIGURATION_CHANGED");
+                expectedPath=Doc.GetPathName();expectedConfiguration=Doc.ConfigurationManager.ActiveConfiguration.Name;
+                owner.Sw.ActivateDoc3(Doc.GetTitle(),false,0,ref e);
+                var manager=(IMotionStudyManager)Doc.Extension.GetMotionStudyManager();
+                foreach(string name in Names(manager)) { var s=(IMotionStudy)manager.GetMotionStudy(name); if(s.IsActive){originalStudy=name;originalActiveTime=s.GetTime();} }
+                if(studyName!=null) {
+                    owner.LastOperationRestoration="pending";
+                    original=Transforms(Doc);
+                    Study=(IMotionStudy)manager.GetMotionStudy(studyName);
+                    if(Study==null) throw new Exception("STUDY_NOT_FOUND");
+                    OriginalTime=Study.GetTime(); Study.Activate();
+                }
+            } catch { Dispose(); throw; }
+        }
+        public void EnsureActive() {
+            var active=(IModelDoc2)cad.Sw.ActiveDoc;
+            if(active==null||!string.Equals(active.GetPathName(),expectedPath,StringComparison.OrdinalIgnoreCase)||!string.Equals(Doc.GetPathName(),expectedPath,StringComparison.OrdinalIgnoreCase)||Doc.ConfigurationManager.ActiveConfiguration.Name!=expectedConfiguration)
+                throw new Exception("SESSION_CONFLICT: active document or configuration changed");
+        }
+        public void Dispose() {
+            try {
+                if(Study!=null&&original!=null) {
+                    Study.SetTime(OriginalTime); Application.DoEvents();
+                    if(originalStudy!=null&&originalStudy!=Study.Name){var originalActive=(IMotionStudy)((IMotionStudyManager)Doc.Extension.GetMotionStudyManager()).GetMotionStudy(originalStudy);originalActive.Activate();originalActive.SetTime(originalActiveTime);Application.DoEvents();}
+                    var after=Transforms(Doc);
+                    RestoreDelta=original.Max(k=>k.Value.Zip(after[k.Key],(a,b)=>Math.Abs(a-b)).Max());
+                    Restored=RestoreDelta<1e-7 && Math.Abs(Study.GetTime()-OriginalTime)<1e-7;
+                } else Restored=true;
+            } finally {
+                if(previous!=null) { int e=0; var activated=cad.Sw.ActivateDoc3(previous.GetTitle(),false,0,ref e); if(activated==null||e!=0) Restored=false; }
+                cad.LastOperationRestoration=Restored?"restored":"unknown";
+                if(!Restored)throw new Exception("RESTORATION_FAILED delta="+RestoreDelta);
+            }
+        }
+    }
+    static string[] Names(IMotionStudyManager mgr) { return ((object[])mgr.GetMotionStudyNames()).Cast<string>().ToArray(); }
+    static Dictionary<string,double[]> Transforms(IModelDoc2 d) { return ((object[])((IAssemblyDoc)d).GetComponents(false)).Cast<IComponent2>().Where(c=>!c.IsSuppressed()).ToDictionary(c=>c.Name2,c=>(double[])c.GetTotalTransform(false).ArrayData); }
+    string Fingerprint(IModelDoc2 doc) {
+        var paths=((object[])((IAssemblyDoc)doc).GetComponents(false)).Cast<IComponent2>().Select(c=>c.GetPathName()).Concat(new[]{doc.GetPathName()}).Distinct().OrderBy(p=>p).ToArray();
+        using(var sha=SHA256.Create()) {
+            var lines=new List<string>();
+            foreach(var p in paths) {
+                bool pump=doc.GetPathName().Equals(PumpPath,StringComparison.OrdinalIgnoreCase);
+                string allowed=pump?Path.Combine(PumpRoot,"parts"):Fixture;
+                bool ownedParameter=parameterPath!=null&&doc.GetPathName().Equals(parameterPath,StringComparison.OrdinalIgnoreCase)&&p.Equals(parameterPath,StringComparison.OrdinalIgnoreCase);
+                string userRoot;bool ownedUser=userRoots.TryGetValue(doc.GetPathName(),out userRoot)&&Path.GetFullPath(p).StartsWith(userRoot+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase);
+                if(!ownedUser&&!ownedParameter&&!(pump&&p.Equals(PumpPath,StringComparison.OrdinalIgnoreCase))&&!Path.GetFullPath(p).StartsWith(allowed+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase)) throw new Exception("EXTERNAL_REFERENCE_UNSUPPORTED");
+                using(var stream=new FileStream(p,FileMode.Open,FileAccess.Read,FileShare.ReadWrite)) lines.Add(p+":"+BitConverter.ToString(sha.ComputeHash(stream)));
+            }
+            lines.Add(doc.ConfigurationManager.ActiveConfiguration.Name);
+            foreach(IComponent2 c in (object[])((IAssemblyDoc)doc).GetComponents(false))lines.Add(c.Name2+":"+c.ReferencedConfiguration+":"+c.IsFixed());
+            return BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(string.Join("\n",lines))));
+        }
+    }
+    public object Capabilities() { return new { revision=Sw.RevisionNumber(),process_id=Sw.GetProcessID(), protocol_version=1, scope="registered_models_and_owned_experiments", supported_assemblies=new[]{"clear","obstacle","gear_pump","gear_phase","parameter_trial"}, phase_experiment_registered=phaseRoot!=null,parameter_experiment_registered=parameterPath!=null,
+        motion_type=4, calibrated_revision="34.0.0", rotary_input="rpm * 2*pi/60, tested on revision 34.0.0", sampling="verified solver output frames", continuous_collision=false,
+        templates_valid=File.Exists(Tutorial+"part.prtdot")&&File.Exists(Tutorial+"assembly.asmdot") }; }
+    public object Inspect(string assembly) {
+        using(var scope=new Scope(this,PathFor(assembly),null)) {
+            var doc=scope.Doc; var ad=(IAssemblyDoc)doc;
+            var comps=((object[])ad.GetComponents(false)).Cast<IComponent2>().Select(c=>new { instance=c.Name2,path=c.GetPathName(),fixed_component=c.IsFixed(),transform=(double[])c.Transform2.ArrayData }).ToArray();
+            int mates=0; var feature=(IFeature)doc.FirstFeature();
+            while(feature!=null) { if(feature.GetTypeName2()=="MateGroup") { var sub=(IFeature)feature.GetFirstSubFeature(); while(sub!=null) { if(sub.GetSpecificFeature2() is IMate2) mates++; sub=(IFeature)sub.GetNextSubFeature(); } } feature=(IFeature)feature.GetNextFeature(); }
+            return new { assembly=assembly,path=doc.GetPathName(),configuration=doc.ConfigurationManager.ActiveConfiguration.Name,components=comps,mate_count=mates,expected_dof=1,dof_basis=assembly=="gear_pump"?"two supported shafts, four rigid locks and one 1:1 gear mate; validated by trajectory":"planar slider-crank topology; validated by solved trajectory" };
+        }
+    }
+    public object ListStudies(string assembly) {
+        using(var scope=new Scope(this,PathFor(assembly),null)) { var mgr=(IMotionStudyManager)scope.Doc.Extension.GetMotionStudyManager(); return Names(mgr).Select(n=>{var s=(IMotionStudy)mgr.GetMotionStudy(n); return new { name=n,type=s.StudyType,duration_s=s.GetDuration(),output_fps=((IMotionStudyProperties)s.GetProperties(s.StudyType)).GetFrameRate() };}).ToArray(); }
+    }
+    static double Argument(double t,double duration) { return t>0&&t<duration ? t+1e-8 : t; }
+    public object Solve(string assembly,string studyName,double duration,int fps,string runId) {
+        ConfigureModel(assembly);if(assembly=="gear_pump"||assembly=="gear_phase")return SolvePump(studyName,duration,fps,runId);
+        Log("LOAD_MOTION_SOLVE "+Sw.LoadAddIn(@"C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\cmotionsw.dll"));
+        if(Sw.RevisionNumber()!="34.0.0") throw new Exception("UNCALIBRATED_VERSION");
+        if(duration<=0||duration>2||(fps!=30&&fps!=60)) throw new Exception("INVALID_SOLVER_OPTIONS");
+        if(Math.Abs(duration*fps-Math.Round(duration*fps))>1e-8) throw new Exception("DURATION_MUST_ALIGN_TO_FRAME");
+        var scope=new Scope(this,PathFor(assembly),studyName); Run run=null;
+        double maxPositionError=0,maxCrankError=0;
+        try {
+            Fingerprint(scope.Doc); // Reject external dependencies before writing solver settings or rebuilding.
+            if(!scope.Doc.EditRebuild3()) throw new Exception("REBUILD_FAILED");
+            scope.Study.Activate();
+            if(scope.Study.StudyType!=4)scope.Study.StudyType=4;
+            Log("STUDY_STATUS name="+scope.Study.Name+" type="+scope.Study.StudyType+" active="+scope.Study.IsActive+" feature_count="+scope.Study.GetMotionFeaturesCount());
+            if(scope.Study.StudyType!=4) throw new Exception("MOTION_ANALYSIS_REQUIRED");
+            // Only the registered fixture's existing calibrated motor is used; no arbitrary motor writes.
+            var features=scope.Study.GetMotionFeatures() as object[];
+            var motors=new List<ISimulationMotorFeatureData>();
+            if(features!=null) foreach(IFeature f in features) { Log("MOTION_FEATURE "+f.Name+" "+f.GetTypeName2()); var m=f.GetDefinition() as ISimulationMotorFeatureData; if(m!=null) { Log("MOTOR_MAGNITUDE "+m.Magnitude); motors.Add(m); } }
+            if(motors.Count==0) {
+                var f=((IAssemblyDoc)scope.Doc).FeatureByName("旋转马达1") as IFeature;
+                if(f!=null) { var m=f.GetDefinition() as ISimulationMotorFeatureData; if(m!=null) {Log("MOTOR_FALLBACK "+m.Magnitude);motors.Add(m);} }
+            }
+            if(motors.Count>1||(motors.Count==1&&Math.Abs(motors[0].Magnitude-2*Math.PI)>1e-5)) throw new Exception("FIXTURE_MOTOR_CHANGED count="+motors.Count);
+            scope.Study.SetDuration(duration); ((IMotionStudyProperties)scope.Study.GetProperties(4)).SetFrameRate(fps);
+            Log("SOLVE_BEGIN "+runId);
+            if(!scope.Study.Calculate()) throw new Exception("SOLVER_FAILED");
+            var result=(IMotionStudyResults)scope.Study.GetResults(4);
+            if(result==null||result.IsOutOfDate()) throw new Exception("RESULTS_STALE");
+            int n=(int)Math.Round(duration*fps)+1;
+            var poses=Transforms(scope.Doc).Keys.ToDictionary(k=>k,k=>new double[n][]);
+            var times=new double[n];
+            string dir=Path.Combine(Root,"runs",runId); Directory.CreateDirectory(dir);
+            using(var csv=new StreamWriter(Path.Combine(dir,"trajectory.csv"))) {
+                csv.WriteLine("frame,time_s,set_time_argument_s,slider_x_m,expected_slider_x_m,crank_angle_deg");
+                for(int i=0;i<n;i++) {
+                    scope.EnsureActive();
+                    double t=(double)i/fps; times[i]=t;
+                    scope.Study.SetTime(Argument(t,duration)); Application.DoEvents();
+                    var trans=Transforms(scope.Doc); foreach(var kv in trans) poses[kv.Key][i]=kv.Value;
+                    double theta=Math.PI/6+2*Math.PI*t;
+                    double expected=.02*Math.Cos(theta)+Math.Sqrt(.08*.08-.02*.02*Math.Sin(theta)*Math.Sin(theta));
+                    double crank=Math.Atan2(trans["crank-1"][1],trans["crank-1"][0]);
+                    double angleError=Math.Abs(Math.Atan2(Math.Sin(crank-theta),Math.Cos(crank-theta)));
+                    double positionError=Math.Abs(trans["slider-1"][9]-expected);
+                    maxPositionError=Math.Max(maxPositionError,positionError); maxCrankError=Math.Max(maxCrankError,angleError);
+                    csv.WriteLine(string.Join(",",new[]{(double)i,t,Argument(t,duration),trans["slider-1"][9],expected,crank*180/Math.PI}.Select(v=>v.ToString("R",CultureInfo.InvariantCulture))));
+                }
+            }
+            if(assembly=="parameter_trial"&&poses[Obstacle(scope.Doc).Name2].Any(p=>p.Zip(Pose(parameterValueMm/1000,0,0,0),(a,b)=>Math.Abs(a-b)).Max()>1e-8))throw new Exception("PARAMETER_NOT_APPLIED_TO_SOLVER");
+            if(maxPositionError>1e-5||maxCrankError>1e-4) throw new Exception("TRAJECTORY_VALIDATION_FAILED position_m="+maxPositionError+" angle_rad="+maxCrankError);
+            if(result.IsOutOfDate()) throw new Exception("RESULTS_STALE");
+            run=new Run { Id=runId,Assembly=assembly,EditVersion=assembly=="parameter_trial"?parameterVersion:0,Path=scope.Doc.GetPathName(),Study=studyName,Fingerprint=Fingerprint(scope.Doc),Duration=duration,Fps=fps,Directory=dir,Times=times,Poses=poses };
+        } finally { scope.Dispose(); }
+        if(!scope.Restored) throw new Exception("RESTORATION_FAILED delta="+scope.RestoreDelta);
+        runs.Add(runId,run);
+        var summary=new { run_id=runId,assembly=assembly,study=studyName,duration_s=duration,output_fps=fps,frames=run.Times.Length,
+            maximum_position_error_m=maxPositionError,maximum_crank_angle_error_rad=maxCrankError,restoration=new { status="restored",maximum_transform_delta=scope.RestoreDelta },
+            trajectory_csv=Path.Combine(run.Directory,"trajectory.csv"),fingerprint=run.Fingerprint };
+        File.WriteAllText(Path.Combine(run.Directory,"solve.json"),Json.Serialize(summary)); return summary;
+    }
+    Run GetRun(string id) { Run r; if(!runs.TryGetValue(id,out r)) throw new Exception("RUN_NOT_FOUND_OR_EXECUTOR_RESTARTED");if(r.Generic)GetUserModel(r.Assembly);ConfigureModel(r.Assembly);if(r.Assembly=="gear_phase"&&r.ModelRoot!=null)pumpRootOverride=r.ModelRoot;return r; }
+    void ValidateRun(Run r,Scope scope) {
+        if(r.Generic&&r.EditVersion!=GetUserModel(r.Assembly).Revision||r.Assembly=="parameter_trial"&&r.EditVersion!=parameterVersion||Fingerprint(scope.Doc)!=r.Fingerprint) throw new Exception("MODEL_REVISION_CHANGED");
+        var result=(IMotionStudyResults)scope.Study.GetResults(4);
+        if(result==null||result.IsOutOfDate()) throw new Exception("RESULTS_STALE");
+        if(Math.Abs(scope.Study.GetDuration()-r.Duration)>1e-8||((IMotionStudyProperties)scope.Study.GetProperties(4)).GetFrameRate()!=r.Fps) throw new Exception("STUDY_SETTINGS_CHANGED");
+    }
+    public object Measure(string id,string entity,string type,string component) {
+        var r=GetRun(id);if(r.Assembly=="gear_pump"||r.Assembly=="gear_phase")return MeasurePump(r,entity,type,component); var scope=new Scope(this,r.Path,r.Study); object summary=null;
+        try {
+            ValidateRun(r,scope);
+            int axis; string unit; double scale=1;
+            if(type=="linear_velocity"&&entity=="slider-1"&&component=="x") {
+                axis=7;unit="m/s";
+                var units=((Array)scope.Doc.GetUnits()).Cast<object>().Select(Convert.ToInt32).ToArray();
+                Log("MEASURE_DOCUMENT_LENGTH_UNIT "+units[0]);
+                if(units[0]!=0) throw new Exception("UNCALIBRATED_DOCUMENT_UNITS");
+                // GetValues has returned both mm/s and m/s across documents in this session.
+                // Choose only after checking the whole curve against this registered fixture's analytic solution.
+            } else if(type=="angular_velocity"&&entity=="crank-1"&&component=="magnitude") { axis=10;unit="deg/s"; }
+            else throw new Exception("UNSUPPORTED_MEASURE: supported slider linear x and crank angular magnitude");
+            int cmp=component=="x"?0:component=="y"?1:component=="z"?2:component=="magnitude"?3:-1; if(cmp<0) throw new Exception("UNSUPPORTED_COMPONENT");
+            var c=((object[])((IAssemblyDoc)scope.Doc).GetComponents(false)).Cast<IComponent2>().FirstOrDefault(v=>v.Name2==entity);
+            if(c==null) throw new Exception("ENTITY_NOT_FOUND");
+            var cosmos=(ICosmosMotionStudyResults)scope.Study.GetResults(4);
+            var pf=(IMotionPlotFeatureData)cosmos.CreatePlotFeatureData(); var x=(IMotionPlotAxisFeatureData)cosmos.CreatePlotXAxisFeatureData(); x.Type=0;
+            var y=(IMotionPlotAxisFeatureData)cosmos.CreatePlotYAxisFeatureData(); y.Type=axis;y.Component=cmp;y.Entities=new DispatchWrapper[]{new DispatchWrapper(Faces(c).First())};
+            var output=cosmos.GetValues(pf,x,new DispatchWrapper[]{new DispatchWrapper(y)}) as IMotionPlotFeatureOutput;
+            if(output==null) throw new Exception("MEASURE_UNAVAILABLE"); var times=(double[])output.GetXAxis();var values=(double[])output.GetYAxis(y);
+            if(times.Length!=r.Times.Length||values.Length!=times.Length||values.Any(v=>double.IsNaN(v)||double.IsInfinity(v))||times.Zip(r.Times,(a,b)=>Math.Abs(a-b)).Max()>1e-8) throw new Exception("INCOMPLETE_MEASURE");
+            double referenceError;
+            if(axis==7) {
+                Func<double,double> expected=t=>{double a=Math.PI/6+2*Math.PI*t;return -.02*2*Math.PI*Math.Sin(a)-.02*.02*2*Math.PI*Math.Sin(a)*Math.Cos(a)/Math.Sqrt(.08*.08-.02*.02*Math.Sin(a)*Math.Sin(a));};
+                double errorSI=values.Zip(times,(v,t)=>Math.Abs(v-expected(t))).Max();
+                double errorMM=values.Zip(times,(v,t)=>Math.Abs(v*.001-expected(t))).Max();
+                scale=errorMM<errorSI ? .001 : 1; referenceError=Math.Min(errorSI,errorMM);
+                if(referenceError>2e-5) throw new Exception("MEASURE_UNIT_OR_REFERENCE_MISMATCH");
+            } else { referenceError=values.Max(v=>Math.Abs(v-360)); if(referenceError>.01) throw new Exception("ANGULAR_REFERENCE_MISMATCH"); }
+            Log("MEASURE_CALIBRATION scale="+scale+" reference_error="+referenceError);
+            string rawCsv=Path.Combine(r.Directory,entity+"_"+type+"_"+component+"_raw.csv");
+            using(var writer=new StreamWriter(rawCsv)) {writer.WriteLine("time_s,value_raw");for(int i=0;i<times.Length;i++) writer.WriteLine(times[i].ToString("R",CultureInfo.InvariantCulture)+","+values[i].ToString("R",CultureInfo.InvariantCulture));}
+            values=values.Select(v=>v*scale).ToArray();
+            string csv=Path.Combine(r.Directory,entity+"_"+type+"_"+component+".csv");
+            using(var writer=new StreamWriter(csv)) { writer.WriteLine("time_s,value_"+unit.Replace("/","_per_")); for(int i=0;i<times.Length;i++) writer.WriteLine(times[i].ToString("R",CultureInfo.InvariantCulture)+","+values[i].ToString("R",CultureInfo.InvariantCulture)); }
+            int peak=Array.IndexOf(values,values.Max()); int absolute=Array.IndexOf(values,values.OrderByDescending(v=>Math.Abs(v)).First());
+            summary=new { run_id=id,entity=entity,measure_type=type,component=component,coordinate_frame="assembly_global",unit=unit,sample_count=times.Length,min=values.Min(),max=values.Max(),
+                peak_time_s=times[peak],max_absolute=Math.Abs(values[absolute]),max_absolute_time_s=times[absolute],mean=values.Average(),mean_definition="sample arithmetic mean",csv_path=csv,raw_csv_path=rawCsv,
+                unit_calibration=new { raw_to_output_scale=scale,maximum_reference_error=referenceError,method="analytic_reference_for_registered_fixture_only" },restoration_status="restored" };
+        } finally { scope.Dispose(); }
+        if(!scope.Restored) throw new Exception("RESTORATION_FAILED"); return summary;
+    }
+    public object CheckMotion(string id,int frameStep,double volumeThreshold) {
+        var scanTimer=System.Diagnostics.Stopwatch.StartNew();
+        var r=GetRun(id); if(frameStep<1||frameStep>r.Times.Length||double.IsNaN(volumeThreshold)||double.IsInfinity(volumeThreshold)||volumeThreshold<0) throw new Exception("INVALID_SAMPLING_OPTIONS");
+        var scope=new Scope(this,r.Path,r.Study); var events=new List<object>(); int count=0; double maxDelta=0;
+        var excludedPairs=r.Assembly=="gear_pump"||r.Assembly=="gear_phase"?new string[0]:new[]{"base-1|crank-1","crank-1|rod-1","rod-1|slider-1"};
+        var indices=Enumerable.Range(0,r.Times.Length).Where(i=>i%frameStep==0).Concat(new[]{r.Times.Length-1}).Distinct().OrderBy(i=>i).ToArray();
+        try {
+            ValidateRun(r,scope);
+            foreach(int i in indices) {
+                Log("SCAN_FRAME_BEGIN run="+id+" frame="+i+" of="+r.Times.Length);Progress(activeJobId,"native_manager_scan",count,indices.Length,id);
+                scope.EnsureActive();
+                scope.Study.SetTime(Argument(r.Times[i],r.Duration)); Application.DoEvents();var actual=Transforms(scope.Doc);
+                double delta=actual.Max(k=>k.Value.Zip(r.Poses[k.Key][i],(a,b)=>Math.Abs(a-b)).Max());maxDelta=Math.Max(maxDelta,delta);
+                if(delta>1e-7) throw new Exception("POSE_MISMATCH frame="+i);
+                var mgr=(IInterferenceDetectionMgr)((IAssemblyDoc)scope.Doc).InterferenceDetectionManager;
+                try {
+                    mgr.TreatCoincidenceAsInterference=false;mgr.IgnoreHiddenBodies=false;
+                    var ints=mgr.GetInterferences() as object[];
+                    if(ints!=null) foreach(IInterference interference in ints) {
+                        var names=((object[])interference.Components).Cast<IComponent2>().Select(c=>c.Name2).OrderBy(n=>n).ToArray();
+                        string pair=string.Join("|",names); bool excluded=excludedPairs.Contains(pair);
+                        double volume=interference.Volume*1e9;
+                        if(!excluded && volume>volumeThreshold) events.Add(new { event_id="event_"+events.Count,frame=i,time_s=r.Times[i],parts=names,volume_mm3=volume });
+                    }
+                    count++;
+                    Progress(activeJobId,"native_manager_scan",count,indices.Length,id);
+                } finally { mgr.Done(); }
+                Log("SCAN_FRAME_DONE run="+id+" frame="+i+" accumulated_events="+events.Count);
+            }
+            ValidateRun(r,scope);
+        } finally { scope.Dispose(); }
+        if(!scope.Restored) throw new Exception("RESTORATION_FAILED");
+        string path=Path.Combine(r.Directory,"interference-step-"+frameStep+".json");
+        var report=new { run_id=id,assertion=events.Count==0?"pass":"fail",claim="discrete_sampled_frames_only",continuous_collision=false,checked_frames=count,total_output_frames=r.Times.Length,
+            checked_frame_indices=indices,maximum_time_step_s=(double)frameStep/r.Fps,volume_threshold_mm3=volumeThreshold,
+            excluded_joint_pairs=excludedPairs,events=events,
+            first_detected_event=events.FirstOrDefault(),maximum_pose_difference=maxDelta,restoration_status="restored",engine="native_interference_manager",elapsed_s=scanTimer.Elapsed.TotalSeconds,report_path=path };
+        File.WriteAllText(path,Json.Serialize(report));
+        reports[id]=path;
+        return new { run_id=id,assertion=events.Count==0?"pass":"fail",claim="discrete_sampled_frames_only",checked_frames=count,event_count=events.Count,
+            first_detected_event=events.FirstOrDefault(),maximum_time_step_s=(double)frameStep/r.Fps,restoration_status="restored",engine="native_interference_manager",elapsed_s=scanTimer.Elapsed.TotalSeconds,report_path=path };
+    }
+    public object Dispatch(Dictionary<string,object> request) {
+        LastOperationRestoration="not_required";
+        string op=(string)request["op"];var p=(Dictionary<string,object>)request["params"];
+        activeJobId=p.ContainsKey("job_id")?(string)p["job_id"]:null;
+        switch(op) {
+            case "get_environment": return UserEnvironment();
+            case "import_assembly": return ImportUserAssembly((string)p["path"],p.ContainsKey("configuration")?(string)p["configuration"]:null);
+            case "list_models": return UserListModels();
+            case "inspect_model": return InspectUserModel((string)p["model_id"]);
+            case "list_motion_studies": return UserStudies((string)p["model_id"]);
+            case "preflight_motion": return PreflightUserMotion((string)p["model_id"],p.ContainsKey("study")?(string)p["study"]:null);
+            case "list_drive_candidates": return UserDriveCandidates((string)p["model_id"]);
+            case "create_motion_study": return CreateUserStudy((string)p["model_id"],(string)p["study"],(string)p["component_id"],(string)p["entity_id"],(string)p["motor_type"],Convert.ToDouble(p["speed"]),Convert.ToBoolean(p["reverse_direction"]));
+            case "convert_motion_study": return ConvertUserStudy((string)p["model_id"],(string)p["study"]);
+            case "run_user_study": return RunUserStudy((string)p["model_id"],(string)p["study"],Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"]);
+            case "get_motion_summary": return UserRunSummary((string)p["run_id"]);
+            case "export_motion_curve": return ExportUserCurve((string)p["run_id"],(string)p["component_id"],(string)p["quantity"],(string)p["axis"]);
+            case "replay_motion_frame": return ReplayUserFrame((string)p["run_id"],Convert.ToInt32(p["frame"]));
+            case "create_model_checkpoint": return CreateUserCheckpoint((string)p["model_id"]);
+            case "restore_model_checkpoint": try{return RestoreUserCheckpoint((string)p["model_id"],(string)p["checkpoint_id"]);}catch{LastOperationRestoration="unknown";throw;}
+            case "get_capabilities": return Capabilities();
+            case "inspect_assembly": return Inspect((string)p["assembly"]);
+            case "list_studies": return ListStudies((string)p["assembly"]);
+            case "list_entities": return PumpEntities((string)p["assembly"]);
+            case "check_interference": return StaticCheck((string)p["assembly"],Convert.ToDouble(p["volume_threshold_mm3"]));
+            case "run_study": return Solve((string)p["assembly"],(string)p["study"],Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"]);
+            case "query_measure": return Measure((string)p["run_id"],(string)p["entity"],(string)p["measure_type"],(string)p["component"]);
+            case "check_interference_during_motion": return p.ContainsKey("engine")&&(string)p["engine"]=="hybrid"?FastCheck((string)p["run_id"],Convert.ToInt32(p["frame_step"]),Convert.ToDouble(p["volume_threshold_mm3"]),activeJobId):CheckMotion((string)p["run_id"],Convert.ToInt32(p["frame_step"]),Convert.ToDouble(p["volume_threshold_mm3"]));
+            case "diagnose_gear_phase": ConfigureModel("gear_pump");return DiagnosePhase();
+            case "create_phase_experiment": return CreatePhase(Convert.ToDouble(p["phase_offset_deg"]));
+            case "get_event_detail": return EventDetail((string)p["run_id"],(string)p["event_id"],false);
+            case "locate_event": return EventDetail((string)p["run_id"],(string)p["event_id"],true);
+            case "verify_exception_restoration": return VerifyExceptionRestoration((string)p["run_id"]);
+            case "create_parameter_experiment": return CreateParameterExperiment();
+            case "list_editable_parameters": return EditableParameters();
+            case "create_checkpoint": return CreateCheckpoint();
+            case "set_parameter": return SetParameter((string)p["parameter"],Convert.ToDouble(p["value_mm"]));
+            case "restore_checkpoint": return RestoreCheckpoint((string)p["checkpoint_id"]);
+            case "run_parameter_search": return ParameterSearch(Convert.ToInt32(p["max_trials"]),Convert.ToDouble(p["time_budget_s"]));
+            case "_test_executor_loss": return TestExecutorLoss((string)p["run_id"]);
+            default: throw new Exception("UNKNOWN_OPERATION");
+        }
+    }
+}
+
