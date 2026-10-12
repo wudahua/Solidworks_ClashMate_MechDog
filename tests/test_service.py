@@ -14,20 +14,30 @@ from unittest.mock import patch
 from contextlib import contextmanager
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from sw_mcp.bridge import Bridge, CadError
+from sw_mcp.bridge import Bridge as NativeBridge, CadError
 from sw_mcp.jobs import Jobs
+
+_bridges = []
+class Bridge(NativeBridge):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _bridges.append(self)
 
 
 @contextmanager
 def temporary_workspace():
-    base = Path(__file__).resolve().parents[1] / "runs" / "service-tests"
+    base = Path(__file__).resolve().parents[1] / "runs" / "st"
     base.mkdir(parents=True, exist_ok=True)
-    temporary = base / uuid.uuid4().hex
+    temporary = base / uuid.uuid4().hex[:8]
     temporary.mkdir()
     try:
         temporary.resolve().relative_to(base.resolve())
         yield str(temporary)
     finally:
+        for bridge in list(_bridges):
+            if bridge.root == temporary:
+                bridge.close()
+                _bridges.remove(bridge)
         # Verify the recursive cleanup target remains inside the intended test workspace.
         temporary.resolve().relative_to(base.resolve())
         if temporary.is_symlink():
@@ -118,7 +128,7 @@ class ServiceTests(unittest.TestCase):
             helper = root / "slow_executor.py"
             helper.write_text(
                 "import json,sys,time\n"
-                "print(json.dumps({'ready':True,'protocol_version':1}),flush=True)\n"
+                "print(json.dumps({'ready':True,'protocol_version':1,'process_id':22}),flush=True)\n"
                 "for line in sys.stdin:\n"
                 " r=json.loads(line)\n"
                 " if r['op']=='slow': time.sleep(.3)\n"
