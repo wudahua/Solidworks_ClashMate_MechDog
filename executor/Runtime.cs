@@ -19,6 +19,7 @@ public partial class Cad {
         public int Fps;
         public Dictionary<string,double[][]> Poses;
         public double[] Times;
+        public Dictionary<string,string> FileHashes;
     }
     readonly Dictionary<string,Run> runs=new Dictionary<string,Run>();
     string PathFor(string assembly) {ConfigureModel(assembly);if(assembly=="gear_pump"||assembly=="gear_phase")return PumpPath;if(assembly=="parameter_trial"){if(parameterPath==null)throw new Exception("EXPERIMENT_NOT_REGISTERED");return parameterPath;}if(assembly!="clear"&&assembly!="obstacle")throw new Exception("UNSUPPORTED_ASSEMBLY");return Path.Combine(Fixture,"slider_crank_"+assembly+".sldasm");}
@@ -30,29 +31,38 @@ public partial class Cad {
         string originalStudy;
         double originalActiveTime;
         string expectedPath,expectedConfiguration;
+        string previousTitle,previousPath,targetStudyName;
         Dictionary<string,double[]> original;
+        OwnedMotionSnapshot ownedSnapshot;
         public bool Restored;
         public double RestoreDelta;
+        public Dictionary<string,double[]> InitialPoses {get{return original;}}
         public Scope(Cad owner,string path,string studyName) {
-            cad=owner; previous=(IModelDoc2)owner.Sw.ActiveDoc;
+            cad=owner;owner.LastOperationRestoration="pending"; previous=(IModelDoc2)owner.Sw.ActiveDoc;
+            previousTitle=previous==null?null:previous.GetTitle();previousPath=previous==null?null:previous.GetPathName();targetStudyName=studyName;
             try {
+                owner.LastOperationRestoration="pending";
+                Log("SCOPE_OPEN_BEGIN "+path);
                 int e=0,w=0; Doc=(IModelDoc2)owner.Sw.OpenDoc6(path,2,1,"",ref e,ref w);
                 if(Doc==null||e!=0) throw new Exception("ASSEMBLY_OPEN_FAILED "+e);
+                Log("SCOPE_OPEN_DONE "+path);
                 if(!Doc.GetPathName().Equals(Path.GetFullPath(path),StringComparison.OrdinalIgnoreCase))throw new Exception("ASSEMBLY_OPEN_PATH_MISMATCH");
                 var registered=owner.userModels.Values.FirstOrDefault(m=>m.Path.Equals(path,StringComparison.OrdinalIgnoreCase));
                 if(registered!=null&&!string.IsNullOrEmpty(registered.Configuration)&&Doc.ConfigurationManager.ActiveConfiguration.Name!=registered.Configuration)throw new Exception("MODEL_CONFIGURATION_CHANGED");
                 expectedPath=Doc.GetPathName();expectedConfiguration=Doc.ConfigurationManager.ActiveConfiguration.Name;
-                owner.Sw.ActivateDoc3(Doc.GetTitle(),false,0,ref e);
+                var current=(IModelDoc2)owner.Sw.ActiveDoc;if(current==null||!string.Equals(current.GetPathName(),expectedPath,StringComparison.OrdinalIgnoreCase))owner.Sw.ActivateDoc3(Doc.GetTitle(),false,0,ref e);
+                Log("SCOPE_ACTIVATE_DONE "+path);
                 var manager=(IMotionStudyManager)Doc.Extension.GetMotionStudyManager();
                 foreach(string name in Names(manager)) { var s=(IMotionStudy)manager.GetMotionStudy(name); if(s.IsActive){originalStudy=name;originalActiveTime=s.GetTime();} }
                 if(studyName!=null) {
                     owner.LastOperationRestoration="pending";
+                    if(registered!=null)ownedSnapshot=new OwnedMotionSnapshot(owner,registered,Doc);
                     original=Transforms(Doc);
                     Study=(IMotionStudy)manager.GetMotionStudy(studyName);
                     if(Study==null) throw new Exception("STUDY_NOT_FOUND");
                     OriginalTime=Study.GetTime(); Study.Activate();
                 }
-            } catch { Dispose(); throw; }
+            } catch(Exception failure) { try{Dispose();}catch(Exception rollback){owner.LastOperationRestoration="unknown";throw new CadFault("RESTORATION_FAILED","打开或激活失败，且无法核验原窗口恢复。",new{original_error=failure.ToString(),rollback_error=rollback.ToString()});}if(failure is COMException)owner.LastOperationRestoration="unknown";throw; }
         }
         public void EnsureActive() {
             var active=(IModelDoc2)cad.Sw.ActiveDoc;
@@ -60,18 +70,22 @@ public partial class Cad {
                 throw new Exception("SESSION_CONFLICT: active document or configuration changed");
         }
         public void Dispose() {
+            Exception restoreCause=null;
             try {
                 if(Study!=null&&original!=null) {
+                    if(ownedSnapshot!=null){Doc=ownedSnapshot.Restore();Study=(IMotionStudy)((IMotionStudyManager)Doc.Extension.GetMotionStudyManager()).GetMotionStudy(targetStudyName);var diagnostic=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(ownedSnapshot.Diagnostics));RestoreDelta=Convert.ToDouble(diagnostic["maximum_transform_delta"]);Restored=true;}
+                    else {
                     Study.SetTime(OriginalTime); Application.DoEvents();
                     if(originalStudy!=null&&originalStudy!=Study.Name){var originalActive=(IMotionStudy)((IMotionStudyManager)Doc.Extension.GetMotionStudyManager()).GetMotionStudy(originalStudy);originalActive.Activate();originalActive.SetTime(originalActiveTime);Application.DoEvents();}
                     var after=Transforms(Doc);
                     RestoreDelta=original.Max(k=>k.Value.Zip(after[k.Key],(a,b)=>Math.Abs(a-b)).Max());
                     Restored=RestoreDelta<1e-7 && Math.Abs(Study.GetTime()-OriginalTime)<1e-7;
+                    }
                 } else Restored=true;
-            } finally {
-                if(previous!=null) { int e=0; var activated=cad.Sw.ActivateDoc3(previous.GetTitle(),false,0,ref e); if(activated==null||e!=0) Restored=false; }
+            } catch(Exception e){restoreCause=e;Restored=false;} finally {
+                try{if(previousTitle!=null) {var active=(IModelDoc2)cad.Sw.ActiveDoc;if(active==null||!string.Equals(active.GetPathName(),previousPath,StringComparison.OrdinalIgnoreCase)){int e=0;var activated=cad.Sw.ActivateDoc3(previousTitle,false,0,ref e);if(activated==null||e!=0)Restored=false;}}}catch(Exception e){restoreCause=e;Restored=false;}
                 cad.LastOperationRestoration=Restored?"restored":"unknown";
-                if(!Restored)throw new Exception("RESTORATION_FAILED delta="+RestoreDelta);
+                if(!Restored)throw new CadFault("RESTORATION_FAILED","无法确认完整状态已恢复。",new{maximum_transform_delta=RestoreDelta,state_difference=ownedSnapshot==null?null:ownedSnapshot.Diagnostics,cause=restoreCause==null?null:restoreCause.ToString()});
             }
         }
     }
@@ -275,7 +289,7 @@ public partial class Cad {
             case "inspect_model": return InspectUserModel((string)p["model_id"]);
             case "list_motion_studies": return UserStudies((string)p["model_id"]);
             case "preflight_motion": return PreflightUserMotion((string)p["model_id"],p.ContainsKey("study")?(string)p["study"]:null);
-            case "list_drive_candidates": return UserDriveCandidates((string)p["model_id"]);
+            case "list_drive_candidates": return UserDriveCandidates((string)p["model_id"],p.ContainsKey("component_id")?(string)p["component_id"]:"",p.ContainsKey("kind")?(string)p["kind"]:"",p.ContainsKey("limit")?Convert.ToInt32(p["limit"]):20,p.ContainsKey("cursor")?(string)p["cursor"]:null);
             case "create_motion_study": return CreateUserStudy((string)p["model_id"],(string)p["study"],(string)p["component_id"],(string)p["entity_id"],(string)p["motor_type"],Convert.ToDouble(p["speed"]),Convert.ToBoolean(p["reverse_direction"]));
             case "convert_motion_study": return ConvertUserStudy((string)p["model_id"],(string)p["study"]);
             case "run_user_study": return RunUserStudy((string)p["model_id"],(string)p["study"],Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"]);
@@ -283,6 +297,7 @@ public partial class Cad {
             case "export_motion_curve": return ExportUserCurve((string)p["run_id"],(string)p["component_id"],(string)p["quantity"],(string)p["axis"]);
             case "replay_motion_frame": return ReplayUserFrame((string)p["run_id"],Convert.ToInt32(p["frame"]));
             case "create_model_checkpoint": return CreateUserCheckpoint((string)p["model_id"]);
+            case "reset_study_time": return ResetUserStudyTime((string)p["model_id"],(string)p["study"]);
             case "restore_model_checkpoint": try{return RestoreUserCheckpoint((string)p["model_id"],(string)p["checkpoint_id"]);}catch{LastOperationRestoration="unknown";throw;}
             case "get_capabilities": return Capabilities();
             case "inspect_assembly": return Inspect((string)p["assembly"]);
@@ -304,6 +319,8 @@ public partial class Cad {
             case "restore_checkpoint": return RestoreCheckpoint((string)p["checkpoint_id"]);
             case "run_parameter_search": return ParameterSearch(Convert.ToInt32(p["max_trials"]),Convert.ToDouble(p["time_budget_s"]));
             case "_test_executor_loss": return TestExecutorLoss((string)p["run_id"]);
+            case "_test_run_restoration_failure": if(System.Environment.GetEnvironmentVariable("SW_MCP_FAULT_TESTS")!="1")throw new Exception("FAULT_TESTS_DISABLED");return RunUserStudy((string)p["model_id"],(string)p["study"],Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"],true);
+            case "_test_set_study_time": if(System.Environment.GetEnvironmentVariable("SW_MCP_FAULT_TESTS")!="1")throw new Exception("FAULT_TESTS_DISABLED");return TestSetUserStudyTime((string)p["model_id"],(string)p["study"],Convert.ToDouble(p["time_s"]));
             default: throw new Exception("UNKNOWN_OPERATION");
         }
     }

@@ -31,7 +31,7 @@ public partial class Cad {
     public Cad(string root) {Root=Path.GetFullPath(root);Sw=ConnectSession();bool prior=Sw.UserControl;if(!prior)Sw.UserControl=true;if(!Sw.UserControl)throw new Exception("SESSION_LIFETIME_UNVERIFIED");Log("SESSION_LIFETIME user_control_before="+prior+" after="+Sw.UserControl);LoadRegistrations();}
     public static void Log(string text) { Console.Error.WriteLine(DateTime.UtcNow.ToString("o")+" "+text); }
     public string Fixture { get { return Path.Combine(Root,"fixtures","slider_crank"); } }
-    void Save(IModelDoc2 d,string path) { int e=0,w=0; if(!d.Extension.SaveAs(path,0,1,null,ref e,ref w)||e!=0) throw new Exception("SAVE_FAILED "+e); }
+    void Save(IModelDoc2 d,string path) { int e=0,w=0;bool same=string.Equals(d.GetPathName(),Path.GetFullPath(path),StringComparison.OrdinalIgnoreCase);bool saved=same?d.Save3(1,ref e,ref w):d.Extension.SaveAs(path,0,1,null,ref e,ref w);if(!saved||e!=0)throw new CadFault("SAVE_FAILED","登记文件保存失败。",new{errors=e,warnings=w,save_method=same?"Save3":"SaveAs"}); }
     IModelDoc2 New(string ext) { var d=(IModelDoc2)Sw.NewDocument(Tutorial+(ext=="part"?"part.prtdot":"assembly.asmdot"),0,0,0); if(d==null) throw new Exception("TEMPLATE_UNAVAILABLE"); return d; }
     void Part(string name, double[][] boxes, double[][] cylinders) {
         string path=Path.Combine(Fixture,name+".sldprt"); if(File.Exists(path)) { int e=0,w=0; if(Sw.OpenDoc6(path,1,1,"",ref e,ref w)==null) throw new Exception("FIXTURE_PART_OPEN_FAILED"); return; }

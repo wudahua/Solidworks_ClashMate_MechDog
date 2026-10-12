@@ -9,7 +9,7 @@ using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 class Program {
     static object Error(Exception e,string restoration="not_required") {
-        string code=e.Message.Split(':')[0].Split(' ')[0];
+        var fault=e as CadFault;string code=fault==null?e.Message.Split(':')[0].Split(' ')[0]:fault.Code;
         if(e is COMException) code="COM_CALL_FAILED";
         else if(e is IOException) code="FILE_ACCESS_FAILED";
         else if(e is InvalidCastException) code="API_TYPE_MISMATCH";
@@ -24,7 +24,17 @@ class Program {
             {"FILE_ACCESS_FAILED","无法读取或保存测试文件，请检查占用状态与路径权限。"},
             {"API_TYPE_MISMATCH","SolidWorks 返回的数据类型未被当前执行器正确支持。"}
         };
-        return new {code=code,message=messages.ContainsKey(code)?messages[code]:e.Message,assertion="inconclusive",restoration_status=restoration};
+        messages["CHECKPOINT_REQUIRES_INITIAL_TIME"]="当前激活算例不在初始时刻；请先使用 reset_study_time 归零，再建立检查点。";
+        messages["CREATE_STUDY_REQUIRES_INITIAL_TIME"]="当前激活算例不在初始时刻；请先使用 reset_study_time 归零，再添加驱动。";
+        messages["EXECUTOR_ALREADY_RUNNING"]="已有其他 MCP 执行器运行；请先停用该服务，保留 SolidWorks 打开。";
+        messages["CHECKPOINT_SETTINGS_MISMATCH"]="恢复后的算例类型、帧率、时间或激活状态与检查点不一致。";
+        messages["CHECKPOINT_TIME_RESTORE_FAILED"]="SolidWorks 拒绝恢复算例时间；保留检查点和日志后核对模型状态。";
+        messages["STUDY_NOT_FOUND"]="登记副本中没有该运动算例；请先 list_motion_studies 核对名称。";
+        messages["MODEL_PREFLIGHT_FAILED"]="模型预检存在阻塞项；请查看 diagnostics 并修正副本或重新导入。";
+        messages["DRIVE_ENTITY_STALE"]="驱动参考已过期；请重新查询驱动候选。";
+        messages["CANDIDATE_CURSOR_STALE"]="候选分页游标已过期；模型或配置已改变，请从第一页重新查询。";
+        messages["ACTIVE_TIME_NOT_FRAME_ALIGNED"]="激活算例停在非输出帧时刻；请先显式 reset_study_time 归零，再求解或回放。";
+        return new {code=code,message=messages.ContainsKey(code)?messages[code]:fault==null?"执行器拒绝："+code+"；"+e.Message:fault.Message,assertion="inconclusive",restoration_status=restoration,diagnostics=new{details=fault==null?null:fault.Diagnostics,native_message=e.Message,hresult=e.HResult}};
     }
     [STAThread] static int Main(string[] args) {
         Console.OutputEncoding=new UTF8Encoding(false);
