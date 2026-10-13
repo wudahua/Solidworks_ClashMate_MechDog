@@ -6,17 +6,20 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.1-alpha.2"
+VERSION = "0.4.1-alpha.3"
 
 
 def build():
-    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.1-alpha.2.md", "LICENSE", ".gitignore", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
+    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.1-alpha.3.md", "LICENSE", ".gitignore", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
     sources += sorted((ROOT/"executor").glob("*.cs"))
     sources += [ROOT/"executor/build.ps1"]
     sources += sorted((ROOT/"sw_mcp").glob("*.py"))
-    sources += [ROOT/"scripts"/name for name in ("self_check.py", "validate_runtime.py", "build_release.py", "recover.py")]
+    sources += [ROOT/"scripts"/name for name in ("self_check.py", "validate_runtime.py", "build_release.py", "recover.py", "local_storage.py")]
     sources += [ROOT/"tests"/name for name in ("test_service.py", "test_reliability.py", "motion_acceptance_v04.py", "motion_protocol_v04.py", "motion_recovery_v04.py", "motion_source_revision_v04.py", "motion_reliability_v04.py", "motion_reset_recovery_v04.py", "motion_time_axis_v04.py", "candidate_geometry_v04.py", "study_history_v04.py", "motion_startup_retry_v04.py", "motion_history_v04.py", "motion_feature_evidence_v04.py", "motion_history_diagnostics_v04.py", "motion_intent_v041.py", "basic_mates_v041.py", "mate_protocol_v041.py")]
     sources += [ROOT/"tests"/name for name in ("test_installation.py", "SessionConnectionTests.cs", "session_connection_checks.py", "session_connection_native.py", "installation_powershell_checks.py")]
+    sources += [ROOT/"tests"/name for name in ("relative_motion_checks.py", "test_mechanism_feedback.py", "mechanism_protocol_checks.py")]
+    sources += [ROOT/"tests/test_clock_feedback.py"]
+    sources += [ROOT/"tests/clock_time_selection_checks.py"]
     releases = ROOT/"releases"
     releases.mkdir(exist_ok=True)
     stage = releases/("SolidWorks运动仿真MCP_v"+VERSION+"_源码_"+uuid.uuid4().hex[:8])
@@ -26,7 +29,9 @@ def build():
         relative = source.relative_to(ROOT)
         assert source.is_file() and not source.is_symlink()
         data = source.read_bytes()
-        assert b"C:\\Users\\Administrator" not in data and b"E:\\Codex Space" not in data
+        normalized = data.decode("utf-8-sig").replace("\\\\", "\\").replace("\\", "/").casefold()
+        for private_root in (ROOT, Path.home()):
+            assert private_root.as_posix().casefold() not in normalized, relative
         target = stage/relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)

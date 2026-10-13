@@ -27,6 +27,11 @@ class CadError(RuntimeError):
 class Bridge:
     """Owns one executor. A timeout never implies that CAD has stopped."""
 
+    LONG_OPERATIONS = frozenset({"check_interference_during_motion", "run_parameter_search", "diagnose_gear_phase",
+        "import_assembly", "run_user_study", "verify_motion_preservation", "replay_motion_frame",
+        "restore_model_checkpoint", "apply_mate", "create_motion_study", "convert_motion_study",
+        "reset_study_time", "create_model_checkpoint"})
+
     def __init__(self, root: Path, timeout: float = 180, motion_scan_timeout: float = 600):
         self.root = root
         self.timeout = timeout
@@ -99,14 +104,79 @@ class Bridge:
                     raise ValueError("Invalid journal")
             except (ValueError, OSError):
                 return {"status": "unreadable", "recovery_required": True}
-            return {**state, "recovery_required": state["status"] != "idle"}
+            own_active = state["status"] == "active" and state.get("owner_id") == self._owner_id
+            return {**state, "recovery_required": state["status"] != "idle",
+                    "journal_derived_fields_consistent": state.get("recovery_required", state["status"] != "idle") == (state["status"] != "idle"),
+                    "state_scope": "current_owner_request_in_progress" if own_active else "idle" if state["status"] == "idle" else "prior_or_unknown_operation",
+                    "requires_checkpoint_restore": state["status"] != "idle" and not own_active,
+                    "cad_request_policy": "wait_for_current_request" if own_active else "available" if state["status"] == "idle" else "recovery_only"}
 
     def _journal(self, state):
         with self._journal_lock:
+            state = {k: v for k, v in state.items() if k not in {"state_scope", "requires_checkpoint_restore", "cad_request_policy", "journal_derived_fields_consistent"}}
+            state = {**state, "recovery_required": state.get("status") != "idle", "schema_version": 2}
             self._journal_path.parent.mkdir(parents=True, exist_ok=True)
             temporary = self._journal_path.with_name(self._journal_path.name + "." + uuid.uuid4().hex + ".tmp")
             temporary.write_text(json.dumps({**state, "updated_at": time.time()}, ensure_ascii=False, indent=2), encoding="utf-8")
             temporary.replace(self._journal_path)
+
+    def get_request_result(self, request_id):
+        """Offline terminal response, including replies received after a timeout."""
+        if not isinstance(request_id, str) or not re.fullmatch(r"[a-f0-9]{32}", request_id):
+            raise CadError("INVALID_REQUEST_ID", "请求标识无效。", "not_required")
+        path = self.root / "runs" / "requests" / (request_id + ".json")
+        if not path.exists():
+            return None
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+            payload = record["response"]
+            digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+            if record["request_id"] != request_id or payload["id"] != request_id or digest != record["response_sha256"]:
+                raise ValueError("Response identity or hash mismatch")
+            return record
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise CadError("REQUEST_RESULT_INVALID", "最终响应文件无法核验；保留未知状态，不重新执行写操作。", diagnostics={"request_id": request_id}) from exc
+
+    def _persist_response(self, state, response):
+        identifier = state["request_id"]
+        if not re.fullmatch(r"[a-f0-9]{32}", identifier):
+            raise ValueError("Invalid response identity")
+        result = response.get("result")
+        record = {"request_id": identifier, "operation": state.get("operation"), "params": state.get("params"),
+                  "model_id": state.get("model_id"), "owner_id": state.get("owner_id"), "received_at": time.time(),
+                  "response": response, "response_sha256": hashlib.sha256(json.dumps(response, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()}
+        folder = self.root / "runs" / "requests"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / (identifier + ".json")
+        temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp.replace(path)
+        if state.get("operation") == "preview_mate" and response.get("ok") and isinstance(result, dict):
+            plan, model = result.get("plan_id"), result.get("model_id")
+            if not isinstance(plan, str) or not re.fullmatch(r"[a-f0-9]{32}", plan) or model != state.get("model_id"):
+                raise ValueError("Invalid mate plan identity")
+            folder = self.root / "runs" / "mate-plan-bindings"
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / (plan + ".json")
+            temp = path.with_suffix(".tmp")
+            temp.write_text(json.dumps({"plan_id": plan, "model_id": model, "owner_id": self._owner_id,
+                                       "executor_pid": state.get("executor_pid"), "request_id": identifier}), encoding="utf-8")
+            temp.replace(path)
+
+    def _mate_model(self, params):
+        plan = params.get("plan_id")
+        if not isinstance(plan, str) or not re.fullmatch(r"[a-f0-9]{32}", plan):
+            raise CadError("INVALID_MATE_PLAN_ID", "配合方案标识无效，请先预览。", "not_required")
+        try:
+            binding = json.loads((self.root / "runs" / "mate-plan-bindings" / (plan + ".json")).read_text(encoding="utf-8"))
+            model = binding["model_id"]
+            if binding["plan_id"] != plan or binding["owner_id"] != self._owner_id or binding["executor_pid"] != self._process.pid or not re.fullmatch(r"user_[a-f0-9]{32}", model):
+                raise ValueError("Plan belongs to another session")
+            if params.get("model_id") and params["model_id"] != model:
+                raise ValueError("Model mismatch")
+            return model
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise CadError("MATE_PLAN_NOT_BOUND", "未找到本会话方案所属模型；请重新 preview_mate，不能重复未知写操作。", "not_required", {"plan_id": plan, "required_tool": "preview_mate"}) from exc
 
     @staticmethod
     def _pid_alive(pid):
@@ -267,9 +337,7 @@ class Bridge:
                     continue
                 request_id = response.get("id")
                 with self._state_lock:
-                    future = self._pending.pop(request_id, None)
-                    if request_id == self._quarantined_request:
-                        self._quarantined_request = None
+                    future = self._pending.get(request_id)
                 state = self.recovery_state()
                 if request_id == state.get("request_id") and state.get("owner_id") == self._owner_id:
                     restoration = response.get("error", {}).get("restoration_status", "not_required")
@@ -279,12 +347,17 @@ class Bridge:
                     if response.get("ok") and isinstance(response.get("result"), dict):
                         value = response["result"]
                         restoration = value.get("restoration_status", value.get("restoration", {}).get("status", "not_required"))
+                    self._persist_response(state, response)
                     if state.get("recovering") and (not response.get("ok") or response.get("result", {}).get("restoration_status") != "restored"):
-                        self._journal({**state["previous_state"], "status": "unknown", "last_recovery_error": response.get("error")})
+                        self._journal({**state["previous_state"], "status": "unknown", "last_recovery_error": response.get("error"), "last_response_request_id": request_id})
                     else:
-                        self._journal({**state, "status": "unknown" if restoration in {"unknown", "pending"} else "idle", "restoration_status": restoration})
-                if future is not None:
-                    future.set_result(response)
+                        self._journal({**state, "status": "unknown" if restoration in {"unknown", "pending"} else "idle", "restoration_status": restoration, "last_response_request_id": request_id})
+                with self._state_lock:
+                    if future is not None:
+                        future.set_result(response)
+                    self._pending.pop(request_id, None)
+                    if request_id == self._quarantined_request:
+                        self._quarantined_request = None
         except Exception as exc:
             error = CadError("EXECUTOR_PROTOCOL_ERROR", f"执行器响应无法解析：{type(exc).__name__}")
         else:
@@ -327,6 +400,8 @@ class Bridge:
                     raise CadError("RECOVERY_SESSION_MISMATCH", "恢复默认绑定故障时相同的 SolidWorks 实例；旧实例已退出时可显式请求替代会话恢复。")
                 if self._pid_alive(state.get("solidworks_pid")):
                     raise CadError("PREVIOUS_SOLIDWORKS_ALIVE", "旧SolidWorks实例仍存活或身份无法核实，拒绝替代会话恢复。")
+            if operation in {"apply_mate", "_test_mate_rollback"}:
+                params = {**params, "model_id": self._mate_model(params)}
             request_id = uuid.uuid4().hex
             future = concurrent.futures.Future()
             with self._state_lock:
@@ -348,14 +423,23 @@ class Bridge:
                                "recovering": recovering, "previous_state": state if recovering else None})
                 self._process.stdin.write(wire)
                 self._process.stdin.flush()
-                deadline = self.motion_scan_timeout if operation in {"check_interference_during_motion", "run_parameter_search", "diagnose_gear_phase", "import_assembly", "run_user_study", "verify_motion_preservation", "replay_motion_frame", "restore_model_checkpoint"} else self.timeout
+                deadline = self.motion_scan_timeout if operation in self.LONG_OPERATIONS else self.timeout
                 response = future.result(timeout=deadline)
             except concurrent.futures.TimeoutError as exc:
                 with self._state_lock:
                     # The late response clears quarantine only after the executor actually finishes.
                     if not future.done():
                         self._quarantined_request = request_id
-                raise CadError("CAD_TIMEOUT", "调用超时；这不代表 SolidWorks 求解已停止。") from exc
+                progress = {}
+                job_id = params.get("job_id")
+                if isinstance(job_id, str) and re.fullmatch(r"[a-f0-9]{32}", job_id):
+                    try:
+                        observed = json.loads((self.root / "runs/progress" / (job_id + ".json")).read_text(encoding="utf-8"))
+                        if observed.get("job_id") == job_id and observed.get("model_id") == model_id and observed.get("plan_id") == params.get("plan_id"):
+                            progress = {k: observed.get(k) for k in ("stage", "checkpoint_id")}
+                    except (OSError, ValueError, AttributeError):
+                        pass
+                raise CadError("CAD_TIMEOUT", "调用超时；CAD 操作可能继续，不能重复写入。查询 get_job 或 get_recovery_state 的最终响应。", diagnostics={"request_id": request_id, "operation": operation, "model_id": model_id, "plan_id": params.get("plan_id"), "job_id": job_id, "wait_budget_s": deadline, "last_native_progress": progress, "next_tools": ["get_job", "get_recovery_state"], "retry_write_allowed": False}) from exc
             except (BrokenPipeError, OSError) as exc:
                 state_after = self.recovery_state()
                 if state_after.get("request_id") == request_id and state_after.get("status") == "active":

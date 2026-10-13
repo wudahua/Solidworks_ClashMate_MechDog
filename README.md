@@ -2,11 +2,36 @@
 
 SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.1-alpha.2` 基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.1-alpha.3` 基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.2.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.3.md)。
 
-本版另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
+本版本保留另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
+
+本版本合入曲柄滑块、液压剪叉与动态钟表反馈修复。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
+
+- `apply_mate`、`create_motion_study`、`convert_motion_study`、`create_model_checkpoint` 和 `reset_study_time` 默认返回 `job_id`；用 `get_job` 轮询，确认 `succeeded` 后使用 `result`。`wait_for_completion=True` 保留同步方式，显式重算归零仍返回任务。默认归零任务不会自动获得计算许可，须明确 `allow_recalculate=True`。
+- 上述写操作执行器等待预算为 600 秒；这不是完成时间保证，也不能替代 MCP 客户端自身的等待限制。超时后保留原任务状态，用 `get_job` 查看 `late_response`，或用 `get_recovery_state(request_id=...)` 读取最终原始响应；无响应仍保持未知，不重复写入。`idle` 只说明请求已结束，配合是否应用看原响应与原生参数。
+- 完整最终响应及其 SHA-256 保存到 `runs/requests/`；配合预览绑定模型与执行器身份，配合请求日志包含所属模型。`get_job` 可离线读取本安装目录历史任务，标注 `historical_job_read_only`，不自动续跑。旧 `queued/running` 记录的真实执行情况未知；已存结果不证明当前模型或 CAD 状态。
+- `create_motion_study` 可指定 `duration_s`、`output_fps`，默认 1 秒、30 fps；仍要求新算例名，不向已有算例追加马达。创建时核验设置，试算可用另一组设置，结束后恢复原设置。重名错误给出换名或复用现有驱动的指引。
+- 恢复结果的 `restore_changes` 说明算例移除/恢复、已登记驱动和参考变化；整个文件快照会回退之后新建的内容，历史结果继续保留但可能过期。无法读取当前算例时明确差异未知，不阻断必要恢复。
+- `entity_id` 不按每次 revision 变化自动清空；只有查询返回并登记的页面 ID 可使用，原生持久引用也须解析通过。恢复旧检查点会回退参考登记表，错误区分“未登记”“登记被恢复回退”和“原生参考失效”，并指引重新查询。方案 `plan_id` 的输入绑定、消费与失效保护继续保留。
+- 保存诊断返回 `save_observation`，保留本会话最近 32 个阶段的脏标志与文件哈希；副本 dirty 与源文件未改动是不同观测，unknown 不自动当作 stale。日志派生状态写入一致，旧日志仅只读标注一致性，不自动解除隔离。
+- 回放继续使用 `1e-7 m` / `1e-6 rad` 阈值，最差组件诊断增加各轴平移差与前后位置。钟表最终复测首帧通过，但中间帧和末帧出现 p3-33 的 Z 向漂移超限，返回 POSE_MISMATCH 并恢复副本。另一次回放曾全部通过，仍不能承诺该模型重复求解稳定；其他装配也逐次核验。
+- 回放超限但副本恢复已核验时，也记录受控保存后的输入哈希和 `last_replay_attempt`，保留 `inconclusive`；恢复未知或模型版本变化不更新旧结果身份。计算后停止播放，按实际时间与全部组件姿态判断回放，不单凭 `SetTime` 布尔返回。末帧浮点值不会被内部偏移推到算例时长以外。
+- 元数据原子替换对 Windows 共享读取锁作有限重试，最多约 420 毫秒；不重试求解、保存 CAD 或创建配合，持久权限错误继续失败并保留路径诊断。
+
+- `reset_study_time(..., allow_recalculate=True)` 显式允许按原设置重新计算后归零，返回异步任务。默认对非零动画或未激活算例只读返回该选项，不先切换姿态。归零前保存检查点；失败时恢复，恢复活动算例可能需要按记录设置重建结果缓存。计算限制为 30 秒、1801 帧，超过预算拒绝；类型、时长与帧率保持并回读核对。
+- 创建摆动液压缸驱动时，用 `reference_component_id` 指定缸体；验证活塞杆直线运动时也指定同一个参考。创建接口新建一个名称不重复的算例和一个马达，默认 1 秒、30 fps，不向已有算例追加驱动。`linear` 选平面法向、速度 mm/s；`rotary` 选圆柱轴、速度 rpm。
+- 校验在每帧参考组件坐标系中测量运动，检查轴变化及相对转动是否在支持范围内；恒速幅值按平均和相邻采样区间核对，容差为 `max(0.001, 请求速度 × 0.5%)`，单位与请求速度相同。它不证明采样之间的瞬时速度或受力精度；方向参数通过原生回读核对，采样的正负号仍不作通用方向证明。
+- `verify_motion_preservation` 的 `job.status=succeeded` 表示执行完成；是否通过看 `verification_status` 或 `assertion`。失败也保留最低行程、单位、参考系和未执行原因。独立验证返回试算前检查点；指定已应用配合方案时返回配合前检查点。
+- 几何查询容忍已解析空零件，支持实体体和曲面体的平面/圆柱面，报告排除、异常及截断。固定支座可用于配合参考，但不作为驱动目标。`suggested_motor` 是兼容旧客户端的几何类型别名，不证明驱动相容；优先使用 `compatible_geometry_motor_types`。
+- 两种几何查询的 `limit` 都是条数上限，还受 16000 UTF-8 字节预算限制。`detail_level="compact"` 减少冗余字段；改变筛选、分组或详情后重新查询第一页。诊断最多展示 20 个组件，另返回完整计数；需详情时按组件查询。
+- `export_motion_curve(..., allow_unverified_history=True)` 显式离线导出完整、哈希与原生时间轴已核验的历史采样，保留失败/恢复未知状态及警示。默认导出仍要求当前输入匹配且结果通过验证；CAD 回放继续严格校验输入、全部组件姿态和恢复，不开放未验证回放。
+- 原生求解器消息列表接口尚未完成校准，返回 `solver_messages_status=unavailable_api_not_proven`；时间轴诊断不能被解释为过约束等特定原因的证明。
+- `python scripts/local_storage.py --output runs/storage.json` 只生成存储清单，不删除数据。清理须显式指定同一个 run ID 两次；默认保留 7 天，最新算例结果、活动/未知任务、恢复未确认数据、检查点和状态快照受保护。扫描不完整或服务运行时拒绝清理。
+
+预检中的原生重建可能令副本变脏，后续保存也可能改变文件哈希；旧结果因此失效时，重新求解并使用新 `run_id`。不能用相同 revision 覆盖文件变化证据。仅查看历史数据可显式使用离线历史接口。
 
 这是供试用的运动仿真版本。已有有效配合的刚体机构可直接进入运动流程；缺少基础配合时可由设计者选定参考和类型，再让助手执行。尚未完成“大部分机械装配均可用”的样本覆盖验收。
 
@@ -96,13 +121,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1 -SolidWorksProce
 
 ## 第一次使用
 
-1. 保存原装配及全部零件。源文件存在未保存修改时导入会拒绝；虚拟零件先保存到磁盘。确认装配在 SolidWorks 中能按设计意图运动。
+1. **先启动本机 SolidWorks 并保持打开**，选择正确 PID。保存原装配及全部零件。源文件存在未保存修改时导入会拒绝；虚拟零件先保存到磁盘。确认装配在 SolidWorks 中能按设计意图运动。
 2. 调用 `get_environment`，确认 revision 与 Motion 使用条件。
 3. 调用 `import_assembly`，传入 `.SLDASM` 绝对路径和可选配置。返回 job_id 后用 `get_job` 等待完成，保存结果中的 model_id 和 checkpoint_id。
 4. 调用 `inspect_model`、`preflight_motion`、`list_motion_studies`。
-5. 已有 Motion Analysis：直接选算例，并查看 `last_run` 及其输入匹配状态。已有动画/Basic Motion：明确请求 `convert_motion_study`。没有驱动：调用 `list_drive_candidates`，由用户选择组件、参考实体、速度与方向，再 `create_motion_study`。创建结果返回实际时长、帧率和算例状态。**预检通过或驱动创建成功不保证驱动与配合相容，也不保证求解成功。** 旋转驱动与现有约束不相容时可能只有初始结果，需核对约束和设计意图；直线驱动只可在适用机构中作为对照，不能通用替代旋转驱动。
+5. 已有 Motion Analysis：直接选算例，并查看 `last_run` 及其输入匹配状态。已有动画/Basic Motion：明确请求 `convert_motion_study`。没有驱动：调用 `list_drive_candidates`，由用户选择组件、参考实体、速度与方向，再 `create_motion_study`。转换和创建默认返回 job_id；等待 get_job 状态为 succeeded 后读取 result，其中包含实际时长、帧率和算例状态。**预检通过或驱动创建成功不保证驱动与配合相容，也不保证求解成功。** 旋转驱动与现有约束不相容时可能只有初始结果，需核对约束和设计意图；直线驱动只可在适用机构中作为对照，不能通用替代旋转驱动。
 6. 调用 `run_motion_study`，用 `get_job` 查询。成功结果包含 run_id、时间轴验证和驱动验证范围。复用已有算例时不声称已独立证明物理结果。
-7. 调用 `export_motion_curve` 或 `replay_motion_frame`。run_id 仅在当前执行器会话有效；文件导出会保留。
+7. 调用 `export_motion_curve` 或 `replay_motion_frame`。CAD 回放和默认曲线导出要求当前会话模型输入匹配。重启后可通过 get_run_artifacts、read_run_poses 或显式历史导出读取保存数据；历史记录不证明当前 CAD 状态。
 
 结果描述的是导入时的副本。之后修改源文件会显示源哈希不一致，副本仍可独立求解和恢复；要模拟新设计，请重新导入。导入过程本身出现源哈希变化则拒绝完成导入。
 
@@ -134,7 +159,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1 -SolidWorksProce
 
 公开工具共24个。基础配合首版只支持已解析、非SpeedPak的顶层SLDPRT实例；不支持子装配内部参考、边线/顶点/基准面或复杂机械配合。同心选两个圆柱面，其余类型选两个平面；方向必须明确为aligned或anti_aligned，距离单位mm，同心默认不锁定旋转。候选列表不根据面积或距离猜测设计意图。描述性预览不移动零件，不产生几何动画预览。
 
-配合操作要求各算例时间为0；需要时先显式reset_study_time。用户明确选定两个参考、类型及参数后，先preview_mate，再apply_mate(confirmed=True)。方案绑定文件哈希、配置、版本、文档更新标记/脏标志、姿态、算例状态及配合清单；保守地在状态变化后拒绝执行。本会话最多128个方案，执行过的方案不能重放，重连后须重新预览。apply_mate会保存登记副本以建立检查点，不保存源装配。
+配合操作要求各算例时间为0；需要时先显式reset_study_time。用户明确选定两个参考、类型及参数后，先preview_mate，再apply_mate(confirmed=True)，等待返回的 job_id 成功并核对原生参数。方案绑定文件哈希、配置、版本、文档更新标记/脏标志、姿态、算例状态及配合清单；保守地在状态变化后拒绝执行。本会话最多128个方案，执行过的方案不能重放，重连后须重新预览。apply_mate会保存登记副本以建立检查点，不保存源装配。
 
 新增配合成功后仍须验证运动。先选择运动组件、参考轴、算例和minimum_travel，再显式verify_motion_preservation。旋转的最低运动量为deg，直线为mm；返回assertion=pass/fail/inconclusive，不能仅凭job成功判定通过。直线验证检查沿轴位移跨度、偏轴位移和伴随旋转；旋转验证检查累计投影角跨度及偏轴旋转，允许偏置组件原点沿圆周移动。默认偏轴容差为直线0.01mm/旋转0.1deg，直线伴随旋转容差0.1deg。这些是首版验收阈值，不是通用机构精度认证。
 

@@ -6,6 +6,7 @@ import json
 import threading
 import time
 import uuid
+import re
 from pathlib import Path
 
 from .bridge import Bridge, CadError
@@ -54,7 +55,9 @@ class Jobs:
         except Exception as exc:
             update = {"status": "failed", "error": {"code": "SERVICE_ERROR", "message": str(exc), "assertion": "inconclusive"}}
         else:
-            update = {"status": "succeeded", "result": result}
+            update = {"status": "succeeded", "execution_status": "completed", "result": result}
+            if job["operation"] == "verify_motion_preservation":
+                update["verification_status"] = result.get("verification_status", result.get("assertion", "inconclusive"))
         with self._lock:
             job.update(update, finished_at=time.time())
             progress_file = self.root / "runs" / "progress" / f"{job_id}.json"
@@ -85,8 +88,31 @@ class Jobs:
         with self._lock:
             job = copy.deepcopy(self._jobs.get(job_id))
         if job is None:
-            raise ValueError("本会话不存在该 job_id；执行器运行记录不会跨重启自动恢复。")
+            if not isinstance(job_id, str) or not re.fullmatch(r"[a-f0-9]{32}", job_id):
+                raise ValueError("无效 job_id。")
+            try:
+                job = json.loads((self.root / "runs/jobs" / (job_id + ".json")).read_text(encoding="utf-8"))
+                if job.get("job_id") != job_id or job.get("status") not in {"queued", "running", "succeeded", "failed", "timed_out", "executor_lost"}:
+                    raise ValueError("Invalid job record")
+            except (OSError, ValueError, AttributeError):
+                raise ValueError("未找到可读取的任务记录。") from None
+            job["historical_job_read_only"] = True
+            job["automatically_resumed"] = False
+            if job["status"] in {"queued", "running"}:
+                job["historical_execution_state"] = "unknown_not_resumed"
         job["cad_operation_state"] = self.bridge.cad_operation_state
+        request_id = job.get("error", {}).get("diagnostics", {}).get("request_id")
+        if request_id and hasattr(self.bridge, "get_request_result"):
+            try:
+                completed = self.bridge.get_request_result(request_id)
+                if completed and completed.get("params", {}).get("job_id") == job_id and completed.get("operation") == job["operation"]:
+                    response = completed["response"]
+                    job["late_response"] = completed
+                    job["late_execution_status"] = "completed" if response.get("ok") else "failed"
+                    job["original_wait_status_preserved"] = True
+                    job["current_model_validity"] = "not_checked_offline"
+            except CadError as exc:
+                job["late_response_error"] = {"code": exc.code, "message": str(exc)}
         progress = self.root / "runs" / "progress" / f"{job_id}.json"
         try:
             value = json.loads(progress.read_text(encoding="utf-8"))

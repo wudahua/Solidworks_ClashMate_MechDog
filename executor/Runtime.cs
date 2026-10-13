@@ -144,7 +144,7 @@ public partial class Cad {
     public object ListStudies(string assembly) {
         using(var scope=new Scope(this,PathFor(assembly),null)) { var mgr=(IMotionStudyManager)scope.Doc.Extension.GetMotionStudyManager(); return Names(mgr).Select(n=>{var s=(IMotionStudy)mgr.GetMotionStudy(n); return new { name=n,type=s.StudyType,duration_s=s.GetDuration(),output_fps=((IMotionStudyProperties)s.GetProperties(s.StudyType)).GetFrameRate() };}).ToArray(); }
     }
-    static double Argument(double t,double duration) { return t>0&&t<duration ? t+1e-8 : t; }
+    static double Argument(double t,double duration) { return MotionTimeSelection.Argument(t,duration); }
     public object Solve(string assembly,string studyName,double duration,int fps,string runId) {
         ConfigureModel(assembly);if(assembly=="gear_pump"||assembly=="gear_phase")return SolvePump(studyName,duration,fps,runId);
         Log("LOAD_MOTION_SOLVE "+Sw.LoadAddIn(@"C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\cmotionsw.dll"));
@@ -306,25 +306,25 @@ public partial class Cad {
         activeJobId=p.ContainsKey("job_id")?(string)p["job_id"]:null;
         switch(op) {
             case "get_environment": return UserEnvironment();
-            case "list_mate_references": return ListMateReferences((string)p["model_id"],(string)p["component_id"],(string)p["kind"],Convert.ToInt32(p["limit"]),(string)p["cursor"]);
+            case "list_mate_references": return ListMateReferences((string)p["model_id"],(string)p["component_id"],(string)p["kind"],Convert.ToInt32(p["limit"]),(string)p["cursor"],p.ContainsKey("detail_level")&&(string)p["detail_level"]=="compact");
             case "preview_mate": return PreviewBasicMate((string)p["model_id"],(string)p["entity_a"],(string)p["entity_b"],(string)p["mate_type"],(string)p["alignment"],Convert.ToDouble(p["distance_mm"]),Convert.ToBoolean(p["lock_rotation"]),(string)p["baseline_run_id"]);
             case "apply_mate": return ApplyBasicMate((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));
-            case "verify_motion_preservation": return VerifyRequestedMotion((string)p["model_id"],(string)p["study"],(string)p["component_id"],(string)p["entity_id"],(string)p["expected_motion"],Convert.ToDouble(p["minimum_travel"]),Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"],(string)p["plan_id"]);
+            case "verify_motion_preservation": return VerifyRequestedMotion((string)p["model_id"],(string)p["study"],(string)p["component_id"],(string)p["entity_id"],(string)p["expected_motion"],Convert.ToDouble(p["minimum_travel"]),Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"],(string)p["plan_id"],p.ContainsKey("reference_component_id")?(string)p["reference_component_id"]:"");
             case "_test_mate_rollback": return ApplyBasicMate((string)p["plan_id"],true,true);
             case "import_assembly": return ImportUserAssembly((string)p["path"],p.ContainsKey("configuration")?(string)p["configuration"]:null);
             case "list_models": return UserListModels();
             case "inspect_model": return InspectUserModel((string)p["model_id"]);
             case "list_motion_studies": return UserStudies((string)p["model_id"]);
             case "preflight_motion": return PreflightUserMotion((string)p["model_id"],p.ContainsKey("study")?(string)p["study"]:null);
-            case "list_drive_candidates": return UserDriveCandidates((string)p["model_id"],p.ContainsKey("component_id")?(string)p["component_id"]:"",p.ContainsKey("kind")?(string)p["kind"]:"",p.ContainsKey("limit")?Convert.ToInt32(p["limit"]):20,p.ContainsKey("cursor")?(string)p["cursor"]:null,p.ContainsKey("group_faces")?Convert.ToBoolean(p["group_faces"]):true);
-            case "create_motion_study": return CreateUserStudy((string)p["model_id"],(string)p["study"],(string)p["component_id"],(string)p["entity_id"],(string)p["motor_type"],Convert.ToDouble(p["speed"]),Convert.ToBoolean(p["reverse_direction"]));
+            case "list_drive_candidates": return UserDriveCandidates((string)p["model_id"],p.ContainsKey("component_id")?(string)p["component_id"]:"",p.ContainsKey("kind")?(string)p["kind"]:"",p.ContainsKey("limit")?Convert.ToInt32(p["limit"]):20,p.ContainsKey("cursor")?(string)p["cursor"]:null,p.ContainsKey("group_faces")?Convert.ToBoolean(p["group_faces"]):true,p.ContainsKey("detail_level")&&(string)p["detail_level"]=="compact");
+            case "create_motion_study": return CreateUserStudy((string)p["model_id"],(string)p["study"],(string)p["component_id"],(string)p["entity_id"],(string)p["motor_type"],Convert.ToDouble(p["speed"]),Convert.ToBoolean(p["reverse_direction"]),p.ContainsKey("reference_component_id")?(string)p["reference_component_id"]:"",p.ContainsKey("duration_s")?Convert.ToDouble(p["duration_s"]):1,p.ContainsKey("output_fps")?Convert.ToInt32(p["output_fps"]):30);
             case "convert_motion_study": return ConvertUserStudy((string)p["model_id"],(string)p["study"]);
             case "run_user_study": return RunUserStudy((string)p["model_id"],(string)p["study"],Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"]);
             case "get_motion_summary": return UserRunSummary((string)p["run_id"]);
             case "export_motion_curve": return ExportUserCurve((string)p["run_id"],(string)p["component_id"],(string)p["quantity"],(string)p["axis"]);
             case "replay_motion_frame": return ReplayUserFrame((string)p["run_id"],Convert.ToInt32(p["frame"]));
             case "create_model_checkpoint": return CreateUserCheckpoint((string)p["model_id"]);
-            case "reset_study_time": return ResetUserStudyTime((string)p["model_id"],(string)p["study"]);
+            case "reset_study_time": return ResetUserStudyTime((string)p["model_id"],(string)p["study"],p.ContainsKey("allow_recalculate")&&Convert.ToBoolean(p["allow_recalculate"]));
             case "restore_model_checkpoint": try{return RestoreUserCheckpoint((string)p["model_id"],(string)p["checkpoint_id"]);}catch{LastOperationRestoration="unknown";throw;}
             case "get_capabilities": return Capabilities();
             case "inspect_assembly": return Inspect((string)p["assembly"]);
