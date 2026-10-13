@@ -49,6 +49,13 @@ async def main(model_id):
             assert job["result"]["run_id"] == job_id
             summary = await client.call_tool("get_motion_summary", {"run_id": job_id})
             assert not summary.is_error
+            studies = await client.call_tool("list_motion_studies", {"model_id": model_id})
+            assert not studies.is_error
+            row = next(s for s in studies.structured_content["result"]["studies"] if s["name"] == "Public_rotary")
+            assert row["last_run"]["run_id"] == job_id and row["last_run"]["result_validity"] == "verified"
+            assert row["last_run"]["input_match_status"] == "matches_recorded_input", row
+            assert row["drive_compatibility_status"] == "not_checked"
+            report["public_history"] = row
             report["job"] = job
             try:
                 import ctypes
