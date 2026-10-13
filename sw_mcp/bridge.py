@@ -317,7 +317,7 @@ class Bridge:
                                "recovering": recovering, "previous_state": state if recovering else None})
                 self._process.stdin.write(wire)
                 self._process.stdin.flush()
-                deadline = self.motion_scan_timeout if operation in {"check_interference_during_motion", "run_parameter_search", "diagnose_gear_phase", "import_assembly", "run_user_study", "replay_motion_frame", "restore_model_checkpoint"} else self.timeout
+                deadline = self.motion_scan_timeout if operation in {"check_interference_during_motion", "run_parameter_search", "diagnose_gear_phase", "import_assembly", "run_user_study", "verify_motion_preservation", "replay_motion_frame", "restore_model_checkpoint"} else self.timeout
                 response = future.result(timeout=deadline)
             except concurrent.futures.TimeoutError as exc:
                 with self._state_lock:
