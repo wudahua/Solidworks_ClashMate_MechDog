@@ -51,7 +51,7 @@ async def main(native_report, unmated_source=None):
                 fb = next(r for r in refs if not r['fixed_component'] and r['kind'] == 'cylindrical_axis')
                 planned = await client.call_tool('preview_mate', {'model_id': copied, 'entity_a': fa['entity_id'], 'entity_b': fb['entity_id'], 'mate_type': 'concentric'})
                 assert not planned.is_error
-                applied = await client.call_tool('apply_mate', {'plan_id': planned.structured_content['result']['plan_id'], 'confirmed': True})
+                applied = await client.call_tool('apply_mate', {'plan_id': planned.structured_content['result']['plan_id'], 'confirmed': True, 'wait_for_completion': True})
                 assert not applied.is_error and applied.structured_content['result']['native_parameters']['verified'], applied
                 report['public_mate_creation'] = applied.structured_content['result']
             identifier = evidence['protocol_model_id']
