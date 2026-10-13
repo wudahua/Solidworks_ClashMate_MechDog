@@ -1,5 +1,5 @@
 {
-  "version": "0.4.0-alpha.4",
+  "version": "0.4.0-alpha.5",
   "kind": "source_only",
   "includes_user_cad": false,
   "includes_runtime_data": false,
@@ -7,13 +7,13 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 17704,
-      "sha256": "93f47f90ad5083b73d0ef10f43e3ba7dba5ad25d9379b2b42eb31a5a19e8c1c5"
+      "bytes": 19009,
+      "sha256": "b6f43c08edf69f1cb06ef72ca62eb5fa86598f02b7e093331f4a11797cb663b8"
     },
     {
-      "path": "发布说明_v0.4.0-alpha.4.md",
-      "bytes": 2370,
-      "sha256": "3c938ea685f97b930cfeb77f4a21b35e24d534fca56a87ef10db749660a77a4c"
+      "path": "发布说明_v0.4.0-alpha.5.md",
+      "bytes": 2234,
+      "sha256": "bbb55b9d316f67ec999dee18e9439253349a47ddcf121450eba0d47e58e37dee"
     },
     {
       "path": "LICENSE",
@@ -37,8 +37,8 @@
     },
     {
       "path": "motion_server.py",
-      "bytes": 10954,
-      "sha256": "f63d6a102fd11e7d4ee152c5e8478029dc72e66b065e1930f40bf274b11c03b8"
+      "bytes": 10958,
+      "sha256": "e2b8fbca400579d5b7f2d9c081ed9bb1e7586eb92bd4afd22afa7ff51336f35a"
     },
     {
       "path": "初始化环境.ps1",
@@ -91,9 +91,19 @@
       "sha256": "bd52db97b14cb4f9e6ba6e16202e4570a8a214531104f214bdf357e15b85471d"
     },
     {
+      "path": "executor/HistoryObservation.cs",
+      "bytes": 2999,
+      "sha256": "d3eb9c9d88f42dd0606cc132daeb7fd431523416dc1ffd17d4339de8707418c7"
+    },
+    {
+      "path": "executor/MotionFeatureEvidence.cs",
+      "bytes": 351,
+      "sha256": "50b3e2089cdec4f6864996649b110ff1cf8ca501e56e27df32a8167e2d996ea6"
+    },
+    {
       "path": "executor/MotionState.cs",
-      "bytes": 7717,
-      "sha256": "ae1953dcfda682968de31bcdb590eaa9f0d4e662f8f9c54e850ff741e023381c"
+      "bytes": 7922,
+      "sha256": "d082d2143abf6e6f114b09a90669cdb358419f9c97adb99dafaaae5dd16fb330"
     },
     {
       "path": "executor/PoseValidation.cs",
@@ -107,13 +117,13 @@
     },
     {
       "path": "executor/Runtime.cs",
-      "bytes": 33673,
-      "sha256": "c6136485e4bcdfbd8a698371a167892e7d455a3f3fccfe9454a10fc6eab9e762"
+      "bytes": 34042,
+      "sha256": "14755e6db81355af43662ccc6108fec2e8da6d263121f6181bb3641e5c92559c"
     },
     {
       "path": "executor/StudyHistory.cs",
-      "bytes": 5795,
-      "sha256": "e7bb8b38bc48cf6886977730e29618f79c74327d6e857c211573cdb1cc3ef46a"
+      "bytes": 8839,
+      "sha256": "20ffcf183b718e0f0f963c65696734eb6156a430717e5b8aa652848cb5f24ad0"
     },
     {
       "path": "executor/TimeAxis.cs",
@@ -122,8 +132,8 @@
     },
     {
       "path": "executor/UserMotion.cs",
-      "bytes": 45580,
-      "sha256": "d0a66978bab43706f99024a68785e637ed753446ce2a881ca180e11e4f387198"
+      "bytes": 47797,
+      "sha256": "8efeaf6a3ae66ba9e51e3ffb0e358fb9afe386123f362c8efcc59adbacc68b33"
     },
     {
       "path": "executor/Workflow.cs",
@@ -162,8 +172,8 @@
     },
     {
       "path": "scripts/build_release.py",
-      "bytes": 3366,
-      "sha256": "e1be08931f011e1184ea446ce3fae8d87860ced8190f5e028f28a55a1c7a1343"
+      "bytes": 3437,
+      "sha256": "991afd627930e38d5b69658a660ef8ad740e21880956dc086f52aa010ac3b1ec"
     },
     {
       "path": "scripts/recover.py",
@@ -187,8 +197,8 @@
     },
     {
       "path": "tests/motion_protocol_v04.py",
-      "bytes": 5366,
-      "sha256": "8204403af213f9ccf8bde5b4fca6107cf34788a6358507fadaf8a8e74c018b9b"
+      "bytes": 5533,
+      "sha256": "08051ad84483423b1595af79efcf0d558a1c2fa9c47cce7a478dbf2cb22fbbd6"
     },
     {
       "path": "tests/motion_recovery_v04.py",
@@ -222,8 +232,8 @@
     },
     {
       "path": "tests/study_history_v04.py",
-      "bytes": 4598,
-      "sha256": "6e711104337c30c5478d8bc848b27d33473b5d416cb8ca6936dea68b65923d92"
+      "bytes": 6289,
+      "sha256": "2f27c7dfa4ce96aab9efe2f80dc2fce3179eee975dd8473cb411d985b75d80ad"
     },
     {
       "path": "tests/motion_startup_retry_v04.py",
@@ -232,8 +242,18 @@
     },
     {
       "path": "tests/motion_history_v04.py",
-      "bytes": 7061,
-      "sha256": "7ffaab4549eaa76a2469936e34b8c1ed589966013116611a3325aba26ab3cf81"
+      "bytes": 7346,
+      "sha256": "56028fbe73dc7fa5c297e7234f7bba2c032d6246a05d144e8159174a609822f3"
+    },
+    {
+      "path": "tests/motion_feature_evidence_v04.py",
+      "bytes": 1677,
+      "sha256": "d8d3c62dda565ce5673fd4b210d970de7a5d6b4381fc0c4bb980084856e67b1d"
+    },
+    {
+      "path": "tests/motion_history_diagnostics_v04.py",
+      "bytes": 8749,
+      "sha256": "cc4bb107cebfdc77ab3dc565b4eaedba3c357e9136d80d18f0ea6eb474d9a5ca"
     },
     {
       "path": "server.py",

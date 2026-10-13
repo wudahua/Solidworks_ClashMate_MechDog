@@ -2,9 +2,9 @@
 
 SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.0-alpha.4` 修复试用版：让 AI 在本机 SolidWorks 中导入已保存装配的隔离副本、检查运动准备状态、复用 Motion Analysis 算例或添加一个恒速驱动，然后求解、导出曲线和回放截图。
+`v0.4.0-alpha.5` 修复试用版：让 AI 在本机 SolidWorks 中导入已保存装配的隔离副本、检查运动准备状态、复用 Motion Analysis 算例或添加一个恒速驱动，然后求解、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.0-alpha.4.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.0-alpha.5.md)。
 
 这是供试用的运动仿真版本。已有有效配合的刚体机构是目标输入；没有配合的装配需要先由设计者完成运动约束。尚未完成“大部分机械装配均可用”的样本覆盖验收。
 
@@ -86,7 +86,7 @@ Get-Process SLDWORKS | Select-Object Id, ProcessName
 
 结果描述的是导入时的副本。之后修改源文件会显示源哈希不一致，副本仍可独立求解和恢复；要模拟新设计，请重新导入。导入过程本身出现源哈希变化则拒绝完成导入。
 
-算例特征列表是 API 能枚举的子集；空列表不能作为“没有马达”的证明。复用算例前仍应确认原装配的驱动设置。
+算例特征列表是 API 能枚举的子集；空列表不能作为“没有马达”的证明。`feature_information_source=native_api` 与 `drive_information_source=project_registration` 分别表示原生枚举和项目登记，登记驱动通过 `registered_drive` 单独返回，不声称已由当前原生枚举核实。`native_null_study_active`/`native_null_study_inactive` 表示返回null时的观测上下文，不证明必须激活才能枚举。空列表的 `feature_presence=unknown`，`empty_feature_list_means_no_drive=False`；查询不自动切换算例。复用算例前仍应确认原装配的驱动设置。
 
 可对 AI 说：“导入这个已配好的装配到副本，列出现有运动算例；使用指定算例运行一秒、30 fps，导出指定组件的 X 位移曲线。”新建驱动时应进一步说明选哪个轴或面、速度和方向。
 
@@ -135,9 +135,13 @@ alpha.1等历史任务只有CSV时，可以受限读取并标记 `manifest_statu
 
 首次连接时未找到SolidWorks，且握手明确失败、没有派发任何CAD请求时，启动软件后可在同一MCP会话重试。已经连接后的执行器丢失、超时、协议异常或恢复隔离均不采用这条重连路径。
 
-`list_motion_studies` 的 `drive_status` 只说明驱动登记情况。`last_run` 独立回显最近一次已索引的求解状态、错误、恢复状态、结果有效性、请求时长/帧率及UTC开始/结束时间；`input_match_status` 为 `matches_recorded_input`、`stale` 或 `unknown`。版本、配置、副本文件哈希或未保存修改变化后，旧结果不再用作同输入失败警告。历史保存在运行目录，检查点恢复不删除历史；恢复后版本改变会使历史过期。记录中断的任务没有伪造结束时间。alpha.4之前没有索引的任务仍可按run_id离线读取，但不自动猜测哪次是最近求解；缺失索引返回 `run_history_status=none`，损坏索引或清单返回 `unavailable`。
+`list_motion_studies` 的 `drive_status` 只说明驱动登记情况。`last_run` 独立回显最近一次已索引的求解状态、错误、恢复状态、结果有效性、请求时长/帧率及UTC开始/结束时间。`matches_recorded_input` 表示已记录的版本、配置、文件以及新记录中的算例类型/时长/帧率匹配，且本次观测完整、没有脏文档；这不是对任意未记录机械语义的证明。`stale` 表示至少一项输入已证实变化；`unknown` 表示脏标志、观测失败或资料不足使一致性尚未确认。单独的GetSaveFlag不能证明用户修改了仿真输入，也不能被直接忽略。
 
-`preflight_motion` 明确返回 `ready_scope=basic_model_preflight_only_not_solver_compatibility`、`drive_compatibility_status=not_checked` 和 `compatibility_probe.attempted=False`。同输入曾出现原生结果不完整、求解失败或驱动幅值核验失败，且恢复已核验时，返回 `PREVIOUS_SOLVE_FAILED_SAME_INPUT` 警告；不自动阻止重试，也不将失败归因为某个配合。历史成功同样不是当前相容性证明。短时探测尚未实现，不在查询或创建过程中隐式调用Calculate；即便将来支持，也须明确预算、检查点、恢复及验证范围。
+`last_run.input_match_diagnostics` 分别报告版本、配置、文件哈希、算例设置匹配情况和判定原因。顶层 `input_observation` 记录插件加载、打开、重建或枚举等步骤的脏文档观测；求解清单同时记录恢复后的观测。每阶段最多列出8个脏文档，总数独立报告。无法解释脏标志时保持unknown，不自动保存、清除标志或丢弃未保存修改。
+
+历史保存在运行目录，检查点恢复不删除历史；恢复后版本改变会使历史过期。记录中断的任务没有伪造结束时间。alpha.4之前没有索引的任务仍可按run_id离线读取，但不自动猜测哪次是最近求解；缺失索引返回 `run_history_status=none`，损坏索引或清单返回 `unavailable`。
+
+`preflight_motion` 明确返回 `ready_scope=basic_model_preflight_only_not_solver_compatibility`、`drive_compatibility_status=not_checked` 和 `compatibility_probe.attempted=False`。同输入曾出现原生结果不完整、求解失败或驱动幅值核验失败，且恢复已核验时，返回 `PREVIOUS_SOLVE_FAILED_SAME_INPUT`。输入尚未确认时返回 `PREVIOUS_SOLVE_FAILED_INPUT_NOT_VERIFIED`，只提示历史失败；已明确变化或恢复未知时不输出同输入警告。不自动阻止重试，也不将失败归因为某个配合。历史成功同样不是当前相容性证明。短时探测尚未实现，不在查询或创建过程中隐式调用Calculate；即便将来支持，也须明确预算、检查点、恢复及验证范围。
 
 `INVALID_MODEL_ID` 表示标识格式错误；`MODEL_NOT_REGISTERED` 表示该标识未在当前安装目录登记。请使用 `list_models` 或 `import_assembly` 返回的完整model_id；它不因服务重启自动过期，不能与会话内run_id混淆。
 
