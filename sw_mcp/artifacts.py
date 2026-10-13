@@ -143,3 +143,61 @@ class Artifacts:
                 rows.append(item)
         next_cursor = base64.b64encode(json.dumps({**identity, "offset": offset+len(rows)}).encode()).decode() if more else None
         return {"run_id": run_id, "result_validity": data.get("result_validity", "inconclusive"), "restoration_status": data.get("restoration_status", "unknown"), "manifest_status": data['manifest_status'], "legacy_without_manifest": data.get('legacy_without_manifest', False), "current_model_validity": "not_checked_offline", **info, "rows": rows, "returned": len(rows), "next_cursor": next_cursor, "access": "saved_artifacts_without_COM"}
+
+    def export_history_curve(self, run_id, component_id, quantity, axis):
+        """Explicit saved-data export; does not consult or change any CAD session."""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", component_id) or quantity not in {"position", "displacement", "linear_velocity", "angular_velocity"} or axis not in {"x", "y", "z", "magnitude"}:
+            raise ValueError("曲线组件、类型或坐标轴无效。")
+        data, manifest, path = self._load(run_id)
+        info = self._csv_info(data, path)
+        if info['artifact_integrity'] != 'verified' or data.get('sampling_status') != 'completed' or data.get('native_time_axis_verified') is not True:
+            raise ArtifactError("HISTORY_EXPORT_INCOMPLETE", "只有哈希与原生时间轴已核验的完整采样可导出历史曲线。")
+        with path.open(encoding='utf-8-sig', newline='') as stream:
+            rows = [self._pose_row(r) for r in csv.DictReader(stream) if r['component_id'] == component_id]
+        count = data.get('frames')
+        fps, duration = data.get('output_fps'), data.get('duration_s')
+        if type(count) is not int or count < 2 or len(rows) != count or not isinstance(fps, (int, float)) or fps <= 0 or not isinstance(duration, (int, float)) or duration <= 0 or any(r['frame'] != i or abs(r['time_s']-i/fps) > 1e-7 for i,r in enumerate(rows)) or abs(rows[-1]['time_s']-duration) > 1e-7:
+            raise ArtifactError("HISTORY_EXPORT_INCOMPLETE", "所选组件没有覆盖完整采样时间轴。")
+        positions = [[r[k] for k in ('x_m','y_m','z_m')] for r in rows]
+        vectors = []
+        for i, row in enumerate(rows):
+            if quantity == 'position':
+                v = positions[i]
+            elif quantity == 'displacement':
+                v = [x-y for x,y in zip(positions[i], positions[0])]
+            else:
+                a, b = max(0,i-1), min(count-1,i+1)
+                dt = rows[b]['time_s']-rows[a]['time_s']
+                if quantity == 'linear_velocity':
+                    v = [(x-y)/dt for x,y in zip(positions[b], positions[a])]
+                else:
+                    keys = ('r00','r01','r02','r10','r11','r12','r20','r21','r22')
+                    before, after = [rows[a][k] for k in keys], [rows[b][k] for k in keys]
+                    q = [sum(before[3*k+r]*after[3*k+c] for k in range(3)) for r in range(3) for c in range(3)]
+                    angle = math.acos(max(-1,min(1,(q[0]+q[4]+q[8]-1)/2)))
+                    if angle > math.pi/4+1e-8:
+                        raise ArtifactError("ROTATION_SAMPLE_AMBIGUOUS", "姿态跨度过大，不能可靠导出采样角速度。")
+                    factor = .5 if angle < 1e-7 else angle/(2*math.sin(angle))
+                    v = [(q[5]-q[7])*factor/dt,(q[6]-q[2])*factor/dt,(q[1]-q[3])*factor/dt]
+            vectors.append(v)
+        values = [math.sqrt(sum(x*x for x in v)) if axis == 'magnitude' else v[('x','y','z').index(axis)] for v in vectors]
+        if self._csv_info(data,path)['observed_poses_sha256'] != info['observed_poses_sha256']:
+            raise ArtifactError("ARTIFACT_HASH_MISMATCH", "导出期间采样文件已改变。")
+        unit = 'm/s' if quantity == 'linear_velocity' else 'rad/s' if quantity == 'angular_velocity' else 'm'
+        target = path.parent / f'offline-{component_id}-{quantity}-{axis}.csv'
+        metadata = target.with_suffix('.json')
+        if target.is_symlink() or metadata.is_symlink():
+            raise ValueError("历史导出路径不能为符号链接。")
+        temporary = target.with_suffix('.csv.tmp')
+        if temporary.exists():
+            raise ArtifactError("HISTORY_EXPORT_BUSY", "历史导出临时文件已存在，请保留并核对。")
+        with temporary.open('x', encoding='utf-8', newline='') as stream:
+            writer = csv.writer(stream); writer.writerow(['time_s','value_'+unit.replace('/','_per_')])
+            writer.writerows((r['time_s'],v) for r,v in zip(rows,values))
+        temporary.replace(target)
+        result = {'run_id': run_id, 'component_id': component_id, 'quantity': quantity, 'axis': axis, 'unit': unit, 'sample_count': count, 'min': min(values), 'max': max(values), 'csv_path': str(target), 'metadata_path': str(metadata), 'result_validity': data.get('result_validity','inconclusive'), 'restoration_status': data.get('restoration_status','unknown'), 'artifact_integrity': 'verified', 'poses_sha256': info['observed_poses_sha256'], 'current_model_validity': 'not_checked_offline', 'access': 'explicit_saved_history_without_COM', 'coordinate_frame': 'assembly_global', 'reference_point': 'component_coordinate_origin', 'physical_validation_claim': False, 'warning': '仅导出已保存采样，不证明请求运动通过或当前CAD状态有效；速度为数值导数。'}
+        metadata_temporary = metadata.with_suffix('.json.tmp')
+        with metadata_temporary.open('x',encoding='utf-8') as stream:
+            stream.write(json.dumps(result,ensure_ascii=False,indent=2))
+        metadata_temporary.replace(metadata)
+        return result
