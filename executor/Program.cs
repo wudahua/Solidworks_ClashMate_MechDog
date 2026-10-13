@@ -39,6 +39,8 @@ class Program {
         messages["DRIVE_ENTITY_NOT_FOUND"]="驱动引用未在当前模型中登记；请重新 list_drive_candidates 选择候选并核对 entity_id。";
         messages["NATIVE_TIME_AXIS_MISMATCH"]="原生结果时间轴与请求采样网格不一致；请查看时间轴诊断，未采集姿态或判定通过。";
         messages["MOTION_RESULTS_INCOMPLETE"]="原生求解没有提供覆盖请求时段的结果；请检查所选驱动是否与配合相容，并查看求解诊断。";
+        messages["INVALID_MODEL_ID"]="model_id 格式错误；请使用 list_models 或 import_assembly 返回的完整标识（user_ 加32位小写十六进制）。";
+        messages["MODEL_NOT_REGISTERED"]="该模型未在当前安装目录登记；请先 list_models 核对，或 import_assembly 创建副本。";
         string fallback="执行器拒绝请求（"+code+"）；请查看 diagnostics 中的原生诊断。";
         return new {code=code,message=messages.ContainsKey(code)?messages[code]:fault==null?fallback:fault.Message,assertion="inconclusive",restoration_status=restoration,document_context_restoration_status=contextRestoration,diagnostics=new{details=fault==null?null:fault.Diagnostics,native_message=e.Message,hresult=e.HResult}};
     }
