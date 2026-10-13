@@ -17,7 +17,7 @@ async def main(model_id):
     async with Client(StdioServerParameters(command=sys.executable, args=[str(ROOT/"motion_server.py")], cwd=ROOT, env=env)) as client:
         tool_response = await client.list_tools()
         names = {t.name for t in tool_response.tools}
-        assert len(names) == 20 and {"import_assembly", "run_motion_study", "reset_study_time", "get_run_artifacts", "read_run_poses"} <= names
+        assert len(names) == 24 and {"import_assembly", "run_motion_study", "reset_study_time", "get_run_artifacts", "read_run_poses", "list_mate_references", "preview_mate", "apply_mate", "verify_motion_preservation"} <= names
         report["tools"] = sorted(names)
         for name, params in [("run_motion_study", {"model_id": "none", "study": "none", "duration_s": -1}), ("import_assembly", {"path": "relative.sldasm"}), ("create_motion_study", {"model_id": "none", "study": "none", "component_id": "none", "entity_id": "none", "motor_type": "linear", "speed": -1})]:
             error = await client.call_tool(name, params)
