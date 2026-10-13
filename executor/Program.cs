@@ -45,7 +45,7 @@ class Program {
         messages["INVALID_MODEL_ID"]="model_id 格式错误；请使用 list_models 或 import_assembly 返回的完整标识（user_ 加32位小写十六进制）。";
         messages["MODEL_NOT_REGISTERED"]="该模型未在当前安装目录登记；请先 list_models 核对，或 import_assembly 创建副本。";
         string fallback="执行器拒绝请求（"+code+"）；请查看 diagnostics 中的原生诊断。";
-        return new {code=code,message=messages.ContainsKey(code)?messages[code]:fault==null?fallback:fault.Message,assertion="inconclusive",restoration_status=restoration,document_context_restoration_status=contextRestoration,diagnostics=new{details=fault==null?null:fault.Diagnostics,native_message=e.Message,hresult=e.HResult}};
+        return new {code=code,message=messages.ContainsKey(code)?messages[code]:fault==null?fallback:fault.Message,assertion="inconclusive",restoration_status=restoration,document_context_restoration_status=contextRestoration,diagnostics=new{details=fault==null?(object)new{managed_exception_type=e.GetType().FullName,exception_chain=e.ToString()}:fault.Diagnostics,native_message=e.Message,hresult=e.HResult,hresult_source=e is COMException?"native_com":"managed_exception",native_hresult=e is COMException?(int?)e.HResult:null}};
     }
     [STAThread] static int Main(string[] args) {
         Console.OutputEncoding=new UTF8Encoding(false);

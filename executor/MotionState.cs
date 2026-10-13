@@ -13,7 +13,7 @@ public partial class Cad {
         public double time_s,duration_s;
         public bool active;
     }
-    void SaveOwnedDocuments(UserModel model){foreach(var d in (Sw.GetDocuments() as object[]??new object[0]).Cast<IModelDoc2>().Where(d=>model.Files.Contains(d.GetPathName(),StringComparer.OrdinalIgnoreCase)).OrderBy(d=>d.GetType()))if(d.GetSaveFlag())Save(d,d.GetPathName());}
+    void SaveOwnedDocuments(UserModel model){foreach(var d in (Sw.GetDocuments() as object[]??new object[0]).Cast<IModelDoc2>().Where(d=>model.Files.Contains(d.GetPathName(),StringComparer.OrdinalIgnoreCase)).OrderBy(d=>d.GetType()))if(d.GetSaveFlag()){string path=d.GetPathName(),before=FileHash(path);Save(d,path);Log("OWNED_INPUT_PERSISTED "+Json.Serialize(new{model_id=model.Id,operation_job_id=activeJobId,path=path,hash_before=before,hash_after=FileHash(path),dirty_after_save=d.GetSaveFlag(),model_revision=model.Revision}));}}
     static StudyState[] StudyStates(IModelDoc2 doc) {
         var manager=(IMotionStudyManager)doc.Extension.GetMotionStudyManager();
         return Names(manager).Select(n=>{var s=(IMotionStudy)manager.GetMotionStudy(n);return new StudyState{name=n,type=s.StudyType,time_s=s.GetTime(),duration_s=s.GetDuration(),fps=((IMotionStudyProperties)s.GetProperties(s.StudyType)).GetFrameRate(),active=s.IsActive};}).ToArray();
@@ -27,12 +27,34 @@ public partial class Cad {
         if(actual.Length!=expected.Length)throw new Exception("CHECKPOINT_STUDY_SET_MISMATCH");
         foreach(var state in expected){var s=actual.SingleOrDefault(v=>v.name==state.name);if(s==null||s.type!=state.type||s.fps!=state.fps||Math.Abs(s.duration_s-state.duration_s)>1e-8||Math.Abs(s.time_s-state.time_s)>1e-8||s.active!=state.active)throw new Exception("CHECKPOINT_SETTINGS_MISMATCH "+Json.Serialize(new{expected=state,actual=s}));}
     }
-    static void ApplyStudyStates(IModelDoc2 doc,StudyState[] states) {
+    static void ApplyStudyStates(IModelDoc2 doc,StudyState[] states,Dictionary<string,double[]> expectedPoses=null) {
         var mgr=(IMotionStudyManager)doc.Extension.GetMotionStudyManager();
         // An inactive study's clock is independent of the selected tab. Never activate every study.
         foreach(var state in states){var s=(IMotionStudy)mgr.GetMotionStudy(state.name);if(s==null)throw new Exception("CHECKPOINT_STUDY_MISSING");if(s.StudyType!=state.type)s.StudyType=state.type;if(Math.Abs(s.GetDuration()-state.duration_s)>1e-8&&!s.SetDuration(state.duration_s))throw new Exception("CHECKPOINT_SETTINGS_MISMATCH");var props=(IMotionStudyProperties)s.GetProperties(s.StudyType);if(props.GetFrameRate()!=state.fps)props.SetFrameRate(state.fps);if(!state.active&&Math.Abs(s.GetTime()-state.time_s)>1e-8&&!s.SetTime(state.time_s))throw new Exception("CHECKPOINT_TIME_RESTORE_FAILED");}
-        foreach(var state in states.Where(v=>v.active)){var s=(IMotionStudy)mgr.GetMotionStudy(state.name);if(!s.IsActive&&!s.Activate())throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","算例激活失败。",new{stage="activate",study=state.name});if(Math.Abs(s.GetTime()-state.time_s)>1e-8&&!s.SetTime(state.time_s))throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","算例时间恢复失败。",new{stage="set_time",study=state.name,expected_time_s=state.time_s,actual_time_s=s.GetTime()});Application.DoEvents();}
+        foreach(var state in states.Where(v=>v.active)){var s=(IMotionStudy)mgr.GetMotionStudy(state.name);if(!s.IsActive&&!s.Activate())throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","算例激活失败。",new{stage="activate",study=state.name});s.Stop();
+            // Animation can report zero while displaying another tab's cached pose.
+            // A new Motion Analysis at zero may instead contain the authored assembly
+            // pose, which must not be replaced with a newly solved frame-zero pose.
+            if((state.type==1||Math.Abs(s.GetTime()-state.time_s)>1e-8)&&!s.SetTime(state.time_s)) {
+                // Saved animation clocks can reopen without their calculated cache. Reconstruct
+                // only the recorded active study, with its exact original settings and a budget.
+                if(state.duration_s<=0||state.duration_s>30||state.fps<1||state.fps>120||state.duration_s*state.fps>1800)throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","恢复时间需要重建结果缓存，但原设置超过预算。",new{stage="rehydrate_budget",study=state});
+                Log("RESTORE_REHYDRATE_ACTIVE_STUDY "+Json.Serialize(state));bool calculated=s.Calculate();s.Stop();Application.DoEvents();s.Stop();
+                if(!calculated||(Math.Abs(s.GetTime()-state.time_s)>1e-8&&!s.SetTime(state.time_s)))throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","重建缓存后仍无法恢复算例时间。",new{stage="set_time_after_rehydrate",study=state.name,calculate_return=calculated,expected_time_s=state.time_s,actual_time_s=s.GetTime()});
+            }
+            Application.DoEvents();s.Stop();}
         VerifyStudyStates(doc,states);
+        if(expectedPoses!=null) {
+            var difference=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(PoseDifference(expectedPoses,Transforms(doc))));
+            if(Convert.ToDouble(difference["maximum_transform_delta"])>1e-7) {
+                var active=states.SingleOrDefault(v=>v.active);
+                if(active==null||active.type!=1||active.duration_s<=0||active.duration_s>30||active.fps<1||active.fps>120||active.duration_s*active.fps>1800)throw new CadFault("CHECKPOINT_POSE_RESTORE_FAILED","时间回读相符但姿态不符；不能用新求解覆盖记录的装配初始姿态。",difference);
+                var s=(IMotionStudy)mgr.GetMotionStudy(active.name);Log("RESTORE_REHYDRATE_POSE_MISMATCH "+Json.Serialize(difference));bool calculated=s.Calculate();s.Stop();Application.DoEvents();s.Stop();bool selected=s.SetTime(active.time_s);Application.DoEvents();s.Stop();
+                var after=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(PoseDifference(expectedPoses,Transforms(doc))));
+                if(!calculated||!selected||Convert.ToDouble(after["maximum_transform_delta"])>1e-7)throw new CadFault("CHECKPOINT_POSE_RESTORE_FAILED","重建缓存后姿态仍与检查点不符。",new{study=active.name,calculate_return=calculated,set_time_return=selected,before=difference,after=after});
+                VerifyStudyStates(doc,states);
+            }
+        }
     }
     class OwnedMotionSnapshot {
         Cad cad;UserModel model;string directory;StudyState[] states;Dictionary<string,double[]> poses;Dictionary<string,string> hashes;
@@ -50,14 +72,16 @@ public partial class Cad {
             AtomicJson(Path.Combine(directory,"state.json"),new{model_id=m.Id,configuration=m.Configuration,studies=states,poses=poses,files=hashes});
         }
         public IModelDoc2 Restore(StudyHistory.Observation observation=null) {
-            foreach(var d in (cad.Sw.GetDocuments() as object[]??new object[0]).Cast<IModelDoc2>().Where(d=>d.GetPathName().Equals(model.Path,StringComparison.OrdinalIgnoreCase))){var mgr=(IMotionStudyManager)d.Extension.GetMotionStudyManager();foreach(string n in Names(mgr)){var study=(IMotionStudy)mgr.GetMotionStudy(n);if(study.IsActive){study.Stop();study.SetTime(0);Application.DoEvents();}}}
+            // Closing and restoring the exact file snapshot discards transient results.
+            // Selecting zero here is unnecessary and can fault on a stale native cache.
+            foreach(var d in (cad.Sw.GetDocuments() as object[]??new object[0]).Cast<IModelDoc2>().Where(d=>d.GetPathName().Equals(model.Path,StringComparison.OrdinalIgnoreCase))){var mgr=(IMotionStudyManager)d.Extension.GetMotionStudyManager();foreach(string n in Names(mgr)){var study=(IMotionStudy)mgr.GetMotionStudy(n);if(study.IsActive){study.Stop();Application.DoEvents();if(study.IsPlaying)throw new CadFault("RESTORATION_STOP_FAILED","恢复前仍在播放，未关闭文档或覆盖快照。",new{study=n});}}}
             cad.CloseUserDocuments(model.Files);
             if((cad.Sw.GetDocuments() as object[]??new object[0]).Cast<IModelDoc2>().Any(d=>model.Files.Contains(d.GetPathName(),StringComparer.OrdinalIgnoreCase)))throw new Exception("CHECKPOINT_DOCUMENT_STILL_OPEN");
             foreach(string p in model.Files)File.Copy(Path.Combine(directory,Path.GetFileName(p)),p,true);
             int e=0,w=0;var doc=(IModelDoc2)cad.Sw.OpenDoc6(model.Path,2,1,"",ref e,ref w);if(doc==null||e!=0)throw new Exception("ASSEMBLY_OPEN_FAILED "+e);
-            cad.Sw.ActivateDoc3(doc.GetTitle(),false,0,ref e);if(e!=0)throw new Exception("ASSEMBLY_OPEN_FAILED "+e);
+            var active=cad.Sw.ActiveDoc as IModelDoc2;if(active==null||!string.Equals(active.GetPathName(),model.Path,StringComparison.OrdinalIgnoreCase))cad.Sw.ActivateDoc3(doc.GetTitle(),false,0,ref e);if(e!=0)throw new Exception("ASSEMBLY_OPEN_FAILED "+e);
             if(doc.ConfigurationManager.ActiveConfiguration.Name!=model.Configuration&&!doc.ShowConfiguration2(model.Configuration))throw new Exception("CHECKPOINT_CONFIGURATION_MISMATCH");
-            ApplyStudyStates(doc,states);Diagnostics=PoseDifference(poses,Transforms(doc));
+            ApplyStudyStates(doc,states,poses);Diagnostics=PoseDifference(poses,Transforms(doc));
             if(observation!=null)cad.ObserveHistory(model,observation,"after_restore_apply_states");
             var delta=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(Diagnostics));
             if(Convert.ToDouble(delta["maximum_transform_delta"])>1e-7||hashes.Any(p=>FileHash(p.Key)!=p.Value))throw new Exception("RESTORATION_FAILED "+Json.Serialize(new{difference=Diagnostics,snapshot=directory}));

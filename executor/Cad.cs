@@ -38,7 +38,7 @@ public partial class Cad {
         if(c==null) throw new Exception("INSERT_FAILED "+name);
         c.Transform2=(MathTransform)((IMathUtility)Sw.GetMathUtility()).CreateTransform(pose); return c;
     }
-    static IEnumerable<IFace2> Faces(IComponent2 c) { object info; var bodies=c.GetBodies3(0,out info) as object[]; if(bodies==null) throw new Exception("UNRESOLVED_COMPONENT"); return bodies.Cast<IBody2>().SelectMany(b=>((object[])b.GetFaces()).Cast<IFace2>()); }
+    static IEnumerable<IFace2> Faces(IComponent2 c) { string status;return ComponentFaces(c,out status); }
     static IFace2 Cylinder(IComponent2 c,double localX) { return Faces(c).First(f=>{var s=(ISurface)f.GetSurface(); return s.IsCylinder() && Math.Abs(((double[])s.CylinderParams)[0]-localX)<1e-6;}); }
     void Concentric(IModelDoc2 doc,IComponent2 a,double ax,IComponent2 b,double bx,string label) {
         doc.ClearSelection2(true);
