@@ -10,7 +10,9 @@ import time
 import ctypes
 import re
 import hashlib
+import stat
 from pathlib import Path
+from sw_mcp.startup import executor_diagnostics
 
 
 class CadError(RuntimeError):
@@ -48,12 +50,19 @@ class Bridge:
         if self._lease is not None:
             return
         directory = self.root / "runs"
-        directory.mkdir(parents=True, exist_ok=True)
-        lease = (directory / "executor-owner.lock").open("a+b")
-        if lease.seek(0, 2) == 0:
-            lease.write(b"0")
-            lease.flush()
-        lease.seek(0)
+        lease = None
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            lease = (directory / "executor-owner.lock").open("a+b")
+            if lease.seek(0, 2) == 0:
+                lease.write(b"0")
+                lease.flush()
+            lease.seek(0)
+        except OSError as exc:
+            if lease is not None:
+                lease.close()
+            raise CadError("MCP_LEASE_UNAVAILABLE", "无法创建服务锁文件；请检查安装目录的写权限。", "not_required",
+                           executor_diagnostics(self.root / "executor/bin/SwExecutor.exe", stage="open_lease", error=exc)) from exc
         try:
             if os.name == "nt":
                 import msvcrt
@@ -157,15 +166,37 @@ class Bridge:
                 self._validate_hello(self._startup.result())
                 return
         exe = self.root / "executor" / "bin" / "SwExecutor.exe"
-        if not exe.is_file():
-            raise CadError("EXECUTOR_NOT_BUILT", "先运行 executor/build.ps1 编译执行器。")
-        (self.root / "runs").mkdir(exist_ok=True)
-        self._log = (self.root / "runs" / "executor.log").open("a", encoding="utf-8")
-        self._process = subprocess.Popen(
-            [str(exe)], cwd=self.root, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=self._log, text=True, encoding="utf-8", bufsize=1,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+        try:
+            if not stat.S_ISREG(exe.stat().st_mode):
+                raise CadError("EXECUTOR_NOT_BUILT", "执行器路径不是文件；先运行 executor/build.ps1 编译。", "not_required", executor_diagnostics(exe, stage="inspect"))
+        except FileNotFoundError as exc:
+            raise CadError("EXECUTOR_NOT_BUILT", "执行器不存在；先运行 executor/build.ps1 编译。", "not_required", executor_diagnostics(exe, stage="inspect", error=exc)) from exc
+        except OSError as exc:
+            code = "EXECUTOR_ACCESS_DENIED" if isinstance(exc, PermissionError) else "EXECUTOR_START_FAILED"
+            raise CadError(code, "无法检查执行器文件；核对路径权限并保留原始错误。", "not_required", executor_diagnostics(exe, stage="inspect", error=exc)) from exc
+        try:
+            (self.root / "runs").mkdir(exist_ok=True)
+            self._log = (self.root / "runs" / "executor.log").open("a", encoding="utf-8")
+        except OSError as exc:
+            raise CadError("EXECUTOR_LOG_UNAVAILABLE", "无法创建执行器日志；请检查安装目录的写权限。", "not_required", executor_diagnostics(exe, stage="open_log", error=exc)) from exc
+        try:
+            self._process = subprocess.Popen(
+                [str(exe)], cwd=self.root, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=self._log, text=True, encoding="utf-8", bufsize=1,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except OSError as exc:
+            code = "EXECUTOR_NOT_BUILT" if isinstance(exc, FileNotFoundError) else "EXECUTOR_ACCESS_DENIED" if isinstance(exc, PermissionError) else "EXECUTOR_START_FAILED"
+            message = "启动时未找到执行器或工作目录；核对路径后重新编译。" if isinstance(exc, FileNotFoundError) else "执行器启动被拒绝；检查权限和宿主运行限制，保留诊断。" if isinstance(exc, PermissionError) else "执行器启动失败；请查看原始系统错误。"
+            diagnostics = executor_diagnostics(exe, stage="launch", error=exc)
+            try:
+                self._log.write(json.dumps({"startup_error": code, "diagnostics": diagnostics}, ensure_ascii=False) + "\n")
+            except OSError:
+                pass
+            finally:
+                self._log.close()
+                self._log = None
+            raise CadError(code, message, "not_required", diagnostics) from exc
         self._reader_thread = threading.Thread(target=self._read, daemon=True, name="cad-responses")
         self._reader_thread.start()
         try:
