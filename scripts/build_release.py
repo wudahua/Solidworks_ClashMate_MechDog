@@ -6,16 +6,16 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.0-alpha.4"
+VERSION = "0.4.0-alpha.5"
 
 
 def build():
-    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.0-alpha.4.md", "LICENSE", ".gitignore", "requirements.txt", "requirements.lock.txt", "motion_server.py", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
+    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.0-alpha.5.md", "LICENSE", ".gitignore", "requirements.txt", "requirements.lock.txt", "motion_server.py", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
     sources += sorted((ROOT/"executor").glob("*.cs"))
     sources += [ROOT/"executor/build.ps1"]
     sources += sorted((ROOT/"sw_mcp").glob("*.py"))
     sources += [ROOT/"scripts"/name for name in ("self_check.py", "build_release.py", "recover.py")]
-    sources += [ROOT/"tests"/name for name in ("test_service.py", "test_reliability.py", "motion_acceptance_v04.py", "motion_protocol_v04.py", "motion_recovery_v04.py", "motion_source_revision_v04.py", "motion_reliability_v04.py", "motion_reset_recovery_v04.py", "motion_time_axis_v04.py", "candidate_geometry_v04.py", "study_history_v04.py", "motion_startup_retry_v04.py", "motion_history_v04.py")]
+    sources += [ROOT/"tests"/name for name in ("test_service.py", "test_reliability.py", "motion_acceptance_v04.py", "motion_protocol_v04.py", "motion_recovery_v04.py", "motion_source_revision_v04.py", "motion_reliability_v04.py", "motion_reset_recovery_v04.py", "motion_time_axis_v04.py", "candidate_geometry_v04.py", "study_history_v04.py", "motion_startup_retry_v04.py", "motion_history_v04.py", "motion_feature_evidence_v04.py", "motion_history_diagnostics_v04.py")]
     releases = ROOT/"releases"
     releases.mkdir(exist_ok=True)
     stage = releases/("SolidWorks运动仿真MCP_v"+VERSION+"_源码_"+uuid.uuid4().hex[:8])
