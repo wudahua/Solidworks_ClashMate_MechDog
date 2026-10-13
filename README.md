@@ -2,11 +2,11 @@
 
 SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.0-alpha.5` 修复试用版：让 AI 在本机 SolidWorks 中导入已保存装配的隔离副本、检查运动准备状态、复用 Motion Analysis 算例或添加一个恒速驱动，然后求解、导出曲线和回放截图。
+`v0.4.1-alpha.1` 基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.0-alpha.5.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.1.md)。
 
-这是供试用的运动仿真版本。已有有效配合的刚体机构是目标输入；没有配合的装配需要先由设计者完成运动约束。尚未完成“大部分机械装配均可用”的样本覆盖验收。
+这是供试用的运动仿真版本。已有有效配合的刚体机构可直接进入运动流程；缺少基础配合时可由设计者选定参考和类型，再让助手执行。尚未完成“大部分机械装配均可用”的样本覆盖验收。
 
 ## 能做什么
 
@@ -16,8 +16,10 @@ SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidwo
 - 异步求解，读取真实输出时间轴和组件姿态，独立核对新建驱动的速度幅值；恢复求解前姿态。
 - 导出位置、位移、线速度和角速度 CSV；回放采样帧并输出 BMP。速度来自姿态数值微分，参考点为组件坐标原点，不是质心或原生瞬时速度。
 - 保存整套副本文件检查点；恢复后核验文件、配置、算例设置和姿态。执行器丢失后阻止普通请求，恢复绑定故障模型和 SolidWorks 实例。
+- 查询包括固定支座在内的顶层零件配合参考，预览具体方案，确认后添加同心、重合、距离、平行或垂直配合；创建或重建失败回滚。
+- 显式验证指定组件沿指定轴的旋转/直线运动；可比较绑定基线的前后运动量。通过结论仅覆盖这项采样运动要求。
 
-公开入口不提供通用干涉检查、受力精度证明、自动补配合、自动推断设计意图或任意参数优化。原项目的专用干涉与闭环验收能力仍属于开发分支范围。
+公开入口不提供通用干涉检查、受力精度证明、自动推断缺失配合或设计意图、任意装配自动补齐配合或任意参数优化。原项目的专用干涉与闭环验收能力仍属于开发分支范围。
 
 ## 环境与兼容性
 
@@ -98,6 +100,9 @@ Get-Process SLDWORKS | Select-Object Id, ProcessName
 | import_assembly / inspect_model | 副本导入、组件与顶层配合 |
 | preflight_motion / list_motion_studies | 准备检查与算例清单 |
 | list_drive_candidates | 按组件、几何类型过滤的分页候选和持久引用 ID；默认按同一轴线/平面位置分组，20项、最多50项 |
+| list_mate_references | 顶层零件平面/圆柱面分页查询，含固定支座；每零件最多128面，报告截断 |
+| preview_mate / apply_mate | 描述性方案预览 / 明确确认后建立检查点并创建配合 |
+| verify_motion_preservation | 显式异步试算指定运动要求，最多5秒601帧；可比较方案绑定的运行基线 |
 | create_motion_study / convert_motion_study | 创建单一恒速驱动 / 显式转换类型 |
 | run_motion_study / get_job | 异步求解与缓存进度 |
 | get_motion_summary / export_motion_curve | 结果有效性检查与 CSV |
@@ -108,6 +113,20 @@ Get-Process SLDWORKS | Select-Object Id, ProcessName
 | get_run_artifacts / read_run_poses | 离线摘要与分页姿态；恢复失败、执行器重启后仍可读取保存文件 |
 
 ## 限制与恢复
+
+公开工具共24个。基础配合首版只支持已解析、非SpeedPak的顶层SLDPRT实例；不支持子装配内部参考、边线/顶点/基准面或复杂机械配合。同心选两个圆柱面，其余类型选两个平面；方向必须明确为aligned或anti_aligned，距离单位mm，同心默认不锁定旋转。候选列表不根据面积或距离猜测设计意图。描述性预览不移动零件，不产生几何动画预览。
+
+配合操作要求各算例时间为0；需要时先显式reset_study_time。用户明确选定两个参考、类型及参数后，先preview_mate，再apply_mate(confirmed=True)。方案绑定文件哈希、配置、版本、文档更新标记/脏标志、姿态、算例状态及配合清单；保守地在状态变化后拒绝执行。本会话最多128个方案，执行过的方案不能重放，重连后须重新预览。apply_mate会保存登记副本以建立检查点，不保存源装配。
+
+新增配合成功后仍须验证运动。先选择运动组件、参考轴、算例和minimum_travel，再显式verify_motion_preservation。旋转的最低运动量为deg，直线为mm；返回assertion=pass/fail/inconclusive，不能仅凭job成功判定通过。直线验证检查沿轴位移跨度、偏轴位移和伴随旋转；旋转验证检查累计投影角跨度及偏轴旋转，允许偏置组件原点沿圆周移动。默认偏轴容差为直线0.01mm/旋转0.1deg，直线伴随旋转容差0.1deg。这些是首版验收阈值，不是通用机构精度认证。
+
+要比较配合前后运动，先run_motion_study取得当前模型已验证基线，再preview_mate传入baseline_run_id，应用后以该plan_id调用验证；组件、算例、时长及帧率须一致。前后运动量差容差为基线的5%，下限旋转0.1deg/直线0.01mm。模型再次修改会使plan_id验证失效。无基线时仅验证当前运动要求，不声称运动相对修改前已保留。
+
+运动验证会恢复求解前状态，但不会因验证失败自动删除新配合。保留方案返回的checkpoint_id，由用户决定restore_model_checkpoint。求解不完整、采样歧义或恢复失败不能判定通过；未知恢复继续隔离。已有未登记快速驱动可能产生采样混叠，即使通过也不证明未采样运动或整个机构自由度正确。
+
+本机反例中，固定支座与转轴的同心配合原生LockRotation=True，但Motion Analysis仍返回了转轴旋转数据。验证器核对直接连接固定组件的原生锁旋转配合，发现声明旋转与锁定约束冲突时返回DECLARED_ROTATION_LOCK_CONFLICT及inconclusive，即使采样运动量达标也不通过。该检查只覆盖直接固定组件锁定关系，不是完整约束图分析。
+
+运动要求的结论单独保存在motion-validation.json和solve.json的motion_validation字段，重启后可通过get_run_artifacts离线读取。外层result_validity=verified描述原生数据完整性及状态恢复，不能替代motion_validation.assertion；约束冲突时可能同时出现原生数据verified和运动要求inconclusive。
 
 默认最多 30 秒、1801 帧、500 个组件和 10 万条组件姿态；帧率 5–120。新建旋转驱动要求每帧小于等于 45°，避免角速度微分歧义。已有快速驱动可能发生采样混叠，应提高帧率并另行校验。
 

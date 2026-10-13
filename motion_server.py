@@ -20,7 +20,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = MCPServer("SolidWorks Motion", version="0.4.0-alpha.5", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = MCPServer("SolidWorks Motion", version="0.4.1-alpha.1", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 
 def packed(data, error=False):
@@ -98,6 +98,40 @@ async def create_motion_study(model_id: str, study: str, component_id: str, enti
     if not math.isfinite(speed) or not 0 < speed <= limit:
         raise ToolError(f"速度须为有限正数，最大 {limit}。")
     return await call("create_motion_study", model_id=model_id, study=study, component_id=component_id, entity_id=entity_id, motor_type=motor_type, speed=speed, reverse_direction=reverse_direction)
+
+
+@mcp.tool()
+async def list_mate_references(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal"] = "", limit: int = 20, cursor: str = "") -> CallToolResult:
+    """分页列出顶层零件配合面，包含固定支座；只返回几何候选，不推断缺失配合。每零件最多128个面并报告截断。"""
+    if not 1 <= limit <= 50:
+        raise ToolError("limit 须在1–50。")
+    return await call("list_mate_references", model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor)
+
+
+@mcp.tool()
+async def preview_mate(model_id: str, entity_a: str, entity_b: str, mate_type: Literal["concentric", "coincident", "distance", "parallel", "perpendicular"], alignment: Literal["aligned", "anti_aligned"] = "aligned", distance_mm: float = 0, lock_rotation: bool = False, baseline_run_id: str = "") -> CallToolResult:
+    """生成描述性配合方案，不移动零件、不保存或试算。同心选圆柱面，其余选平面。可绑定本会话当前模型的已验证运动基线。方案在状态变化或重连后失效。"""
+    if not math.isfinite(distance_mm) or not 0 <= distance_mm <= 10000 or (mate_type != "distance" and distance_mm != 0) or (lock_rotation and mate_type != "concentric"):
+        raise ToolError("距离须在0–10000mm且仅用于距离配合；锁旋转仅适用于同心配合。")
+    return await call("preview_mate", model_id=model_id, entity_a=entity_a, entity_b=entity_b, mate_type=mate_type, alignment=alignment, distance_mm=distance_mm, lock_rotation=lock_rotation, baseline_run_id=baseline_run_id)
+
+
+@mcp.tool()
+async def apply_mate(plan_id: str, confirmed: bool = False) -> CallToolResult:
+    """用户明确确认具体方案后执行。保存登记副本并建立检查点；创建/重建失败自动回滚。成功只证明配合创建，须另行验证运动。"""
+    if not confirmed:
+        raise ToolError("须由用户明确确认配合方案后传入confirmed=True。")
+    return await call("apply_mate", plan_id=plan_id, confirmed=confirmed)
+
+
+@mcp.tool()
+async def verify_motion_preservation(model_id: str, study: str, component_id: str, entity_id: str, expected_motion: Literal["rotary", "linear"], minimum_travel: float, duration_s: float = 1, output_fps: int = 30, plan_id: str = "") -> CallToolResult:
+    """显式异步试算指定轴的旋转/直线运动，最低运动量单位deg/mm。检查完整时间轴、偏轴运动并恢复状态；只验证采样运动，不证明所有自由度。指定已应用plan_id时可与其绑定基线比较。失败验证保留新增配合，用户可恢复返回的检查点。"""
+    if not math.isfinite(minimum_travel) or minimum_travel <= 0:
+        raise ToolError("minimum_travel须为有限正数，旋转单位deg、直线单位mm。")
+    if not math.isfinite(duration_s) or not 0 < duration_s <= 5 or not 5 <= output_fps <= 120 or abs(duration_s*output_fps-round(duration_s*output_fps)) > 1e-8 or round(duration_s*output_fps)+1 > 601:
+        raise ToolError("验证时长须在(0,5]秒、帧率5–120并对齐输出帧，最多601帧。")
+    return enqueue("verify_motion_preservation", {"model_id": model_id, "study": study, "component_id": component_id, "entity_id": entity_id, "expected_motion": expected_motion, "minimum_travel": minimum_travel, "duration_s": duration_s, "output_fps": output_fps, "plan_id": plan_id})
 
 
 @mcp.tool()
