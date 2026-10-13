@@ -37,6 +37,7 @@ public partial class Cad {
     class OwnedMotionSnapshot {
         Cad cad;UserModel model;string directory;StudyState[] states;Dictionary<string,double[]> poses;Dictionary<string,string> hashes;
         public object Diagnostics;
+        public StudyState[] InputStudies {get{return states;}}
         public OwnedMotionSnapshot(Cad owner,UserModel m,IModelDoc2 doc) {
             cad=owner;model=m;
             var initial=StudyStates(doc);var unsupported=initial.FirstOrDefault(v=>v.active&&Math.Abs(v.time_s*v.fps-Math.Round(v.time_s*v.fps))>1e-5);
@@ -48,7 +49,7 @@ public partial class Cad {
             foreach(string p in m.Files)File.Copy(p,Path.Combine(directory,Path.GetFileName(p)));
             AtomicJson(Path.Combine(directory,"state.json"),new{model_id=m.Id,configuration=m.Configuration,studies=states,poses=poses,files=hashes});
         }
-        public IModelDoc2 Restore() {
+        public IModelDoc2 Restore(StudyHistory.Observation observation=null) {
             foreach(var d in (cad.Sw.GetDocuments() as object[]??new object[0]).Cast<IModelDoc2>().Where(d=>d.GetPathName().Equals(model.Path,StringComparison.OrdinalIgnoreCase))){var mgr=(IMotionStudyManager)d.Extension.GetMotionStudyManager();foreach(string n in Names(mgr)){var study=(IMotionStudy)mgr.GetMotionStudy(n);if(study.IsActive){study.Stop();study.SetTime(0);Application.DoEvents();}}}
             cad.CloseUserDocuments(model.Files);
             if((cad.Sw.GetDocuments() as object[]??new object[0]).Cast<IModelDoc2>().Any(d=>model.Files.Contains(d.GetPathName(),StringComparer.OrdinalIgnoreCase)))throw new Exception("CHECKPOINT_DOCUMENT_STILL_OPEN");
@@ -57,6 +58,7 @@ public partial class Cad {
             cad.Sw.ActivateDoc3(doc.GetTitle(),false,0,ref e);if(e!=0)throw new Exception("ASSEMBLY_OPEN_FAILED "+e);
             if(doc.ConfigurationManager.ActiveConfiguration.Name!=model.Configuration&&!doc.ShowConfiguration2(model.Configuration))throw new Exception("CHECKPOINT_CONFIGURATION_MISMATCH");
             ApplyStudyStates(doc,states);Diagnostics=PoseDifference(poses,Transforms(doc));
+            if(observation!=null)cad.ObserveHistory(model,observation,"after_restore_apply_states");
             var delta=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(Diagnostics));
             if(Convert.ToDouble(delta["maximum_transform_delta"])>1e-7||hashes.Any(p=>FileHash(p.Key)!=p.Value))throw new Exception("RESTORATION_FAILED "+Json.Serialize(new{difference=Diagnostics,snapshot=directory}));
             return doc;

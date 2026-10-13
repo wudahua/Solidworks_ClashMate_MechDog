@@ -38,6 +38,8 @@ public partial class Cad {
         public double RestoreDelta;
         public Dictionary<string,double[]> InitialPoses {get{return original;}}
         public string DocumentPath {get{return expectedPath;}}
+        public StudyState[] InitialStudyStates {get{return ownedSnapshot==null?null:ownedSnapshot.InputStudies;}}
+        public StudyHistory.Observation HistoryObservation;
         public Scope(Cad owner,string path,string studyName) {
             cad=owner;owner.LastContextRestoration="pending"; previous=(IModelDoc2)owner.Sw.ActiveDoc;
             previousTitle=previous==null?null:previous.GetTitle();previousPath=previous==null?null:previous.GetPathName();targetStudyName=studyName;
@@ -74,7 +76,7 @@ public partial class Cad {
             Exception restoreCause=null;
             try {
                 if(Study!=null&&original!=null) {
-                    if(ownedSnapshot!=null){Doc=ownedSnapshot.Restore();Study=(IMotionStudy)((IMotionStudyManager)Doc.Extension.GetMotionStudyManager()).GetMotionStudy(targetStudyName);var diagnostic=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(ownedSnapshot.Diagnostics));RestoreDelta=Convert.ToDouble(diagnostic["maximum_transform_delta"]);Restored=true;}
+                    if(ownedSnapshot!=null){Doc=ownedSnapshot.Restore(HistoryObservation);Study=(IMotionStudy)((IMotionStudyManager)Doc.Extension.GetMotionStudyManager()).GetMotionStudy(targetStudyName);var diagnostic=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(ownedSnapshot.Diagnostics));RestoreDelta=Convert.ToDouble(diagnostic["maximum_transform_delta"]);Restored=true;}
                     else {
                     Study.SetTime(OriginalTime); Application.DoEvents();
                     if(originalStudy!=null&&originalStudy!=Study.Name){var originalActive=(IMotionStudy)((IMotionStudyManager)Doc.Extension.GetMotionStudyManager()).GetMotionStudy(originalStudy);originalActive.Activate();originalActive.SetTime(originalActiveTime);Application.DoEvents();}
@@ -339,6 +341,7 @@ public partial class Cad {
             case "restore_checkpoint": return RestoreCheckpoint((string)p["checkpoint_id"]);
             case "run_parameter_search": return ParameterSearch(Convert.ToInt32(p["max_trials"]),Convert.ToDouble(p["time_budget_s"]));
             case "_test_executor_loss": return TestExecutorLoss((string)p["run_id"]);
+            case "_test_history_state": return TestHistoryState((string)p["model_id"],(string)p["study"],(string)p["mode"],p.ContainsKey("fps")?Convert.ToInt32(p["fps"]):0);
             case "_test_run_restoration_failure": if(System.Environment.GetEnvironmentVariable("SW_MCP_FAULT_TESTS")!="1")throw new Exception("FAULT_TESTS_DISABLED");return RunUserStudy((string)p["model_id"],(string)p["study"],Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"],true);
             case "_test_set_study_time": if(System.Environment.GetEnvironmentVariable("SW_MCP_FAULT_TESTS")!="1")throw new Exception("FAULT_TESTS_DISABLED");return TestSetUserStudyTime((string)p["model_id"],(string)p["study"],Convert.ToDouble(p["time_s"]));
             default: throw new Exception("UNKNOWN_OPERATION");
