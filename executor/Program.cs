@@ -36,6 +36,9 @@ class Program {
         messages["ACTIVE_TIME_NOT_FRAME_ALIGNED"]="激活算例停在非输出帧时刻；请先显式 reset_study_time 归零，再求解或回放。";
         messages["COM_SESSION_NOT_FOUND"]="未找到指定或已启动的 SolidWorks 实例；启动软件并核对 PID 后重试连接。";
         messages["COM_SESSION_UNAVAILABLE"]="SolidWorks 实例尚未提供可用 COM 会话；确认启动完成后重试连接。";
+        messages["INVALID_SOLIDWORKS_PID"]="SW_MCP_PROCESS_ID 必须是正整数，请核对客户端配置。";
+        messages["COM_SESSION_ID_MISMATCH"]="返回的 SolidWorks PID 与所选实例不一致；请求没有发送，请核对配置。";
+        messages["AMBIGUOUS_COM_SESSION"]="发现多个 SolidWorks 实例；请明确配置 SW_MCP_PROCESS_ID。";
         messages["DRIVE_ENTITY_NOT_FOUND"]="驱动引用未在当前模型中登记；请重新 list_drive_candidates 选择候选并核对 entity_id。";
         messages["NATIVE_TIME_AXIS_MISMATCH"]="原生结果时间轴与请求采样网格不一致；请查看时间轴诊断，未采集姿态或判定通过。";
         messages["MOTION_RESULTS_INCOMPLETE"]="原生求解没有提供覆盖请求时段的结果；请检查所选驱动是否与配合相容，并查看求解诊断。";
@@ -53,6 +56,10 @@ class Program {
             try {ownsGate=gate.WaitOne(0);} catch(AbandonedMutexException) {ownsGate=true;throw new Exception("PREVIOUS_EXECUTOR_CRASH: inspect SolidWorks state before restarting");}
             if(!ownsGate) throw new Exception("EXECUTOR_ALREADY_RUNNING: use one MCP server at a time");
             string root=Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"..",".."));
+            if(args.Length>0 && args[0]=="check-connection") {
+                ConnectionDiagnostics info; SolidWorksConnection.Connect(out info);
+                Console.WriteLine(Cad.Json.Serialize(new {protocol_version=1,ready=true,process_id=info.actual_pid,revision=info.revision,connection=info}));return 0;
+            }
             var cad=new Cad(root);
             if(args.Length>0 && args[0]=="build-motion-examples") {Console.WriteLine(Cad.Json.Serialize(cad.BuildMotionExamples()));return 0;}
             if(args.Length>0 && args[0]=="build-fixture") { Console.WriteLine(Cad.Json.Serialize(cad.BuildFixture())); return 0; }
@@ -63,7 +70,7 @@ class Program {
             if(args.Length>0 && args[0]=="phase-diagnosis") { cad.DiagnosePhase();Console.WriteLine("PHASE_DIAGNOSIS_SAVED");return 0; }
             if(args.Length>0 && args[0]=="fast-validation") {string run=Guid.NewGuid().ToString("N");cad.Solve("gear_pump","齿轮泵_30rpm",2,30,run);Console.WriteLine(Cad.Json.Serialize(cad.FastCheck(run,1,.001,null)));return 0;}
             if(args.Length>0 && args[0]=="validate-fixture") { Console.WriteLine(Cad.Json.Serialize(cad.Solve("clear","MVP_60rpm",1,60,"fixture-validation"))); return 0; }
-            Console.WriteLine(Cad.Json.Serialize(new { protocol_version=1, ready=true, revision=cad.Sw.RevisionNumber(),process_id=cad.Sw.GetProcessID() }));
+            Console.WriteLine(Cad.Json.Serialize(new { protocol_version=1, ready=true, revision=cad.Sw.RevisionNumber(),process_id=cad.Sw.GetProcessID(),connection=cad.ConnectionInfo }));
             var queue=new BlockingCollection<string>();
             var reader=new Thread(()=>{ string line; while((line=Console.ReadLine())!=null) queue.Add(line);queue.CompleteAdding(); }); reader.IsBackground=true;reader.Start();
             while(!queue.IsCompleted) {
@@ -74,7 +81,7 @@ class Program {
                 Console.Out.Flush();Application.DoEvents();
             }
             return 0;
-        } catch(Exception e) { Console.Error.WriteLine(e); if(args.Length==0)Console.WriteLine(Cad.Json.Serialize(new {protocol_version=1,ready=false,error=Error(e)})); return 1; }
+        } catch(Exception e) { Console.Error.WriteLine(e); if(args.Length==0 || args[0]=="check-connection")Console.WriteLine(Cad.Json.Serialize(new {protocol_version=1,ready=false,error=Error(e)})); return 1; }
         finally {if(ownsGate) gate.ReleaseMutex();if(gate!=null) gate.Dispose();}
     }
 }

@@ -19,17 +19,8 @@ public partial class Cad {
     public string LastContextRestoration="not_required";
     public static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 16777216 };
     const string Tutorial = @"C:\Users\Public\Documents\SOLIDWORKS\SOLIDWORKS 2026\samples\tutorial\advdrawings\";
-    [DllImport("ole32.dll")]static extern int GetRunningObjectTable(int reserved,out IRunningObjectTable table);
-    [DllImport("ole32.dll")]static extern int CreateBindCtx(int reserved,out IBindCtx context);
-    static ISldWorks ConnectSession(){
-        IRunningObjectTable rot;Marshal.ThrowExceptionForHR(GetRunningObjectTable(0,out rot));IBindCtx context;Marshal.ThrowExceptionForHR(CreateBindCtx(0,out context));IEnumMoniker list;rot.EnumRunning(out list);
-        var available=new Dictionary<int,IMoniker>();var m=new IMoniker[1];while(list.Next(1,m,IntPtr.Zero)==0){string name;m[0].GetDisplayName(context,null,out name);var match=Regex.Match(name,"^SolidWorks_PID_([0-9]+)$");if(match.Success)available[int.Parse(match.Groups[1].Value)]=m[0];}
-        string selected=System.Environment.GetEnvironmentVariable("SW_MCP_PROCESS_ID");int pid;
-        if(!string.IsNullOrEmpty(selected)){if(!int.TryParse(selected,out pid)||!available.ContainsKey(pid))throw new Exception("COM_SESSION_NOT_FOUND: configured SW_MCP_PROCESS_ID is not registered");}
-        else{if(available.Count==0)throw new Exception("COM_SESSION_NOT_FOUND");if(available.Count!=1)throw new Exception("AMBIGUOUS_COM_SESSION: set SW_MCP_PROCESS_ID; available="+string.Join(",",available.Keys));pid=available.Keys.First();}
-        object result;rot.GetObject(available[pid],out result);var sw=result as ISldWorks;if(sw==null)throw new Exception("COM_SESSION_UNAVAILABLE");if(sw.GetProcessID()!=pid)throw new Exception("COM_SESSION_ID_MISMATCH");Log("COM_CONNECTED pid="+pid);return sw;
-    }
-    public Cad(string root) {Root=Path.GetFullPath(root);Sw=ConnectSession();bool prior=Sw.UserControl;if(!prior)Sw.UserControl=true;if(!Sw.UserControl)throw new Exception("SESSION_LIFETIME_UNVERIFIED");Log("SESSION_LIFETIME user_control_before="+prior+" after="+Sw.UserControl);LoadRegistrations();}
+    public readonly ConnectionDiagnostics ConnectionInfo;
+    public Cad(string root) {Root=Path.GetFullPath(root);Sw=SolidWorksConnection.Connect(out ConnectionInfo);Log("COM_CONNECTED "+Json.Serialize(ConnectionInfo));bool prior=Sw.UserControl;if(!prior)Sw.UserControl=true;if(!Sw.UserControl)throw new Exception("SESSION_LIFETIME_UNVERIFIED");Log("SESSION_LIFETIME user_control_before="+prior+" after="+Sw.UserControl);LoadRegistrations();}
     public static void Log(string text) { Console.Error.WriteLine(DateTime.UtcNow.ToString("o")+" "+text); }
     public string Fixture { get { return Path.Combine(Root,"fixtures","slider_crank"); } }
     void Save(IModelDoc2 d,string path) { int e=0,w=0;bool same=string.Equals(d.GetPathName(),Path.GetFullPath(path),StringComparison.OrdinalIgnoreCase);bool saved=same?d.Save3(1,ref e,ref w):d.Extension.SaveAs(path,0,1,null,ref e,ref w);if(!saved||e!=0)throw new CadFault("SAVE_FAILED","登记文件保存失败。",new{errors=e,warnings=w,save_method=same?"Save3":"SaveAs"}); }
