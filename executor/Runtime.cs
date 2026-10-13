@@ -306,6 +306,11 @@ public partial class Cad {
         activeJobId=p.ContainsKey("job_id")?(string)p["job_id"]:null;
         switch(op) {
             case "get_environment": return UserEnvironment();
+            case "list_mate_references": return ListMateReferences((string)p["model_id"],(string)p["component_id"],(string)p["kind"],Convert.ToInt32(p["limit"]),(string)p["cursor"]);
+            case "preview_mate": return PreviewBasicMate((string)p["model_id"],(string)p["entity_a"],(string)p["entity_b"],(string)p["mate_type"],(string)p["alignment"],Convert.ToDouble(p["distance_mm"]),Convert.ToBoolean(p["lock_rotation"]),(string)p["baseline_run_id"]);
+            case "apply_mate": return ApplyBasicMate((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));
+            case "verify_motion_preservation": return VerifyRequestedMotion((string)p["model_id"],(string)p["study"],(string)p["component_id"],(string)p["entity_id"],(string)p["expected_motion"],Convert.ToDouble(p["minimum_travel"]),Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"],(string)p["plan_id"]);
+            case "_test_mate_rollback": return ApplyBasicMate((string)p["plan_id"],true,true);
             case "import_assembly": return ImportUserAssembly((string)p["path"],p.ContainsKey("configuration")?(string)p["configuration"]:null);
             case "list_models": return UserListModels();
             case "inspect_model": return InspectUserModel((string)p["model_id"]);

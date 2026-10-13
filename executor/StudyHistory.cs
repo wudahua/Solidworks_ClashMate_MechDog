@@ -84,6 +84,9 @@ public static class StudyHistory {
             }
             var last=new Dictionary<string,object>();
             foreach(string key in new[]{"run_id","solver_status","sampling_status","restoration_status","result_validity","error_code","started_at","finished_at","duration_s","output_fps","model_revision","configuration"})last[key]=Value(saved,key);
+            var motionValidation=Value(saved,"motion_validation") as Dictionary<string,object>;
+            last["motion_validation_assertion"]=motionValidation==null?null:Value(motionValidation,"assertion");
+            last["motion_validation_claim"]=motionValidation==null?null:Value(motionValidation,"claim");
             last["input_match_status"]=applicability;last["compatibility_claim"]="historical_solve_observation_only";
             last["input_match_diagnostics"]=new{revision_match=revisionMatch,configuration_match=configurationMatch,file_hashes_match=hashesMatch,study_settings_match=settingsMatch,observation_complete=observation!=null&&observation.Complete,dirty_documents_observed=observation!=null&&observation.AnyDirty,reasons=reasons};
             response["last_run"]=last;response["run_history_status"]="available";
