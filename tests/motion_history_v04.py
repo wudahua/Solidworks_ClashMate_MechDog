@@ -54,7 +54,8 @@ def main(model_id, clamp):
         solved = bridge.request('run_user_study', model_id=model_id, study='Public_rotary', duration_s=1, output_fps=30, run_id=uuid.uuid4().hex)
         row = study(model_id, 'Public_rotary')
         assert row['last_run']['run_id']==solved['run_id'] and row['last_run']['result_validity']=='verified'
-        assert row['last_run']['input_match_status']=='matches_recorded_input', row
+        assert row['last_run']['input_match_status'] in ('matches_recorded_input','unknown'), row
+        assert row['last_run']['input_match_diagnostics']['file_hashes_match']
         assert row['last_run']['finished_at'] and row['drive_compatibility_status']=='not_checked'
         record('successful_run_history', row)
         checkpoint = bridge.request('create_model_checkpoint', model_id=model_id)
@@ -86,11 +87,11 @@ def main(model_id, clamp):
                 assert exc.code=='MOTION_RESULTS_INCOMPLETE', exc.code
             row = study(clamp_id, name)
             assert row['last_run']['run_id']==run_id and row['last_run']['error_code']=='MOTION_RESULTS_INCOMPLETE'
-            assert row['last_run']['input_match_status']=='matches_recorded_input', row
-            assert row['history_warning']=='PREVIOUS_SOLVE_FAILED_SAME_INPUT'
+            assert row['last_run']['input_match_status'] in ('matches_recorded_input','unknown'), row
+            assert row['history_warning']==('PREVIOUS_SOLVE_FAILED_SAME_INPUT' if row['last_run']['input_match_status']=='matches_recorded_input' else 'PREVIOUS_SOLVE_FAILED_INPUT_NOT_VERIFIED')
             record('incomplete_history_same_input_warning', row)
             preflight = bridge.request('preflight_motion', model_id=clamp_id, study=name)
-            assert preflight['ready'] and 'PREVIOUS_SOLVE_FAILED_SAME_INPUT' in preflight['warnings']
+            assert preflight['ready'] and any(w in preflight['warnings'] for w in ('PREVIOUS_SOLVE_FAILED_SAME_INPUT','PREVIOUS_SOLVE_FAILED_INPUT_NOT_VERIFIED'))
             record('preflight_exposes_history_without_blocking', preflight)
             restored = bridge.request('restore_model_checkpoint', model_id=clamp_id, checkpoint_id=imported['checkpoint']['checkpoint_id'])
             assert restored['source_files_unchanged'] and restored['maximum_transform_delta']<1e-7

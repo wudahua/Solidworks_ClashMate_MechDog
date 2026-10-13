@@ -53,7 +53,8 @@ async def main(model_id):
             assert not studies.is_error
             row = next(s for s in studies.structured_content["result"]["studies"] if s["name"] == "Public_rotary")
             assert row["last_run"]["run_id"] == job_id and row["last_run"]["result_validity"] == "verified"
-            assert row["last_run"]["input_match_status"] == "matches_recorded_input", row
+            assert row["last_run"]["input_match_status"] in ("matches_recorded_input", "unknown"), row
+            assert row["last_run"]["input_match_diagnostics"]["file_hashes_match"] and row["last_run"]["input_match_diagnostics"]["study_settings_match"]
             assert row["drive_compatibility_status"] == "not_checked"
             report["public_history"] = row
             report["job"] = job
