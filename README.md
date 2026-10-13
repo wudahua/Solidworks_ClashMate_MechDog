@@ -2,9 +2,11 @@
 
 SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.1-alpha.1` 基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.1-alpha.2` 基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.1.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.2.md)。
+
+本版本合并泉州电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
 
 这是供试用的运动仿真版本。已有有效配合的刚体机构可直接进入运动流程；缺少基础配合时可由设计者选定参考和类型，再让助手执行。尚未完成“大部分机械装配均可用”的样本覆盖验收。
 
@@ -28,7 +30,7 @@ SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidwo
 | SolidWorks | 本机已安装并由用户启动；已校准 **2026 SP0，API revision 34.0.0** |
 | Motion | 已安装并具备 Motion Analysis 使用许可；Motion 插件加载失败明确拒绝 |
 | 系统 | Windows x64；正式试用建议 Windows 11，独立 Windows 11 机器验收待完成 |
-| Python | 64 位 Python 3.11+；开发实测为 3.12.14，建议先用 3.12 |
+| Python | 64 位 Python 3.11+；完整开发验收使用 3.12.14。用户报告 3.13 安装、编译及连接成功，运动求解/配合/恢复的 3.13 验收待完成，建议先用 3.12 |
 | 编译 | .NET Framework 4.8 的 x64 C# 编译器，引用用户本机 SolidWorks interop |
 | MCP SDK | 固定为 2.3.0，依赖版本见 requirements.lock.txt |
 
@@ -38,43 +40,59 @@ SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidwo
 
 ## 安装
 
-解压到有写权限的短路径，例如 `C:\MCP\ClashMate`，避免直接放在 Program Files。所有运行结果和隔离副本保存在安装目录的 `runs/` 与 `experiments/`；很长的安装路径或CAD文件名可能触及Windows路径长度限制。
+解压到有写权限的短路径，例如 `C:\MCP\ClashMateMechDog`，避免直接放在 Program Files。所有运行结果和隔离副本保存在安装目录的 `runs/` 与 `experiments/`；很长的安装路径或CAD文件名可能触及Windows路径长度限制。
 
 ```powershell
 # 在解压后的项目目录执行；PythonPath 填自己的 Python 路径。
-.\初始化环境.ps1 -PythonPath 'C:\Python312\python.exe'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -PythonPath 'C:\Python312\python.exe'
 
 # 如果 SolidWorks 安装在其他位置：
-.\初始化环境.ps1 -PythonPath 'C:\Python312\python.exe' -SolidWorksInstallDir 'D:\SOLIDWORKS'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -PythonPath 'C:\Python312\python.exe' -SolidWorksInstallDir 'D:\SOLIDWORKS'
 
 # 不进入 COM 的安装自检
 .\.venv\Scripts\python.exe .\scripts\self_check.py
 ```
 
-安装脚本会从 PyPI 安装固定版本依赖，并从本机安装目录引用 DLL。发布包不附带 SolidWorks 程序、授权、interop DLL 或预编译执行器。
+安装脚本默认从 PyPI 安装固定版本依赖，并从本机安装目录引用 DLL。网络环境需要镜像时，可追加 `-PipIndexUrl 'https://pypi.tuna.tsinghua.edu.cn/simple'`，由用户选择可信 HTTPS 源；依赖锁定和 TLS 校验保持生效。发布包不附带 SolidWorks 程序、授权、interop DLL 或预编译执行器。
+
+`-ExecutionPolicy Bypass` 仅对这次启动的 PowerShell 进程及其子进程生效，不永久改变用户或计算机策略，也不能覆盖企业组策略。脚本仍被阻止时先运行 `Get-ExecutionPolicy -List`，核对 `MachinePolicy`/`UserPolicy`，由管理员按组织规定处理。[微软执行策略说明](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies)
+
+`-PythonPath` 应指向基础 Python，而不是另一虚拟环境。已有 `.venv` 会核对实际版本、64 位架构、项目目录和基础解释器；不匹配或目录不完整时先停止安装并输出诊断，不自动删除或覆盖。可选择与已有环境匹配的基础 Python，或由用户保留/移走旧 `.venv` 后重新安装。中文 `初始化环境.ps1`、`启动MCP.ps1` 继续转发至英文入口。
+
+若解压后中文文件名乱码，先核对下载包 SHA256 和解压工具。已核验 `v0.4.1-alpha.1` 官方源码资产的中文条目为 UTF-8 且标志位正确；不要强制按 GBK 转换。可以用 Windows PowerShell `Expand-Archive` 解压原 ZIP，并保留文件哈希、工具版本和命令供排查；本版本提供 `install.ps1`/`start.ps1` 英文入口。
 
 启动 SolidWorks 后，在相同 Windows 用户和桌面会话运行服务；双方权限级别应一致。只允许一个执行器运行。多个 SolidWorks 实例时必须选择 PID：
 
 ```powershell
 Get-Process SLDWORKS | Select-Object Id, ProcessName
-.\启动MCP.ps1 -SolidWorksProcessId 12345
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1 -SolidWorksProcessId 12345
 ```
 
 将命令登记到支持 stdio MCP 的客户端。示例中的路径和 PID 必须改为本机值；服务 stdout 只承载 MCP 协议。
 
+项目统一使用显示名 `SolidWorks ClashMate MechDog`（协议 `serverInfo.name`）和配置键 `solidworks-clashmate-mechdog`（`mcpServers` 下的服务标识）；GitHub 仓库及目录名仍为 `Solidworks_ClashMate_MechDog`。两项 MCP 名称采用空格显示和小写连字符标识的同一品牌。已安装的旧包不会自动改名；在 WorkBuddy 的 `mcp.json` 中把原服务键 `solidworks-motion` 或 `solidworks-clashmate` 改为 `solidworks-clashmate-mechdog`，保留该条目的路径、参数和环境变量，并让客户端重新加载该服务。替换原条目即可，避免同时保留两个指向同一项目的服务。协议显示名由服务源码决定，升级至本版本并重新加载服务后才会更新。
+
 ```json
 {
   "mcpServers": {
-    "solidworks-motion": {
-      "command": "C:\\MCP\\SolidWorksMotion\\.venv\\Scripts\\python.exe",
-      "args": ["C:\\MCP\\SolidWorksMotion\\motion_server.py"],
+    "solidworks-clashmate-mechdog": {
+      "command": "C:\\MCP\\ClashMateMechDog\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\MCP\\ClashMateMechDog\\motion_server.py"],
       "env": {"SW_MCP_PROCESS_ID": "12345"}
     }
   }
 }
 ```
 
+同样的配置可从 [mcp-config.example.json](mcp-config.example.json) 复制；请替换路径和 PID，项目不会自动修改 WorkBuddy 的全局配置。
+
 可先在终端运行 `.\.venv\Scripts\python.exe .\scripts\self_check.py --connect`；此前通过 `$env:SW_MCP_PROCESS_ID='12345'` 选择实例。服务不会自动启动或关闭 SolidWorks。
+
+连接优先使用 PID 注册项；选定 PID 缺少注册项时，才尝试 `GetActiveObject`，并严格核对返回实例的 PID 和可读 revision。不一致返回 `COM_SESSION_ID_MISMATCH`，不发送 CAD 请求。未配置 PID 且没有 PID 注册项时要求用户明确选择；通用活动对象不代表只有一个实例。连接诊断仅输出相关 PID、注册项总数、连接方式和 HRESULT，不列出其他应用的 ROT 对象名称。
+
+只检查 COM 连接、不加载模型登记、不改 `UserControl` 或加载 Motion 时，可运行 `.\executor\bin\SwExecutor.exe check-connection`。安装自检输出 JSON，失败返回非零退出码；`connection_checked=true` 只表示真实环境查询成功。`self_check.py --connect` 使用正常执行器握手，并受已有恢复隔离记录约束。
+
+执行器缺失返回 `EXECUTOR_NOT_BUILT`，可重新运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\executor\build.ps1`。`EXECUTOR_ACCESS_DENIED` 表示启动或文件访问被拒绝，重新编译未必解决；请对比真实 MCP 客户端与 Agent 子进程的启动结果，并保留 `runs/executor.log` 和自检 JSON。`MCP_LEASE_UNAVAILABLE`/`EXECUTOR_LOG_UNAVAILABLE` 则先检查安装目录写权限。编译后生成 `executor/bin/build-manifest.json`，记录 EXE 大小、哈希、源码哈希和时间；没有证据时不把错误归因于杀毒软件、沙箱或 SolidWorks。
 
 ## 第一次使用
 

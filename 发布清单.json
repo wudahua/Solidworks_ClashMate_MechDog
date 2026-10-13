@@ -1,5 +1,5 @@
 {
-  "version": "0.4.1-alpha.1",
+  "version": "0.4.1-alpha.2",
   "kind": "source_only",
   "includes_user_cad": false,
   "includes_runtime_data": false,
@@ -7,13 +7,13 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 23072,
-      "sha256": "addea5c7a388cee794591f8223937575ed18624722c804de1ee77b7d8dcc4a22"
+      "bytes": 27322,
+      "sha256": "b2e83c3db5150438936ed3f55784685233fd2cc3ccf9d7a8b8ccb23fec1933d7"
     },
     {
-      "path": "发布说明_v0.4.1-alpha.1.md",
-      "bytes": 2963,
-      "sha256": "cc83630d75c157da97e023f9efb5ad3b0a11e925c600086779dd42ff71393b43"
+      "path": "发布说明_v0.4.1-alpha.2.md",
+      "bytes": 4389,
+      "sha256": "f3c4b03863ca4c4e45d18c859712003ccbead5668c560253871e3ab6241740d7"
     },
     {
       "path": "LICENSE",
@@ -37,18 +37,33 @@
     },
     {
       "path": "motion_server.py",
-      "bytes": 14621,
-      "sha256": "608a39c519e98a601fc36293a544fd458a4f494d7a0e2733c0fb05f53bc970c2"
+      "bytes": 14632,
+      "sha256": "64378831390c424d1b25df01baa89661d68200e3ade759068ffd4a0aabc3e716"
+    },
+    {
+      "path": "mcp-config.example.json",
+      "bytes": 251,
+      "sha256": "7f1c42116361c17b39e239da447a88d410828c06caa4d028a80654a5433edb81"
+    },
+    {
+      "path": "install.ps1",
+      "bytes": 1758,
+      "sha256": "d1ad1de573218f88a21bde4379924aa6586f22a9209b336b7ed8a655e0e0219c"
+    },
+    {
+      "path": "start.ps1",
+      "bytes": 828,
+      "sha256": "c84e5c02f4fcad0bf2195157de89c18cf8783c411ce9f27e117936912794b676"
     },
     {
       "path": "初始化环境.ps1",
-      "bytes": 1083,
-      "sha256": "8768a4b26a2a9258770c9ce6f2b9e00c409820dc309addadb9bda4f44f08ae9e"
+      "bytes": 214,
+      "sha256": "e9d26c28b81a58057ebeac0791a448c932ff52aefb4332c89f0ad44c5bd543d1"
     },
     {
       "path": "启动MCP.ps1",
-      "bytes": 682,
-      "sha256": "c57cbc58eb6badecd3e120b5a500829eac4b3af6c1c08c32444c2e731f5e9367"
+      "bytes": 168,
+      "sha256": "f4755408dd937f672eab9348740da7e67faae2778307a4c471a07c46bb7b2efd"
     },
     {
       "path": "生成运动示例.ps1",
@@ -67,8 +82,8 @@
     },
     {
       "path": "executor/Cad.cs",
-      "bytes": 9724,
-      "sha256": "991b263cf03f80fd9ae0e3ca8f3875f2cb21ff5a3af12f5bbbec970d6bd68692"
+      "bytes": 8294,
+      "sha256": "6173c3700f0722799bebca57285c9519ca49a33c0bc5bb7b63c681e034a3077a"
     },
     {
       "path": "executor/CadFault.cs",
@@ -122,13 +137,18 @@
     },
     {
       "path": "executor/Program.cs",
-      "bytes": 7955,
-      "sha256": "ce258319e126312222ec67ac3841dcab5e8f661aee11a55767637254a44a2814"
+      "bytes": 8711,
+      "sha256": "1841992462ec3e9c041289b63b75d76df947f478639c9a9c40c992bdec82d2a5"
     },
     {
       "path": "executor/Runtime.cs",
       "bytes": 35051,
       "sha256": "ef9b445522333de32d6eac37aaa6a7e15b104e0d66b54b86ab5cda9a5a645874"
+    },
+    {
+      "path": "executor/SessionConnection.cs",
+      "bytes": 5949,
+      "sha256": "facca08723234ce4b2cf89eb645a0aa6a798420c29ea80a574c5c33a65407dd8"
     },
     {
       "path": "executor/StudyHistory.cs",
@@ -143,7 +163,7 @@
     {
       "path": "executor/UserMotion.cs",
       "bytes": 48010,
-      "sha256": "cc47f3233a32be2cbb74968e808b99b6518ba50f3860db1c48c54b13c81d07ae"
+      "sha256": "9510258d84056a1301e30bce1d493dea97ad5f93b80efdd0fe823b5b0068daa7"
     },
     {
       "path": "executor/Workflow.cs",
@@ -152,8 +172,8 @@
     },
     {
       "path": "executor/build.ps1",
-      "bytes": 1190,
-      "sha256": "38ce3da04a5101b24bdf8e65ed866060d076feca355c53f0bfd7902de9cd0c09"
+      "bytes": 2202,
+      "sha256": "734e234dae9a43b605407270a027b9c21d0414f0f3605ab5b3a5b2ee08e06c17"
     },
     {
       "path": "sw_mcp/__init__.py",
@@ -167,8 +187,8 @@
     },
     {
       "path": "sw_mcp/bridge.py",
-      "bytes": 21319,
-      "sha256": "cd42e2f786fc5eeb53fdc643fab2ab22edad2cb44aed7745e8329c8e648c2826"
+      "bytes": 23739,
+      "sha256": "347288cf1fe06adb402e05736f4a1a1d3f782ddf648ecf1152f15b1ebe0343d2"
     },
     {
       "path": "sw_mcp/jobs.py",
@@ -176,14 +196,24 @@
       "sha256": "5b669a11a318860690c08e0325c9eeb315bc1e52c693dda7fd0f7dd5ec5dfb83"
     },
     {
+      "path": "sw_mcp/startup.py",
+      "bytes": 2045,
+      "sha256": "1753464a5c4a5494803845baed1746a7bd1b130186c0390af91b35272b7d90ce"
+    },
+    {
       "path": "scripts/self_check.py",
-      "bytes": 1280,
-      "sha256": "d304cf3679311818632caf4c9a3d4c0f0ab99924936b22283a73601c4256ee59"
+      "bytes": 2711,
+      "sha256": "595373f1d70a267615c79afee308db66869f9cbde32ba9b13c2968a2752e64cd"
+    },
+    {
+      "path": "scripts/validate_runtime.py",
+      "bytes": 2574,
+      "sha256": "5bba431d0f0a3c8b7159951c27e49300353fd06a2b17f17487ce426f43007b2f"
     },
     {
       "path": "scripts/build_release.py",
-      "bytes": 3510,
-      "sha256": "333afed28edc022857b2da521ae8abe6cf6a0e39bd12f070d2fa3a6c453d6597"
+      "bytes": 3791,
+      "sha256": "f6c66827a9022e354808059721a29738c38a38cf4c98b3e70b55e2d05e3e61aa"
     },
     {
       "path": "scripts/recover.py",
@@ -279,6 +309,31 @@
       "path": "tests/mate_protocol_v041.py",
       "bytes": 6662,
       "sha256": "359f453b76251b812c99b1fc5de7ab64a940dc8f5b062e1ee7a466ff79ede6c7"
+    },
+    {
+      "path": "tests/test_installation.py",
+      "bytes": 8259,
+      "sha256": "685ca61b060f2ee37abfef4dc340bd83e8bb705efa83ba53a5311e916a422b43"
+    },
+    {
+      "path": "tests/SessionConnectionTests.cs",
+      "bytes": 5741,
+      "sha256": "577834f62c8f1e4a0ebcb9668fea96d2e43c0a237b8b625edae50a9b46b3b53d"
+    },
+    {
+      "path": "tests/session_connection_checks.py",
+      "bytes": 1946,
+      "sha256": "b76cf3f9feed582bf5a380b356be6352c764cd96e9ba3671df784d2d3409f498"
+    },
+    {
+      "path": "tests/session_connection_native.py",
+      "bytes": 7737,
+      "sha256": "4007cf1dbc8d3b2380b61e6595d817a7a9b437eab47775782e71882948caa342"
+    },
+    {
+      "path": "tests/installation_powershell_checks.py",
+      "bytes": 4518,
+      "sha256": "e3e532c71d5bc3d7edf2e705fd98462a0d722064ec445555270eb79531816f74"
     },
     {
       "path": "server.py",

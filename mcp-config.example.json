@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "solidworks-clashmate-mechdog": {
+      "command": "C:\\MCP\\ClashMateMechDog\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\MCP\\ClashMateMechDog\\motion_server.py"],
+      "env": {"SW_MCP_PROCESS_ID": "12345"}
+    }
+  }
+}
