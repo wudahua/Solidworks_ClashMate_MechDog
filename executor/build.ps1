@@ -17,4 +17,4 @@ $executorItem = Get-Item -LiteralPath $executorFile
 if ($executorItem.Length -le 0) { throw 'Compiled executor is empty.' }
 $sourceRecords = @($sources | ForEach-Object { @{ path = [IO.Path]::GetFileName($_); sha256 = (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant() } })
 $manifest = @{ built_at_utc = [DateTime]::UtcNow.ToString('o'); executor_bytes = $executorItem.Length; executor_sha256 = (Get-FileHash -LiteralPath $executorFile -Algorithm SHA256).Hash.ToLowerInvariant(); solidworks_install_dir = $installRoot; compiler = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"; sources = $sourceRecords }
-$manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $binPath 'build-manifest.json') -Encoding UTF8
+[IO.File]::WriteAllText((Join-Path $binPath 'build-manifest.json'), ($manifest | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))

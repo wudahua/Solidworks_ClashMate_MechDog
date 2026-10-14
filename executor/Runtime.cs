@@ -89,7 +89,7 @@ public partial class Cad {
                 try{if(previousTitle!=null) {var active=(IModelDoc2)cad.Sw.ActiveDoc;if(active==null||!string.Equals(active.GetPathName(),previousPath,StringComparison.OrdinalIgnoreCase)){int e=0;var activated=cad.Sw.ActivateDoc3(previousTitle,false,0,ref e);if(activated==null||e!=0)Restored=false;}}}catch(Exception e){restoreCause=e;Restored=false;}
                 cad.LastContextRestoration=Restored?"restored":"unknown";
                 if(Study!=null&&original!=null||!Restored)cad.LastOperationRestoration=Restored?"restored":"unknown";
-                if(!Restored)throw new CadFault("RESTORATION_FAILED","无法确认完整状态已恢复。",new{maximum_transform_delta=RestoreDelta,state_difference=ownedSnapshot==null?null:ownedSnapshot.Diagnostics,cause=restoreCause==null?null:restoreCause.ToString()});
+                if(!Restored)throw new CadFault("RESTORATION_FAILED","无法确认完整状态已恢复。",new{maximum_transform_delta=RestoreDelta,state_difference=ownedSnapshot==null?null:ownedSnapshot.Diagnostics,cause=restoreCause==null?null:restoreCause.ToString(),cause_details=restoreCause==null?null:FailureEvidence(restoreCause)});
             }
         }
     }
@@ -303,7 +303,7 @@ public partial class Cad {
         LastOperationRestoration="not_required";
         LastContextRestoration="not_required";
         string op=(string)request["op"];var p=(Dictionary<string,object>)request["params"];
-        activeJobId=p.ContainsKey("job_id")?(string)p["job_id"]:null;
+        activeJobId=p.ContainsKey("job_id")?(string)p["job_id"]:null;activeRequestId=request.ContainsKey("id")?request["id"] as string:null;
         switch(op) {
             case "get_environment": return UserEnvironment();
             case "list_mate_references": return ListMateReferences((string)p["model_id"],(string)p["component_id"],(string)p["kind"],Convert.ToInt32(p["limit"]),(string)p["cursor"],p.ContainsKey("detail_level")&&(string)p["detail_level"]=="compact");

@@ -29,18 +29,21 @@ public partial class Cad {
     }
     static void ApplyStudyStates(IModelDoc2 doc,StudyState[] states,Dictionary<string,double[]> expectedPoses=null) {
         var mgr=(IMotionStudyManager)doc.Extension.GetMotionStudyManager();
+        if(expectedPoses!=null)Log("RESTORE_BEFORE_APPLY_STATES "+Json.Serialize(new{pose_change=PoseChange(expectedPoses,Transforms(doc)),studies=StudyStates(doc)}));
         // An inactive study's clock is independent of the selected tab. Never activate every study.
-        foreach(var state in states){var s=(IMotionStudy)mgr.GetMotionStudy(state.name);if(s==null)throw new Exception("CHECKPOINT_STUDY_MISSING");if(s.StudyType!=state.type)s.StudyType=state.type;if(Math.Abs(s.GetDuration()-state.duration_s)>1e-8&&!s.SetDuration(state.duration_s))throw new Exception("CHECKPOINT_SETTINGS_MISMATCH");var props=(IMotionStudyProperties)s.GetProperties(s.StudyType);if(props.GetFrameRate()!=state.fps)props.SetFrameRate(state.fps);if(!state.active&&Math.Abs(s.GetTime()-state.time_s)>1e-8&&!s.SetTime(state.time_s))throw new Exception("CHECKPOINT_TIME_RESTORE_FAILED");}
+        foreach(var state in states){var s=(IMotionStudy)mgr.GetMotionStudy(state.name);if(s==null)throw new Exception("CHECKPOINT_STUDY_MISSING");if(s.StudyType!=state.type)s.StudyType=state.type;if(Math.Abs(s.GetDuration()-state.duration_s)>1e-8&&!s.SetDuration(state.duration_s))throw new Exception("CHECKPOINT_SETTINGS_MISMATCH");var props=(IMotionStudyProperties)s.GetProperties(s.StudyType);if(props.GetFrameRate()!=state.fps)props.SetFrameRate(state.fps);if(!state.active&&Math.Abs(s.GetTime()-state.time_s)>1e-8 ){bool selected=s.SetTime(state.time_s);Application.DoEvents();s.Stop();if(Math.Abs(s.GetTime()-state.time_s)>1e-8||s.IsPlaying)throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","未激活算例时间回读不符。",new{study=state.name,set_time_return=selected,actual_time_s=s.GetTime(),expected_time_s=state.time_s,playing=s.IsPlaying});}}
         foreach(var state in states.Where(v=>v.active)){var s=(IMotionStudy)mgr.GetMotionStudy(state.name);if(!s.IsActive&&!s.Activate())throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","算例激活失败。",new{stage="activate",study=state.name});s.Stop();
             // Animation can report zero while displaying another tab's cached pose.
             // A new Motion Analysis at zero may instead contain the authored assembly
             // pose, which must not be replaced with a newly solved frame-zero pose.
-            if((state.type==1||Math.Abs(s.GetTime()-state.time_s)>1e-8)&&!s.SetTime(state.time_s)) {
+            var loadedPoses=Transforms(doc);bool poseAlreadyMatches=expectedPoses!=null&&expectedPoses.Count==loadedPoses.Count&&expectedPoses.All(p=>loadedPoses.ContainsKey(p.Key)&&PoseValidation.Matches(p.Value,loadedPoses[p.Key]));
+            Log("RESTORE_ACTIVE_BEFORE_TIME_SELECTION "+Json.Serialize(new{study=state.name,time_s=s.GetTime(),pose_already_matches=poseAlreadyMatches}));
+            if((Math.Abs(s.GetTime()-state.time_s)>1e-8||(state.type==1&&!poseAlreadyMatches))&&!s.SetTime(state.time_s)) {
                 // Saved animation clocks can reopen without their calculated cache. Reconstruct
                 // only the recorded active study, with its exact original settings and a budget.
                 if(state.duration_s<=0||state.duration_s>30||state.fps<1||state.fps>120||state.duration_s*state.fps>1800)throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","恢复时间需要重建结果缓存，但原设置超过预算。",new{stage="rehydrate_budget",study=state});
                 Log("RESTORE_REHYDRATE_ACTIVE_STUDY "+Json.Serialize(state));bool calculated=s.Calculate();s.Stop();Application.DoEvents();s.Stop();
-                if(!calculated||(Math.Abs(s.GetTime()-state.time_s)>1e-8&&!s.SetTime(state.time_s)))throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","重建缓存后仍无法恢复算例时间。",new{stage="set_time_after_rehydrate",study=state.name,calculate_return=calculated,expected_time_s=state.time_s,actual_time_s=s.GetTime()});
+                bool selected=s.SetTime(state.time_s);Application.DoEvents();s.Stop();if(!calculated||Math.Abs(s.GetTime()-state.time_s)>1e-8||s.IsPlaying)throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","重建缓存后仍无法恢复算例时间。",new{stage="set_time_after_rehydrate",study=state.name,calculate_return=calculated,expected_time_s=state.time_s,actual_time_s=s.GetTime()});
             }
             Application.DoEvents();s.Stop();}
         VerifyStudyStates(doc,states);
@@ -51,7 +54,7 @@ public partial class Cad {
                 if(active==null||active.type!=1||active.duration_s<=0||active.duration_s>30||active.fps<1||active.fps>120||active.duration_s*active.fps>1800)throw new CadFault("CHECKPOINT_POSE_RESTORE_FAILED","时间回读相符但姿态不符；不能用新求解覆盖记录的装配初始姿态。",difference);
                 var s=(IMotionStudy)mgr.GetMotionStudy(active.name);Log("RESTORE_REHYDRATE_POSE_MISMATCH "+Json.Serialize(difference));bool calculated=s.Calculate();s.Stop();Application.DoEvents();s.Stop();bool selected=s.SetTime(active.time_s);Application.DoEvents();s.Stop();
                 var after=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(PoseDifference(expectedPoses,Transforms(doc))));
-                if(!calculated||!selected||Convert.ToDouble(after["maximum_transform_delta"])>1e-7)throw new CadFault("CHECKPOINT_POSE_RESTORE_FAILED","重建缓存后姿态仍与检查点不符。",new{study=active.name,calculate_return=calculated,set_time_return=selected,before=difference,after=after});
+                if(!calculated||Math.Abs(s.GetTime()-active.time_s)>1e-8||s.IsPlaying||Convert.ToDouble(after["maximum_transform_delta"])>1e-7)throw new CadFault("CHECKPOINT_POSE_RESTORE_FAILED","重建缓存后姿态仍与检查点不符。",new{study=active.name,calculate_return=calculated,set_time_return=selected,expected_time_s=active.time_s,actual_time_s=s.GetTime(),playing=s.IsPlaying,before=difference,after=after,pose_change=PoseChange(expectedPoses,Transforms(doc))});
                 VerifyStudyStates(doc,states);
             }
         }
