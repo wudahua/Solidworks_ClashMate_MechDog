@@ -45,6 +45,12 @@ class SessionConnectionTests {
         entries[22]=()=>new Fake{pid=22,revision=""};Reject(()=>Connect("22",entries,new ConnectionDiagnostics()),"COM_SESSION_UNAVAILABLE");
         var many=Empty();for(int i=1;i<=100;i++){int pid=i;many[i]=()=>new Fake{pid=pid};}
         info=new ConnectionDiagnostics();Reject(()=>Connect(null,many,info),"AMBIGUOUS_COM_SESSION");Check(info.available_pids.Length==32 && info.available_pids_truncated,"diagnostics bounded");
+        var inventory=new SessionInventory();inventory.Identities[22]="start-A";int scans=0;
+        var auto=SessionConnector.Connect("auto",Empty(),Active,v=>v.pid,v=>v.revision,new ConnectionDiagnostics(),()=>{scans++;return inventory;});Check(auto.pid==22&&scans==2,"auto unique missing ROT verified twice");
+        inventory.Identities[33]="start-B";int calls=lookups;Reject(()=>SessionConnector.Connect("auto",Empty(),Active,v=>v.pid,v=>v.revision,new ConnectionDiagnostics(),()=>inventory),"AMBIGUOUS_COM_SESSION");Check(calls==lookups,"auto multiple no COM lookup");
+        inventory.Identities.Remove(33);inventory.Complete=false;Reject(()=>SessionConnector.Connect("auto",Empty(),Active,v=>v.pid,v=>v.revision,new ConnectionDiagnostics(),()=>inventory),"AUTO_SESSION_INVENTORY_UNAVAILABLE");inventory.Complete=true;
+        scans=0;Reject(()=>SessionConnector.Connect("auto",Empty(),Active,v=>v.pid,v=>v.revision,new ConnectionDiagnostics(),()=>{scans++;var snapshot=new SessionInventory();snapshot.Identities[22]=scans==1?"start-A":"start-reused-PID";return snapshot;}),"AUTO_SESSION_IDENTITY_CHANGED");
+        Reject(()=>SessionConnector.Connect("auto",Empty(),Active,v=>v.pid,v=>v.revision,new ConnectionDiagnostics(),()=>new SessionInventory()),"COM_SESSION_NOT_FOUND");
         object live=null;
         if(args.Length==2 && args[0]=="--live") {
             int pid=int.Parse(args[1]);System.Environment.SetEnvironmentVariable("SW_MCP_PROCESS_ID",args[1]);
@@ -54,7 +60,9 @@ class SessionConnectionTests {
             Check(actual.GetProcessID()==pid && fallback.connection_source=="GetActiveObject_fallback","native fallback with missing PID inventory");
             var wrong=new ConnectionDiagnostics();Reject(()=>SessionConnector.Connect((pid+1).ToString(),new Dictionary<int,Func<ISldWorks>>(),SolidWorksConnection.ActiveObject,s=>s.GetProcessID(),s=>s.RevisionNumber(),wrong),"COM_SESSION_ID_MISMATCH");
             Check(sw.UserControl==userControl,"read-only probe retained UserControl");
-            live=new{normal_connection=normal,forced_missing_pid_inventory_connection=fallback,wrong_pid=wrong,forced_inventory_is_test_only=true,user_control_before=userControl,user_control_after=sw.UserControl};
+            ConnectionDiagnostics autoInfo=null;var actualInventory=SessionInventory.ReadVerified();
+            if(actualInventory.Complete&&actualInventory.Identities.Count==1&&actualInventory.Identities.ContainsKey(pid)){autoInfo=new ConnectionDiagnostics();var autoSw=SessionConnector.Connect("auto",new Dictionary<int,Func<ISldWorks>>(),SolidWorksConnection.ActiveObject,s=>s.GetProcessID(),s=>s.RevisionNumber(),autoInfo,SessionInventory.ReadVerified);Check(autoSw.GetProcessID()==pid&&autoInfo.process_identity_before==autoInfo.process_identity_after,"native auto missing ROT identity stable");}
+            live=new{normal_connection=normal,forced_missing_pid_inventory_connection=fallback,auto_forced_missing_rot=autoInfo,wrong_pid=wrong,forced_inventory_is_test_only=true,user_control_before=userControl,user_control_after=sw.UserControl};
         }
         Console.WriteLine(new JavaScriptSerializer().Serialize(new{all_passed=true,checks=checks,live=live}));
     }
