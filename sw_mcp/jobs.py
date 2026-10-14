@@ -30,7 +30,7 @@ class Jobs:
 
     def submit(self, operation: str, params: dict) -> dict:
         job_id = uuid.uuid4().hex
-        if operation in {"run_study", "run_user_study", "verify_motion_preservation"}:
+        if operation in {"run_study", "run_user_study", "verify_motion_preservation", "probe_motion_compatibility"}:
             params = {**params, "run_id": job_id}
         params = {**params, "job_id": job_id}
         with self._lock:
