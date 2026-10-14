@@ -315,6 +315,7 @@ public partial class Cad {
             case "list_models": return UserListModels();
             case "inspect_model": return InspectUserModel((string)p["model_id"]);
             case "list_motion_studies": return UserStudies((string)p["model_id"]);
+            case "probe_motion_compatibility": return ProbeUserCompatibility((string)p["model_id"],(string)p["study"],Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"]);
             case "preflight_motion": return PreflightUserMotion((string)p["model_id"],p.ContainsKey("study")?(string)p["study"]:null);
             case "list_drive_candidates": return UserDriveCandidates((string)p["model_id"],p.ContainsKey("component_id")?(string)p["component_id"]:"",p.ContainsKey("kind")?(string)p["kind"]:"",p.ContainsKey("limit")?Convert.ToInt32(p["limit"]):20,p.ContainsKey("cursor")?(string)p["cursor"]:null,p.ContainsKey("group_faces")?Convert.ToBoolean(p["group_faces"]):true,p.ContainsKey("detail_level")&&(string)p["detail_level"]=="compact");
             case "create_motion_study": return CreateUserStudy((string)p["model_id"],(string)p["study"],(string)p["component_id"],(string)p["entity_id"],(string)p["motor_type"],Convert.ToDouble(p["speed"]),Convert.ToBoolean(p["reverse_direction"]),p.ContainsKey("reference_component_id")?(string)p["reference_component_id"]:"",p.ContainsKey("duration_s")?Convert.ToDouble(p["duration_s"]):1,p.ContainsKey("output_fps")?Convert.ToInt32(p["output_fps"]):30);

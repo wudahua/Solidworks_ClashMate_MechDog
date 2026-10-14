@@ -40,7 +40,7 @@ public partial class Cad {
             var page=entities.Skip(offset).Take(limit).ToList();var response=new Dictionary<string,object>{{"model_id",id},{"model_revision",m.Revision},{"group_faces",groupFaces},{"raw_candidate_count",rawTotal},{"total",entities.Count},{"offset",offset},{"entities",page},{"claim","geometric_candidates_only_no_automatic_design_intent_inference"}};
             response["detail_level"]=compact?"compact":"full";response["motion_compatibility"]="not_checked";response["requires_user_selection"]=true;response["excluded_components"]=excluded.Take(20).ToArray();response["excluded_component_count"]=excluded.Count;response["skipped_components"]=skipped.Take(20).ToArray();response["skipped_component_count"]=skipped.Count;response["truncated_components"]=truncated.Take(20).ToArray();response["truncated_component_count"]=truncated.Count;response["diagnostic_component_limit"]=20;response["geometry_complete"]=skipped.Count==0&&truncated.Count==0;response["suggested_motor_semantics"]="deprecated_geometry_type_alias_not_drive_recommendation";
             BoundGeometryPage(response,page,offset,entities.Count,limit,next=>Convert.ToBase64String(Encoding.UTF8.GetBytes(Json.Serialize(new{model_id=id,fingerprint=fingerprint,component_filter=componentFilter,kind=kind,offset=next}))));
-            foreach(var entity in page){string key=(string)entity["entity_id"];RegisterEntity(m,key,references[key]);}SaveUserModel(m);return response;
+            foreach(var entity in page){string key=(string)entity["entity_id"];RegisterEntity(m,key,references[key],(string)entity["component_id"],(string)entity["kind"]);}SaveUserModel(m);return response;
         }
     }
 }

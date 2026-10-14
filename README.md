@@ -2,9 +2,9 @@
 
 SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.1-alpha.4` 基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.1-alpha.5` 基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.4.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.5.md)。
 
 本版本保留另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
 
@@ -15,7 +15,7 @@ SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidwo
 - 完整最终响应及其 SHA-256 保存到 `runs/requests/`；配合预览绑定模型与执行器身份，配合请求日志包含所属模型。`get_job` 可离线读取本安装目录历史任务，标注 `historical_job_read_only`，不自动续跑。旧 `queued/running` 记录的真实执行情况未知；已存结果不证明当前模型或 CAD 状态。
 - `create_motion_study` 可指定 `duration_s`、`output_fps`，默认 1 秒、30 fps；仍要求新算例名，不向已有算例追加马达。创建时核验设置，试算可用另一组设置，结束后恢复原设置。重名错误给出换名或复用现有驱动的指引。
 - 恢复结果的 `restore_changes` 说明算例移除/恢复、已登记驱动和参考变化；整个文件快照会回退之后新建的内容，历史结果继续保留但可能过期。无法读取当前算例时明确差异未知，不阻断必要恢复。
-- `entity_id` 不按每次 revision 变化自动清空；只有查询返回并登记的页面 ID 可使用，原生持久引用也须解析通过。恢复旧检查点会回退参考登记表，错误区分“未登记”“登记被恢复回退”和“原生参考失效”，并指引重新查询。方案 `plan_id` 的输入绑定、消费与失效保护继续保留。
+- `entity_id` 不按每次 revision 变化自动清空；只有查询或 inspect 返回且已登记的 ID 可使用，原生持久引用也须解析通过。恢复旧检查点会回退参考登记表，错误区分“未登记”“登记被恢复回退”和“原生参考失效”，并指引重新查询。方案 `plan_id` 的输入绑定、消费与失效保护继续保留。
 - 保存诊断返回 `save_observation`，摘要只包含本次操作，最多 8 条阶段、4 KB；完整阶段与哈希按操作落盘并可离线分页读取；副本 dirty 与源文件未改动是不同观测，unknown 不自动当作 stale。日志派生状态写入一致，旧日志仅只读标注一致性，不自动解除隔离。
 - 回放继续使用 `1e-7 m` / `1e-6 rad` 阈值，最差组件诊断增加各轴平移差与前后位置。钟表最终复测首帧通过，但中间帧和末帧出现 p3-33 的 Z 向漂移超限，返回 POSE_MISMATCH 并恢复副本。另一次回放曾全部通过，仍不能承诺该模型重复求解稳定；其他装配也逐次核验。
 - 回放超限但副本恢复已核验时，也记录受控保存后的输入哈希和 `last_replay_attempt`，保留 `inconclusive`；恢复未知或模型版本变化不更新旧结果身份。计算后停止播放，按实际时间与全部组件姿态判断回放，不单凭 `SetTime` 布尔返回。末帧浮点值不会被内部偏移推到算例时长以外。
@@ -34,6 +34,30 @@ SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidwo
 预检中的原生重建可能令副本变脏，后续保存也可能改变文件哈希；旧结果因此失效时，重新求解并使用新 `run_id`。不能用相同 revision 覆盖文件变化证据。仅查看历史数据可显式使用离线历史接口。
 
 这是供试用的运动仿真版本。已有有效配合的刚体机构可直接进入运动流程；缺少基础配合时可由设计者选定参考和类型，再让助手执行。尚未完成“大部分机械装配均可用”的样本覆盖验收。
+
+
+## alpha.5 使用变化
+
+- 最低行程的浮点尾差有受限数值预算，回显实测、门槛与残差；这不是机械精度容差。
+- `inspect_model` 返回 `registered_supported_inspected_face` 的面可直接用于配合或适用驱动，不用重复登记查询；失效引用与不支持的组件仍拒绝。检查不自动改配合或猜运动意图。
+- `preflight_motion` 的 `basic_input_ready` 和兼容 `ready` 仅表示基础检查；`solver_compatibility_status=not_checked` 不能显示为求解保证。默认预检会重建副本，dirty 观测保留。
+- 显式 `compatibility_probe=True` 指定算例、`probe_duration_s`（最多1秒）和 `probe_output_fps`，在另一个副本异步短算；先满足已保存输入条件，返回 `job_id` 后用 `get_job` 查询。结果只覆盖该输入/短区间，网格异常为 inconclusive，原副本须核验不变。探测恢复未知时使用响应/恢复日志的受影响 `probe_model_id` 和检查点，不恢复到无关的原模型。
+- `SW_MCP_PROCESS_ID=auto` 或 `start.ps1 -AutoDetect` 可在每次服务启动时选择唯一、身份可核验的同用户会话实例。多个进程（含辅助实例）不按窗口标题猜选；仍可指定整数PID。已有会话丢失或 unknown 不能自动切换后继续写入。
+- 旧 journal 的原值在 `observed_dispatch_state`，兼容 `dispatch_state` 给当前派生值；`journal_schema_version` 与响应schema区分。只读显示不会把磁盘日志重写为idle。
+- 对原生未登记驱动，`drive_validation=null` 表示没有本项目的独立速度核对；不等于模型没有马达。矩阵系数差为全部组件/帧/矩阵元素的 `max|R_ij(t)-R_ij(0)|`，无量纲，不是角度。
+
+## 原地升级
+
+先停用旧安装目录的MCP服务，保留SolidWorks打开；从新包目录调用：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.1-alpha.5_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
+# 核对后移除 -DryRun 执行升级，可另传 -SolidWorksInstallDir。
+```
+
+ZIP与同目录`.sha256`须来自可信发布页。升级先核验清单/哈希/版本，备份将替换的源码与执行器；保留`.venv`、`runs`、`experiments`及未知恢复记录。安装校验基础解释器和旧venv身份后按锁定依赖重新编译。编译失败记录源码/二进制回滚；依赖环境变化不属于快照回滚。备份与收据在`upgrade-backups/`。不自动替换客户端全局配置、不终止用户进程或删除原恢复日志。
+
+同目录升级继续使用原路径与数据；另目录安装不会自动迁移绝对路径登记。名称仍为`SolidWorks ClashMate MechDog`/`solidworks-clashmate-mechdog`。
 
 ## 能做什么
 
@@ -93,7 +117,7 @@ Get-Process SLDWORKS | Select-Object Id, ProcessName
 powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1 -SolidWorksProcessId 12345
 ```
 
-将命令登记到支持 stdio MCP 的客户端。示例中的路径和 PID 必须改为本机值；服务 stdout 只承载 MCP 协议。
+将命令登记到支持 stdio MCP 的客户端。示例路径必须改为本机路径；整数 PID 模式填本机值，auto 模式核验唯一实例；服务 stdout 只承载 MCP 协议。
 
 项目统一使用显示名 `SolidWorks ClashMate MechDog`（协议 `serverInfo.name`）和配置键 `solidworks-clashmate-mechdog`（`mcpServers` 下的服务标识）；GitHub 仓库及目录名仍为 `Solidworks_ClashMate_MechDog`。两项 MCP 名称采用空格显示和小写连字符标识的同一品牌。已安装的旧包不会自动改名；在 WorkBuddy 的 `mcp.json` 中把原服务键 `solidworks-motion` 或 `solidworks-clashmate` 改为 `solidworks-clashmate-mechdog`，保留该条目的路径、参数和环境变量，并让客户端重新加载该服务。替换原条目即可，避免同时保留两个指向同一项目的服务。协议显示名由服务源码决定，升级至本版本并重新加载服务后才会更新。
 
@@ -103,11 +127,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1 -SolidWorksProce
     "solidworks-clashmate-mechdog": {
       "command": "C:\\MCP\\ClashMateMechDog\\.venv\\Scripts\\python.exe",
       "args": ["C:\\MCP\\ClashMateMechDog\\motion_server.py"],
-      "env": {"SW_MCP_PROCESS_ID": "12345"}
+      "env": {"SW_MCP_PROCESS_ID": "auto"}
     }
   }
 }
 ```
+
+示例使用显式自动模式；多实例时把 `auto` 改为所选整数PID。
 
 同样的配置可从 [mcp-config.example.json](mcp-config.example.json) 复制；请替换路径和 PID，项目不会自动修改 WorkBuddy 的全局配置。
 
@@ -203,7 +229,7 @@ alpha.1等历史任务只有CSV时，可以受限读取并标记 `manifest_statu
 
 历史保存在运行目录，检查点恢复不删除历史；恢复后版本改变会使历史过期。记录中断的任务没有伪造结束时间。alpha.4之前没有索引的任务仍可按run_id离线读取，但不自动猜测哪次是最近求解；缺失索引返回 `run_history_status=none`，损坏索引或清单返回 `unavailable`。
 
-`preflight_motion` 明确返回 `ready_scope=basic_model_preflight_only_not_solver_compatibility`、`drive_compatibility_status=not_checked` 和 `compatibility_probe.attempted=False`。同输入曾出现原生结果不完整、求解失败或驱动幅值核验失败，且恢复已核验时，返回 `PREVIOUS_SOLVE_FAILED_SAME_INPUT`。输入尚未确认时返回 `PREVIOUS_SOLVE_FAILED_INPUT_NOT_VERIFIED`，只提示历史失败；已明确变化或恢复未知时不输出同输入警告。不自动阻止重试，也不将失败归因为某个配合。历史成功同样不是当前相容性证明。短时探测尚未实现，不在查询或创建过程中隐式调用Calculate；即便将来支持，也须明确预算、检查点、恢复及验证范围。
+默认 `preflight_motion` 明确返回 `ready_scope=basic_model_preflight_only_not_solver_compatibility`、`drive_compatibility_status=not_checked` 和 `compatibility_probe.attempted=False`。同输入曾出现原生结果不完整、求解失败或驱动幅值核验失败，且恢复已核验时，返回 `PREVIOUS_SOLVE_FAILED_SAME_INPUT`。输入尚未确认时返回 `PREVIOUS_SOLVE_FAILED_INPUT_NOT_VERIFIED`，只提示历史失败；已明确变化或恢复未知时不输出同输入警告。不自动阻止重试，也不将失败归因为某个配合。历史成功同样不是当前相容性证明。显式 `compatibility_probe=True` 可在另一个隔离副本短算，默认1秒；预算、检查点、恢复及结论范围见上文。默认查询或创建不隐式调用 Calculate。
 
 `INVALID_MODEL_ID` 表示标识格式错误；`MODEL_NOT_REGISTERED` 表示该标识未在当前安装目录登记。请使用 `list_models` 或 `import_assembly` 返回的完整model_id；它不因服务重启自动过期，不能与会话内run_id混淆。
 
@@ -229,14 +255,14 @@ alpha.1等历史任务只有CSV时，可以受限读取并标记 `manifest_statu
 
 ## 后续路线
 
-本地未发布修订（2026-10-14）：公开工具仍为 24 个。
+已纳入发布的 2026-10-14 修订：公开工具仍为 24 个。
 
-QZC 更新验收反馈的本地修订：
+QZC 更新验收反馈修订：
 
 - `apply_mate` 的 `execution` 分别记录原生对象返回、特征确认、重建、参数核验、保存和提交；`null` 表示该项未检查。`swAddMateError_e` 中 **1 为成功，5 为装配过定义**。过定义原因为 `MATE_OVERDEFINED`，外层保留 `MATE_APPLY_ROLLED_BACK` 及 `rollback_verified`，与创建后重建失败区分。旧 `mate_created` 只表示对象非空，不能当作提交成功；更改参数仍须新预览和确认。
 - 写响应的 `save_observation.scope=current_operation`，摘要最多 4 KB，只含本次操作；嵌套检查点保留同一 `operation_id`。完整阶段和哈希分别存入模型目录 `save-observations/`。用 `get_run_artifacts(model_id=..., operation_id=..., limit=5)` 离线分页读取，完整哈希需 `include_file_hashes=True`，响应最多 16 KB；过大的单条记录给出摘要和原文件路径。升级时原累计观测按原字节归档，摘要中的 `archived_legacy_query` 提供 `legacy_` 加 SHA256 的查询标识，不伪造旧操作身份。
 - 默认 `replay_motion_frame` 仍要求本会话 run 与当前输入匹配，重算、核验全部组件并恢复。通过后登记独立文件名的 BMP、帧时间、姿态 CSV 哈希、图像哈希和核验范围；`get_run_artifacts(run_id=...)` 列出最近 5 个已登记图像。`replay_motion_frame(run_id, frame, saved_image_only=True)` 可在重启或恢复隔离时读取该帧既有截图，不调用 COM。它不能生成未拍摄的帧；旧无清单 BMP 不自动升级为已核验图像。任意旧输入重新回放仍需未来的不可变输入快照功能。历史图像不证明当前 CAD 或独立物理精度，也不保证所有组件在画面中可见。
-- `inspect_model.reference_guidance` 给出本模型的查询路线，配合实体外层也列出 `entity_id` 和几何类型。inspection-only 表示该次返回来源，登记情况不能仅据此推断；查询返回页和原生引用仍需核验。驱动查询需找指定面时可用 `group_faces=False`，避免只返回等价几何组的代表面。
+- `inspect_model.reference_guidance` 给出本模型的查询路线，配合实体外层也列出 `entity_id` 和几何类型。以实体的登记状态为准：支持的返回面经核验自动登记，其他参考仍需查询且不得自动改绑。驱动查询需找指定面时可用 `group_faces=False`，避免只返回等价几何组的代表面。
 
 恢复字段判读：`status=idle/active/unknown` 分别表示日志中的请求已结束、执行中、未确认；不是机械姿态认证。`current_request_state=completed/dispatching/unconfirmed` 是相应的当前请求状态。`observed_dispatch_state` 保留旧日志原值；`dispatch_field_consistent` 和 `recovery_field_consistent` 分别核对两个派生字段，`journal_derived_fields_consistent` 是两者均一致。旧日志不一致不会自动重写或解除隔离。
 
@@ -248,7 +274,7 @@ QZC 更新验收反馈的本地修订：
 
 - 添加配合前，对激活动画的检查点在另一份独立副本中预演恢复；时间、全体姿态、原副本文件及配合未通过核验时拒绝写入。旧液压反馈检查点仍无法完整恢复记录姿态，此限制没有消除。首次覆盖为顶层刚体零件；激活动画的多层装配会明确拒绝预检，不能假定安全回滚。
 - `get_motion_summary(run_id, allow_unverified_history=True)` 可在服务重启或 CAD 隔离时离线查看历史摘要；曲线使用同名选项。历史哈希通过不代表当前模型匹配或物理验证通过。当前 CAD 回放仍要求版本及文件哈希匹配。
-- 配合预览检查相同持久化面参考、类型、方向及支持的参数是否确定重复。相同组件对上的其他配合会提示复核；边与面不能自动判等，距离配合参数尚不用于确定判重。`inspect_model` 的参考须通过 `list_mate_references` 查询相应页面登记后再使用。
+- 配合预览检查相同持久化面参考、类型、方向及支持的参数是否确定重复。相同组件对上的其他配合会提示复核；边与面不能自动判等，距离配合参数尚不用于确定判重。`inspect_model` 已登记的受支持顶层面可直接使用；其他参考通过 `list_mate_references` 查询对应页面。
 - 显式归零会改变登记副本。查看 `previous_time_s`、`target_time_s`、`pose_change`、`operation_state` 和 `pre_operation_pose_restored`；兼容字段 `restoration_status=restored` 不能单独解释为归零前姿态已恢复。
 - 恢复状态返回原始 `observed_dispatch_state` 和当前 `current_request_state`，旧日志矛盾会标出而不会改写。替代会话仍须明确传入 `allow_replacement_session=true`，并核验旧实例已退出。
 - `experiments` 在首次生成示例或导入装配时创建；安装后暂时不存在是正常情况。JSON 构建清单写入无 BOM UTF-8，读取仍兼容旧清单。

@@ -22,7 +22,7 @@ def main():
     exe = folder / "ConnectionTests.exe"
     subprocess.run([str(Path(os.environ["WINDIR"]) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"),
                     "/nologo", "/platform:x64", "/reference:System.Web.Extensions.dll", "/reference:" + str(interop),
-                    "/out:" + str(exe), str(ROOT / "executor/CadFault.cs"), str(ROOT / "executor/SessionConnection.cs"),
+                    "/out:" + str(exe), str(ROOT / "executor/CadFault.cs"), str(ROOT / "executor/SessionConnection.cs"),str(ROOT / "executor/SessionInventory.cs"),
                     str(ROOT / "tests/SessionConnectionTests.cs")], check=True)
     command = [str(exe)]
     if args.solidworks_pid is not None:

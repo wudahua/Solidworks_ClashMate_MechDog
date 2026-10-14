@@ -30,7 +30,7 @@ class Bridge:
     LONG_OPERATIONS = frozenset({"check_interference_during_motion", "run_parameter_search", "diagnose_gear_phase",
         "import_assembly", "run_user_study", "verify_motion_preservation", "replay_motion_frame",
         "restore_model_checkpoint", "apply_mate", "create_motion_study", "convert_motion_study",
-        "reset_study_time", "create_model_checkpoint"})
+        "reset_study_time", "create_model_checkpoint", "probe_motion_compatibility"})
 
     def __init__(self, root: Path, timeout: float = 180, motion_scan_timeout: float = 600):
         self.root = root
@@ -109,6 +109,8 @@ class Bridge:
             recovery_consistent = state.get("recovery_required", state["status"] != "idle") == (state["status"] != "idle")
             dispatch_consistent = state.get("dispatch_state", expected_dispatch) == expected_dispatch
             return {**state, "recovery_required": state["status"] != "idle",
+                    "dispatch_state": expected_dispatch, "response_schema_version": 4,
+                    "journal_schema_version": state.get("schema_version"),
                     "journal_derived_fields_consistent": recovery_consistent and dispatch_consistent,
                     "recovery_field_consistent": recovery_consistent,
                     "dispatch_field_consistent": dispatch_consistent,
@@ -120,7 +122,7 @@ class Bridge:
 
     def _journal(self, state):
         with self._journal_lock:
-            state = {k: v for k, v in state.items() if k not in {"state_scope", "requires_checkpoint_restore", "cad_request_policy", "journal_derived_fields_consistent", "recovery_field_consistent", "dispatch_field_consistent", "observed_dispatch_state", "current_request_state"}}
+            state = {k: v for k, v in state.items() if k not in {"state_scope", "requires_checkpoint_restore", "cad_request_policy", "journal_derived_fields_consistent", "recovery_field_consistent", "dispatch_field_consistent", "observed_dispatch_state", "current_request_state", "response_schema_version", "journal_schema_version"}}
             state = {**state, "recovery_required": state.get("status") != "idle", "schema_version": 3,
                      "dispatch_state": {"idle": "completed", "active": "dispatching", "unknown": "unconfirmed"}.get(state.get("status"), "unconfirmed")}
             self._journal_path.parent.mkdir(parents=True, exist_ok=True)
@@ -359,6 +361,11 @@ class Bridge:
                     if state.get("recovering") and (not response.get("ok") or response.get("result", {}).get("restoration_status") != "restored"):
                         self._journal({**state["previous_state"], "status": "unknown", "last_recovery_error": response.get("error"), "last_response_request_id": request_id})
                     else:
+                        if state.get("operation") == "probe_motion_compatibility" and restoration in {"unknown", "pending"}:
+                            details = response.get("error", {}).get("diagnostics", {}).get("details") or {}
+                            affected = details.get("affected_model_id")
+                            if isinstance(affected, str) and re.fullmatch(r"user_[a-f0-9]{32}", affected):
+                                state = {**state, "original_request_model_id": state.get("model_id"), "model_id": affected}
                         self._journal({**state, "status": "unknown" if restoration in {"unknown", "pending"} else "idle", "restoration_status": restoration, "last_response_request_id": request_id})
                 with self._state_lock:
                     if future is not None:
@@ -422,6 +429,11 @@ class Bridge:
             try:
                 assert self._process and self._process.stdin
                 model_id = params.get("model_id")
+                if operation == "probe_motion_compatibility":
+                    probe_run = params.get("run_id")
+                    if not isinstance(probe_run, str) or not re.fullmatch(r"[a-f0-9]{32}", probe_run):
+                        raise CadError("INVALID_RUN_ID", "探测缺少可核验的运行标识。", "not_required")
+                    model_id = "user_" + probe_run
                 run_id = params.get("run_id", "")
                 if not model_id and isinstance(run_id, str) and re.fullmatch(r"[a-f0-9]{32}", run_id):
                     try:
