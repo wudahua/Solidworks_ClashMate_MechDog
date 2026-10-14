@@ -26,6 +26,11 @@
       "sha256": "21c86ac28c637444577454c2e2ef4bd1a4d9a569967e25df46f4cc998ad6f110"
     },
     {
+      "path": ".gitattributes",
+      "bytes": 88,
+      "sha256": "bd4bec001be8b8b56c86b0124f663956b7bd7b49d724b15508d855c7bec0722a"
+    },
+    {
       "path": "requirements.txt",
       "bytes": 11,
       "sha256": "b2a3a41cb92969a57ba10746218731ed453fe6528322ddda667df989ac494035"
@@ -327,13 +332,13 @@
     },
     {
       "path": "scripts/build_release.py",
-      "bytes": 5161,
-      "sha256": "c9b14f1c400a9a4c8609b1472fc4ae226e00e5fd3d1c79356c3c0c1a975ad93a"
+      "bytes": 5179,
+      "sha256": "a41cf07603012827f505fb7e2a2d253ad4c939847006b46a83f57d65ec221a4f"
     },
     {
       "path": "scripts/verify_release.py",
-      "bytes": 4115,
-      "sha256": "1f3c0f85a6310efd519db7822154d884c4268d486f2015f56a0e84cc41badd86"
+      "bytes": 4132,
+      "sha256": "8bbc640caea4f8650caf3f5d6ce739a66a9334f87d0dc0ce446f580f3deeb7e7"
     },
     {
       "path": "scripts/upgrade.py",
