@@ -6,9 +6,15 @@ using System.Windows.Forms;
 using SolidWorks.Interop.swmotionstudy;
 
 public partial class Cad {
-    public object ResetUserStudyTime(string id,string studyName,bool allowRecalculate=false) {
+    public object ResetUserStudyTime(string id,string studyName,bool allowRecalculate=false) {using(var saveObservationScope=BeginSaveObservationOperation("reset_study_time")){
         var m=GetUserModel(id);
-        if(!allowRecalculate){using(var probe=new Scope(this,m.Path,null)){var selected=(IMotionStudy)((IMotionStudyManager)probe.Doc.Extension.GetMotionStudyManager()).GetMotionStudy(studyName);if(selected==null)throw new CadFault("STUDY_NOT_FOUND","未找到所选算例。",new{study=studyName});if(Math.Abs(selected.GetTime())>1e-8&&(selected.StudyType==1||!selected.IsActive)){LastOperationRestoration="not_required";throw new CadFault("STUDY_RESET_REQUIRES_CALCULATION","非零动画或未激活算例可能缺少结果缓存；请显式允许重新计算后归零。没有激活、移动或保存该算例。",new{study=studyName,stage="preflight_nonzero_clock",time_s=selected.GetTime(),study_type=selected.StudyType,active=selected.IsActive,required_option="allow_recalculate=true",automatic_calculate=false,model_state_changed=false});}}}
+        Dictionary<string,double[]> initialPoses;StudyState initial;StudyState[] preOperationStudies;
+        using(var probe=new Scope(this,m.Path,null)){
+            var selected=(IMotionStudy)((IMotionStudyManager)probe.Doc.Extension.GetMotionStudyManager()).GetMotionStudy(studyName);
+            if(selected==null)throw new CadFault("STUDY_NOT_FOUND","未找到所选算例。",new{study=studyName});
+            initialPoses=Transforms(probe.Doc);preOperationStudies=StudyStates(probe.Doc);initial=preOperationStudies.Single(s=>s.name==studyName);
+            if(!allowRecalculate&&Math.Abs(selected.GetTime())>1e-8&&(selected.StudyType==1||!selected.IsActive)){LastOperationRestoration="not_required";throw new CadFault("STUDY_RESET_REQUIRES_CALCULATION","非零动画或未激活算例可能缺少结果缓存；请显式允许重新计算后归零。没有激活、移动或保存该算例。",new{study=studyName,stage="preflight_nonzero_clock",time_s=selected.GetTime(),study_type=selected.StudyType,active=selected.IsActive,required_option="allow_recalculate=true",automatic_calculate=false,model_state_changed=false});}
+        }
         var cp=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(CreateUserCheckpoint(id)));
         string checkpoint=(string)cp["checkpoint_id"],stage="load_motion";var trace=new List<object>();LastOperationRestoration="pending";
         try {
@@ -16,7 +22,7 @@ public partial class Cad {
                 var mgr=(IMotionStudyManager)scope.Doc.Extension.GetMotionStudyManager();
                 var study=(IMotionStudy)mgr.GetMotionStudy(studyName);
                 if(study==null)throw new CadFault("STUDY_NOT_FOUND","未找到所选算例。",new{study=studyName});
-                var initial=StudyStates(scope.Doc).Single(s=>s.name==studyName);
+                trace.Add(new{stage="after_checkpoint_save",pose_change=PoseChange(initialPoses,Transforms(scope.Doc))});
                 stage="stop";study.Stop();if(study.IsPlaying)throw new Exception("STUDY_PLAYING_STOP_REQUIRED");
                 stage="activate";bool activated=study.IsActive||mgr.ActivateMotionStudy(studyName);Application.DoEvents();
                 trace.Add(new{stage=stage,native_return=activated,active=study.IsActive,time_s=study.GetTime()});
@@ -34,14 +40,14 @@ public partial class Cad {
                 }
                 stage="verify";var actual=StudyStates(scope.Doc).Single(s=>s.name==studyName);
                 if(Math.Abs(actual.time_s)>1e-8||!actual.active||study.IsPlaying||actual.type!=initial.type||actual.fps!=initial.fps||Math.Abs(actual.duration_s-initial.duration_s)>1e-8)throw new CadFault("STUDY_RESET_UNVERIFIED","归零后的时间、播放状态或算例设置未通过核对。",new{initial=initial,actual=actual,playing=study.IsPlaying});
-                stage="save";SaveOwnedDocuments(m);Save(scope.Doc,m.Path);ObserveOwnedSave(m,"after_reset_save");m.Revision++;SaveUserModel(m);VerifyUserSources(m);LastOperationRestoration="restored";
-                return new{model_id=id,study=studyName,time_s=actual.time_s,active=actual.active,previous_checkpoint_id=checkpoint,results_invalidated=true,restoration_status="restored",source_files_unchanged=true,recalculated_for_reset=calculated,study_settings_preserved=true,native_steps=trace,save_observation=SaveObservation(m)};
+                stage="save";SaveOwnedDocuments(m);Save(scope.Doc,m.Path);ObserveOwnedSave(m,"after_reset_save");m.Revision++;SaveUserModel(m);VerifyUserSources(m);actual=StudyStates(scope.Doc).Single(s=>s.name==studyName);if(Math.Abs(actual.time_s)>1e-8||!actual.active||study.IsPlaying||actual.type!=initial.type||actual.fps!=initial.fps||Math.Abs(actual.duration_s-initial.duration_s)>1e-8)throw new CadFault("STUDY_RESET_UNVERIFIED","保存后归零时间或算例设置改变；已进入检查点回滚。",new{initial=initial,actual=actual,stage="verify_after_save"});var finalPoses=Transforms(scope.Doc);var poseChange=PoseChange(initialPoses,finalPoses);bool previousPoseRestored=initialPoses.Count==finalPoses.Count&&initialPoses.All(p=>finalPoses.ContainsKey(p.Key)&&PoseValidation.Matches(p.Value,finalPoses[p.Key]));LastOperationRestoration="restored";
+                return new{model_id=id,study=studyName,time_s=actual.time_s,previous_time_s=initial.time_s,target_time_s=0,pose_change=poseChange,operation_state="committed",restoration_scope="document_context_only_after_successful_reset",target_pose_validation="clock_and_settings_verified_no_independent_frame0_pose_oracle",pre_operation_pose_restored=previousPoseRestored,restoration_status_semantics="legacy_status_confirms_safe_completion_not_previous_pose",active=actual.active,previous_checkpoint_id=checkpoint,results_invalidated=true,restoration_status="restored",source_files_unchanged=true,recalculated_for_reset=calculated,study_settings_preserved=true,native_steps=trace,save_observation=SaveObservation(m)};
             }
         }catch(Exception failure) {
             var original=failure as CadFault;
             var diagnostics=new{study=studyName,stage=stage,checkpoint_id=checkpoint,native_steps=trace,original_code=HistoryErrorCode(failure),original_details=original==null?null:original.Diagnostics,native_hresult=failure is COMException?(int?)failure.HResult:null,native_message=failure.Message};
-            try{RestoreUserCheckpoint(id,checkpoint);LastOperationRestoration="restored";}catch(Exception rollback){LastOperationRestoration="unknown";throw new CadFault("STUDY_RESET_ROLLBACK_FAILED","归零失败且检查点恢复未确认；保留现场并恢复检查点。",new{failure=diagnostics,rollback_error=rollback.ToString()});}
+            try{RestoreUserCheckpoint(id,checkpoint);using(var restoredScope=new Scope(this,GetUserModel(id).Path,null)){VerifyStudyStates(restoredScope.Doc,preOperationStudies);var restoredPoses=Transforms(restoredScope.Doc);if(initialPoses.Count!=restoredPoses.Count||!initialPoses.All(p=>restoredPoses.ContainsKey(p.Key)&&PoseValidation.Matches(p.Value,restoredPoses[p.Key])))throw new CadFault("RESET_PRE_OPERATION_STATE_NOT_RESTORED","检查点文件已恢复，但未恢复归零调用前的真实姿态。",new{pose_change=PoseChange(initialPoses,restoredPoses)});}LastOperationRestoration="restored";}catch(Exception rollback){LastOperationRestoration="unknown";throw new CadFault("STUDY_RESET_ROLLBACK_FAILED","归零失败且检查点恢复未确认；保留现场并恢复检查点。",new{failure=diagnostics,rollback_error=rollback.ToString(),rollback_failure=FailureEvidence(rollback),operation_state="recovery_required"});}
             throw new CadFault(original==null?"STUDY_TIME_RESET_FAILED":original.Code,original==null?"算例归零失败，已恢复检查点；请查看具体阶段。":original.Message,diagnostics);
         }
-    }
+    }}
 }

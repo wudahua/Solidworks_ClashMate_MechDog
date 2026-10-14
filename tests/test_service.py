@@ -16,6 +16,7 @@ from contextlib import contextmanager
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sw_mcp.bridge import Bridge as NativeBridge, CadError
 from sw_mcp.jobs import Jobs
+from transport_cleanup import drain_bridge, remove_test_root
 
 _bridges = []
 class Bridge(NativeBridge):
@@ -34,15 +35,20 @@ def temporary_workspace():
         temporary.resolve().relative_to(base.resolve())
         yield str(temporary)
     finally:
+        failures=[]
+        (temporary/'release').touch()
         for bridge in list(_bridges):
             if bridge.root == temporary:
-                bridge.close()
-                _bridges.remove(bridge)
-        # Verify the recursive cleanup target remains inside the intended test workspace.
-        temporary.resolve().relative_to(base.resolve())
-        if temporary.is_symlink():
-            raise RuntimeError("Unexpected test directory symlink")
-        shutil.rmtree(temporary)
+                try:
+                    drain_bridge(bridge)
+                except BaseException as error:
+                    failures.append(error)
+                finally:
+                    _bridges.remove(bridge)
+        if failures:
+            raise RuntimeError(f"Helper cleanup failed; preserved {temporary}") from failures[0]
+        remove_test_root(temporary,base)
+
 
 
 class BlockingCad:
@@ -127,11 +133,15 @@ class ServiceTests(unittest.TestCase):
             (binary / "SwExecutor.exe").touch()
             helper = root / "slow_executor.py"
             helper.write_text(
-                "import json,sys,time\n"
+                "import json,sys,time\nfrom pathlib import Path\ngate=Path(__file__).with_name('release')\n"
                 "print(json.dumps({'ready':True,'protocol_version':1,'process_id':22}),flush=True)\n"
                 "for line in sys.stdin:\n"
                 " r=json.loads(line)\n"
-                " if r['op']=='slow': time.sleep(.3)\n"
+                " if r['op']=='slow':\n"
+                "  end=time.monotonic()+20\n"
+                "  while not gate.exists():\n"
+                "   if time.monotonic()>end: raise RuntimeError('gate expired')\n"
+                "   time.sleep(.01)\n"
                 " print(json.dumps({'id':r['id'],'ok':True,'result':r['op']}),flush=True)\n",
                 encoding="utf-8",
             )
@@ -140,7 +150,7 @@ class ServiceTests(unittest.TestCase):
             def spawn(command, **kwargs):
                 return original_popen([sys.executable, str(helper)], **kwargs)
 
-            bridge = Bridge(root, timeout=.05)
+            bridge = Bridge(root, timeout=.5)
             try:
                 with patch("sw_mcp.bridge.subprocess.Popen", side_effect=spawn):
                     with self.assertRaises(CadError) as first:
@@ -150,17 +160,15 @@ class ServiceTests(unittest.TestCase):
                     with self.assertRaises(CadError) as second:
                         bridge.request("next")
                     self.assertEqual(second.exception.code, "CAD_BUSY_AFTER_TIMEOUT")
-                    deadline = time.monotonic() + 2
+                    (root/"release").touch()
+                    bridge.timeout=5
+                    deadline = time.monotonic() + 10
                     while bridge.cad_operation_state != "available" and time.monotonic() < deadline:
                         time.sleep(.01)
                     self.assertEqual(bridge.request("next"), "next")
             finally:
-                bridge.close()
-                if bridge._process:
-                    bridge._process.wait(timeout=2)
-                    bridge._process.stdout.close()
-                if bridge._log:
-                    bridge._log.close()
+                (root/'release').touch()
+                drain_bridge(bridge)
 
 
     def test_restart_refuses_unfinished_request_and_live_previous_executor(self):
@@ -232,11 +240,7 @@ class ServiceTests(unittest.TestCase):
                         bridge.request("run_study")
                     self.assertEqual(error.exception.code, "RECOVERY_REQUIRED")
             finally:
-                bridge.close()
-                bridge._process.wait(timeout=2)
-                bridge._process.stdout.close()
-                if bridge._log is not None:
-                    bridge._log.close()
+                drain_bridge(bridge)
 
 
     def test_replacement_session_requires_explicit_flag_and_dead_old_solidworks(self):
@@ -252,6 +256,7 @@ class ServiceTests(unittest.TestCase):
                 with self.assertRaises(CadError) as error:
                     bridge.request("restore_checkpoint", checkpoint_id="a" * 32)
                 self.assertEqual(error.exception.code, "RECOVERY_SESSION_MISMATCH")
+                self.assertEqual(error.exception.diagnostics["required_param"], "allow_replacement_session")
                 with self.assertRaises(CadError) as error:
                     bridge.request("restore_checkpoint", checkpoint_id="a" * 32, allow_replacement_session=True)
                 self.assertEqual(error.exception.code, "PREVIOUS_SOLIDWORKS_ALIVE")

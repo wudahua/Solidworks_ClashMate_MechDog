@@ -108,7 +108,20 @@ class Artifacts:
         data, manifest, poses = self._load(run_id)
         keys = ("run_id", "model_id", "study", "solver_status", "calculate_returned_success", "physics_validation_status", "result_validity_scope", "sampling_status", "restoration_status", "result_validity", "duration_s", "output_fps", "frames", "components", "motion_detected", "maximum_translation_from_frame0_m", "maximum_rotation_coefficient_delta_from_frame0", "input_pose_to_frame0_difference", "failure", "failure_diagnostics", "restoration_failure", "drive_validation", "validation_scope", "motion_validation")
         info = self._csv_info(data, poses) if poses.is_file() else {}
-        return {**{k: data[k] for k in keys if k in data}, **info, "manifest_status": data['manifest_status'], "legacy_without_manifest": data.get('legacy_without_manifest', False), "access": "saved_artifacts_without_COM", "current_model_validity": "not_checked_offline", "manifest_path": str(manifest) if manifest.is_file() else None, "poses_available": poses.is_file(), "poses_csv": str(poses) if poses.is_file() else None}
+        from sw_mcp.replay_images import ReplayImages
+        try:
+            images = ReplayImages(self.root).list(run_id)
+        except (ArtifactError, OSError) as error:
+            images = {"status":"unavailable", "images":[], "error_code":getattr(error,"code","IMAGE_ACCESS_FAILED"), "message":str(error), "claim":"image_failure_does_not_invalidate_independently_verified_pose_csv"}
+        return {**{k: data[k] for k in keys if k in data}, **info, "saved_frame_images": images, "manifest_status": data['manifest_status'], "legacy_without_manifest": data.get('legacy_without_manifest', False), "access": "saved_artifacts_without_COM", "historical_data": True, "physical_validation_claim": False, "current_model_validity": "not_checked_offline", "manifest_path": str(manifest) if manifest.is_file() else None, "poses_available": poses.is_file(), "poses_csv": str(poses) if poses.is_file() else None}
+
+    def save_observations(self, model_id, operation_id='', limit=5, cursor='', include_file_hashes=False):
+        from sw_mcp.save_observations import SaveObservations
+        return SaveObservations(self.root).read(model_id, operation_id, limit, cursor, include_file_hashes)
+
+    def saved_frame_image(self, run_id, frame):
+        from sw_mcp.replay_images import ReplayImages
+        return ReplayImages(self.root).frame(run_id, frame)
 
     def poses(self, run_id, component_id="", frame_start=0, limit=20, cursor=""):
         if type(limit) is not int or not 1 <= limit <= 50 or type(frame_start) is not int or frame_start < 0:

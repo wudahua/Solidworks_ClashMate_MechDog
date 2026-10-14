@@ -20,7 +20,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.1-alpha.3", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.1-alpha.4", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 
 def packed(data, error=False):
@@ -161,8 +161,13 @@ async def get_job(job_id: str) -> CallToolResult:
 
 
 @mcp.tool()
-async def get_motion_summary(run_id: str) -> CallToolResult:
-    """检查结果是否过期并返回求解摘要、验证范围和文件位置。run_id 仅在当前执行器会话有效。"""
+async def get_motion_summary(run_id: str, allow_unverified_history: bool = False) -> CallToolResult:
+    """默认核验当前会话的输入匹配；显式 allow_unverified_history=True 离线读取保存摘要，支持重启和隔离状态，不证明当前模型有效或运动通过。"""
+    if allow_unverified_history:
+        try:
+            return packed({"ok": True, "result": await asyncio.to_thread(artifacts.summary, run_id)})
+        except (ArtifactError, ValueError) as exc:
+            return packed({"ok": False, "error": {"code": getattr(exc, "code", "INVALID_HISTORY_SUMMARY"), "message": str(exc)}}, True)
     return await call("get_motion_summary", run_id=run_id)
 
 
@@ -178,8 +183,13 @@ async def export_motion_curve(run_id: str, component_id: str, quantity: Literal[
 
 
 @mcp.tool()
-async def replay_motion_frame(run_id: str, frame: int) -> CallToolResult:
-    """核验所选帧姿态并导出 BMP 截图，然后恢复操作前姿态。"""
+async def replay_motion_frame(run_id: str, frame: int, saved_image_only: bool = False) -> CallToolResult:
+    """默认仅回放本会话输入匹配的run：重算、全组件姿态核验、截图并恢复。saved_image_only=True离线读取该帧已记录且哈希通过的历史BMP，不调用COM、不检查当前模型；未曾生成该帧图像则明确报缺失，不强行摆位。"""
+    if saved_image_only:
+        try:
+            return packed({"ok": True, "result": await asyncio.to_thread(artifacts.saved_frame_image, run_id, frame)})
+        except (ArtifactError, ValueError, OSError) as exc:
+            return packed({"ok": False, "error": {"code": getattr(exc, "code", "SAVED_IMAGE_ACCESS_FAILED"), "message": str(exc), "assertion": "inconclusive", "restoration_status": "not_required"}}, True)
     return await call("replay_motion_frame", run_id=run_id, frame=frame)
 
 
@@ -198,9 +208,15 @@ async def reset_study_time(model_id: str, study: str, allow_recalculate: bool = 
 
 
 @mcp.tool()
-async def get_run_artifacts(run_id: str) -> CallToolResult:
-    """离线读取保存的求解摘要，恢复失败或重启后仍可调用；不证明当前 CAD 状态或结果物理精度。"""
+async def get_run_artifacts(run_id: str = "", model_id: str = "", operation_id: str = "", limit: int = 5, cursor: str = "", include_file_hashes: bool = False) -> CallToolResult:
+    """离线：传run_id读求解摘要及已记录截图；或传model_id/operation_id分页读本次保存观测（operation_id为空选最近已记录操作）。完整哈希须include_file_hashes=True，限1–20条/16KB；大记录给受限摘要和文件路径。两种身份不可混用。重启/隔离可用，不证明当前CAD状态或物理精度。"""
     try:
+        if model_id:
+            if run_id:
+                raise ValueError("run_id 与 model_id 保存观测查询不能混用。")
+            return packed(await asyncio.to_thread(artifacts.save_observations, model_id, operation_id, limit, cursor, include_file_hashes))
+        if operation_id or cursor or include_file_hashes or limit != 5:
+            raise ValueError("保存观测分页参数须同时指定 model_id。")
         return packed(await asyncio.to_thread(artifacts.summary, run_id))
     except ArtifactError as exc:
         return packed({"ok": False, "error": {"code": exc.code, "message": str(exc), "assertion": "inconclusive", "restoration_status": "not_required"}}, True)
@@ -221,7 +237,7 @@ async def read_run_poses(run_id: str, component_id: str = "", frame_start: int =
 
 @mcp.tool()
 async def get_recovery_state(request_id: str = "") -> CallToolResult:
-    """离线读请求日志；可传request_id查询完整最终响应（包括迟到结果），不证明当前模型。unknown/active拒绝普通CAD调用。"""
+    """离线读日志/迟到响应。status: idle=请求结束，active=记录执行中，unknown=未确认；不证明CAD姿态。current_request_state为completed/dispatching/unconfirmed。observed_dispatch_state保留旧原值；*_field_consistent核对派生字段，false不自动改日志或解除隔离。state_scope区分本owner执行中、idle和旧/未知请求；cad_request_policy为available/wait_for_current_request/recovery_only。恢复未知须显式恢复检查点。"""
     state = bridge.recovery_state()
     if request_id:
         try:

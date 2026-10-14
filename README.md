@@ -2,13 +2,13 @@
 
 SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.1-alpha.3` 基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.1-alpha.4` 基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.3.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.4.md)。
 
 本版本保留另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
 
-本版本合入曲柄滑块、液压剪叉与动态钟表反馈修复。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
+本版本汇总五份 2026-10-14 反馈修订，改善检查点写入保护、配合诊断、恢复及历史结果读取。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
 
 - `apply_mate`、`create_motion_study`、`convert_motion_study`、`create_model_checkpoint` 和 `reset_study_time` 默认返回 `job_id`；用 `get_job` 轮询，确认 `succeeded` 后使用 `result`。`wait_for_completion=True` 保留同步方式，显式重算归零仍返回任务。默认归零任务不会自动获得计算许可，须明确 `allow_recalculate=True`。
 - 上述写操作执行器等待预算为 600 秒；这不是完成时间保证，也不能替代 MCP 客户端自身的等待限制。超时后保留原任务状态，用 `get_job` 查看 `late_response`，或用 `get_recovery_state(request_id=...)` 读取最终原始响应；无响应仍保持未知，不重复写入。`idle` 只说明请求已结束，配合是否应用看原响应与原生参数。
@@ -16,7 +16,7 @@ SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidwo
 - `create_motion_study` 可指定 `duration_s`、`output_fps`，默认 1 秒、30 fps；仍要求新算例名，不向已有算例追加马达。创建时核验设置，试算可用另一组设置，结束后恢复原设置。重名错误给出换名或复用现有驱动的指引。
 - 恢复结果的 `restore_changes` 说明算例移除/恢复、已登记驱动和参考变化；整个文件快照会回退之后新建的内容，历史结果继续保留但可能过期。无法读取当前算例时明确差异未知，不阻断必要恢复。
 - `entity_id` 不按每次 revision 变化自动清空；只有查询返回并登记的页面 ID 可使用，原生持久引用也须解析通过。恢复旧检查点会回退参考登记表，错误区分“未登记”“登记被恢复回退”和“原生参考失效”，并指引重新查询。方案 `plan_id` 的输入绑定、消费与失效保护继续保留。
-- 保存诊断返回 `save_observation`，保留本会话最近 32 个阶段的脏标志与文件哈希；副本 dirty 与源文件未改动是不同观测，unknown 不自动当作 stale。日志派生状态写入一致，旧日志仅只读标注一致性，不自动解除隔离。
+- 保存诊断返回 `save_observation`，摘要只包含本次操作，最多 8 条阶段、4 KB；完整阶段与哈希按操作落盘并可离线分页读取；副本 dirty 与源文件未改动是不同观测，unknown 不自动当作 stale。日志派生状态写入一致，旧日志仅只读标注一致性，不自动解除隔离。
 - 回放继续使用 `1e-7 m` / `1e-6 rad` 阈值，最差组件诊断增加各轴平移差与前后位置。钟表最终复测首帧通过，但中间帧和末帧出现 p3-33 的 Z 向漂移超限，返回 POSE_MISMATCH 并恢复副本。另一次回放曾全部通过，仍不能承诺该模型重复求解稳定；其他装配也逐次核验。
 - 回放超限但副本恢复已核验时，也记录受控保存后的输入哈希和 `last_replay_attempt`，保留 `inconclusive`；恢复未知或模型版本变化不更新旧结果身份。计算后停止播放，按实际时间与全部组件姿态判断回放，不单凭 `SetTime` 布尔返回。末帧浮点值不会被内部偏移推到算例时长以外。
 - 元数据原子替换对 Windows 共享读取锁作有限重试，最多约 420 毫秒；不重试求解、保存 CAD 或创建配合，持久权限错误继续失败并保留路径诊断。
@@ -228,6 +228,33 @@ alpha.1等历史任务只有CSV时，可以受限读取并标记 `manifest_statu
 接入实际 COM 的协议测试和故障注入测试属于开发验收：后者需要显式使用自建登记模型，并只终止测试自己创建的执行器，不能对正在处理用户文件的服务执行。见 tests 目录脚本说明。
 
 ## 后续路线
+
+本地未发布修订（2026-10-14）：公开工具仍为 24 个。
+
+QZC 更新验收反馈的本地修订：
+
+- `apply_mate` 的 `execution` 分别记录原生对象返回、特征确认、重建、参数核验、保存和提交；`null` 表示该项未检查。`swAddMateError_e` 中 **1 为成功，5 为装配过定义**。过定义原因为 `MATE_OVERDEFINED`，外层保留 `MATE_APPLY_ROLLED_BACK` 及 `rollback_verified`，与创建后重建失败区分。旧 `mate_created` 只表示对象非空，不能当作提交成功；更改参数仍须新预览和确认。
+- 写响应的 `save_observation.scope=current_operation`，摘要最多 4 KB，只含本次操作；嵌套检查点保留同一 `operation_id`。完整阶段和哈希分别存入模型目录 `save-observations/`。用 `get_run_artifacts(model_id=..., operation_id=..., limit=5)` 离线分页读取，完整哈希需 `include_file_hashes=True`，响应最多 16 KB；过大的单条记录给出摘要和原文件路径。升级时原累计观测按原字节归档，摘要中的 `archived_legacy_query` 提供 `legacy_` 加 SHA256 的查询标识，不伪造旧操作身份。
+- 默认 `replay_motion_frame` 仍要求本会话 run 与当前输入匹配，重算、核验全部组件并恢复。通过后登记独立文件名的 BMP、帧时间、姿态 CSV 哈希、图像哈希和核验范围；`get_run_artifacts(run_id=...)` 列出最近 5 个已登记图像。`replay_motion_frame(run_id, frame, saved_image_only=True)` 可在重启或恢复隔离时读取该帧既有截图，不调用 COM。它不能生成未拍摄的帧；旧无清单 BMP 不自动升级为已核验图像。任意旧输入重新回放仍需未来的不可变输入快照功能。历史图像不证明当前 CAD 或独立物理精度，也不保证所有组件在画面中可见。
+- `inspect_model.reference_guidance` 给出本模型的查询路线，配合实体外层也列出 `entity_id` 和几何类型。inspection-only 表示该次返回来源，登记情况不能仅据此推断；查询返回页和原生引用仍需核验。驱动查询需找指定面时可用 `group_faces=False`，避免只返回等价几何组的代表面。
+
+恢复字段判读：`status=idle/active/unknown` 分别表示日志中的请求已结束、执行中、未确认；不是机械姿态认证。`current_request_state=completed/dispatching/unconfirmed` 是相应的当前请求状态。`observed_dispatch_state` 保留旧日志原值；`dispatch_field_consistent` 和 `recovery_field_consistent` 分别核对两个派生字段，`journal_derived_fields_consistent` 是两者均一致。旧日志不一致不会自动重写或解除隔离。
+
+`state_scope=current_owner_request_in_progress` 对应本服务请求执行中、`cad_request_policy=wait_for_current_request`；`state_scope=idle` 对应日志 idle、`cad_request_policy=available`；旧或未知请求使用 `prior_or_unknown_operation` 和 `recovery_only`。恢复未知时仍须明确选择检查点并核验恢复；`idle` 不等于配合已提交或运动通过。
+
+客户端配置键更名与历史目录分别处理：同目录升级只替换原键、保留 command/args/env 并重载；换安装目录会形成另一套存储。离线 run 数据可按该目录读取，执行器内 run 缓存不跨会话迁移。模型清单含绝对路径与原生引用，不要只改 JSON 路径就用于 CAD 恢复；目录迁移必须重新登记、重定向及核验隔离。
+
+单位保持原协议：几何坐标 `m`、面积 `m²`、配合距离和直线运动门槛 `mm`、直线驱动 `mm/s`、旋转驱动 `rpm`；导出曲线按 quantity 标明 `m`、`m/s` 或 `rad/s`。内部 API 换算保持不变。几何候选只说明可用的参考类型，相容性仍为 `not_checked`；平动组件上的圆柱孔不代表推荐给该组件加旋转驱动。
+
+- 添加配合前，对激活动画的检查点在另一份独立副本中预演恢复；时间、全体姿态、原副本文件及配合未通过核验时拒绝写入。旧液压反馈检查点仍无法完整恢复记录姿态，此限制没有消除。首次覆盖为顶层刚体零件；激活动画的多层装配会明确拒绝预检，不能假定安全回滚。
+- `get_motion_summary(run_id, allow_unverified_history=True)` 可在服务重启或 CAD 隔离时离线查看历史摘要；曲线使用同名选项。历史哈希通过不代表当前模型匹配或物理验证通过。当前 CAD 回放仍要求版本及文件哈希匹配。
+- 配合预览检查相同持久化面参考、类型、方向及支持的参数是否确定重复。相同组件对上的其他配合会提示复核；边与面不能自动判等，距离配合参数尚不用于确定判重。`inspect_model` 的参考须通过 `list_mate_references` 查询相应页面登记后再使用。
+- 显式归零会改变登记副本。查看 `previous_time_s`、`target_time_s`、`pose_change`、`operation_state` 和 `pre_operation_pose_restored`；兼容字段 `restoration_status=restored` 不能单独解释为归零前姿态已恢复。
+- 恢复状态返回原始 `observed_dispatch_state` 和当前 `current_request_state`，旧日志矛盾会标出而不会改写。替代会话仍须明确传入 `allow_replacement_session=true`，并核验旧实例已退出。
+- `experiments` 在首次生成示例或导入装配时创建；安装后暂时不存在是正常情况。JSON 构建清单写入无 BOM UTF-8，读取仍兼容旧清单。
+- PID 可在 PowerShell 用 `Get-Process SLDWORKS | Select-Object Id, MainWindowTitle` 查询，再填入客户端配置。窗口存在不代表 COM 已就绪；多实例仍必须核对实际 COM PID。
+
+当前开发机确认是 Windows 10 19045；Python 实际版本以 `scripts/validate_runtime.py` 输出为准，不按目录名判断。未将第三方报告的 Windows 11 环境记为本机验收。动态钟表的单次成功案例不消除重复求解漂移限制；超限仍返回 inconclusive。
 
 1. Windows 11 独立机器安装、MCP 客户端关闭与恢复回归。
 2. 刚性多层子装配、重复零件不同配置、轻量化及外部参照样本矩阵。

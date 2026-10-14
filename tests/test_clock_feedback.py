@@ -7,21 +7,29 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from sw_mcp.bridge import Bridge,CadError
 from sw_mcp.jobs import Jobs
+from transport_cleanup import drain_bridge, remove_test_root
 
 
 class ClockTransportTests(unittest.TestCase):
     def setUp(self):
         self.root=ROOT/'runs/clock-tests'/uuid.uuid4().hex[:8];self.root.mkdir(parents=True)
-        self.bridge=Bridge(self.root,timeout=.04,motion_scan_timeout=.04)
+        self.bridge=Bridge(self.root,timeout=5,motion_scan_timeout=.5)
+        self.gate=self.root/"release"
+        self.addCleanup(self.cleanup)
         (self.root/'executor/bin').mkdir(parents=True);(self.root/'executor/bin/SwExecutor.exe').touch()
         helper=self.root/'helper.py'
         helper.write_text('''import json,sys,time
+from pathlib import Path
+gate=Path(__file__).with_name('release')
 print(json.dumps({'ready':True,'protocol_version':1,'process_id':22}),flush=True)
 for line in sys.stdin:
  r=json.loads(line);p=r['params']
  if r['op']=='preview_mate': answer={'id':r['id'],'ok':True,'result':{'plan_id':'b'*32,'model_id':p['model_id']}}
  elif r['op']=='apply_mate':
-  time.sleep(.18)
+  end=time.monotonic()+20
+  while not gate.exists():
+   if time.monotonic()>end: raise RuntimeError("test gate expired")
+   time.sleep(.01)
   if p.get('outcome')=='unknown': answer={'id':r['id'],'ok':False,'error':{'code':'MATE_ROLLBACK_FAILED','restoration_status':'unknown'}}
   elif p.get('outcome')=='rolledback': answer={'id':r['id'],'ok':False,'error':{'code':'MATE_APPLY_ROLLED_BACK','restoration_status':'restored'}}
   else: answer={'id':r['id'],'ok':True,'result':{'model_id':p['model_id'],'plan_id':p['plan_id'],'checkpoint_id':'c'*32,'native_parameters':{'verified':True},'restoration_status':'restored'}}
@@ -31,16 +39,15 @@ for line in sys.stdin:
         real=subprocess.Popen
         self.patcher=patch('sw_mcp.bridge.subprocess.Popen',side_effect=lambda command,**kw:real([sys.executable,str(helper)],**kw))
         self.patcher.start()
-    def tearDown(self):
-        self.bridge.close()
-        if self.bridge._process:
-            self.bridge._process.wait(timeout=3);self.bridge._process.stdout.close()
-        self.patcher.stop();self.root.resolve().relative_to((ROOT/'runs/clock-tests').resolve())
-        if self.root.is_symlink():raise RuntimeError('Unexpected link')
-        shutil.rmtree(self.root)
+        self.addCleanup(self.patcher.stop)
+    def cleanup(self):
+        self.gate.touch()
+        drain_bridge(self.bridge)
+        remove_test_root(self.root,ROOT/'runs/clock-tests')
     def plan(self):return self.bridge.request('preview_mate',model_id='user_'+'a'*32)['plan_id']
     def await_reply(self):
-        end=time.monotonic()+3
+        self.gate.touch()
+        end=time.monotonic()+10
         while self.bridge.cad_operation_state=='unknown_after_timeout' and time.monotonic()<end:time.sleep(.01)
         self.assertEqual(self.bridge.cad_operation_state,'available')
     def test_derived_journal_fields_are_written_consistently(self):
@@ -50,6 +57,16 @@ for line in sys.stdin:
         self.bridge._journal_path.write_text(json.dumps({'status':'idle','recovery_required':True}))
         before=self.bridge._journal_path.read_bytes();state=self.bridge.recovery_state()
         self.assertFalse(state['journal_derived_fields_consistent']);self.assertEqual(self.bridge._journal_path.read_bytes(),before)
+    def test_legacy_dispatch_state_is_diagnosed_without_rewriting(self):
+        self.bridge._journal_path.parent.mkdir(parents=True,exist_ok=True)
+        self.bridge._journal_path.write_text(json.dumps({'status':'idle','dispatch_state':'dispatching','recovery_required':False}))
+        before=self.bridge._journal_path.read_bytes();state=self.bridge.recovery_state()
+        self.assertFalse(state['dispatch_field_consistent']);self.assertFalse(state['journal_derived_fields_consistent'])
+        self.assertEqual(state['observed_dispatch_state'],'dispatching');self.assertEqual(state['current_request_state'],'completed')
+        self.assertEqual(self.bridge._journal_path.read_bytes(),before)
+        self.bridge._journal({'status':'unknown','dispatch_state':'dispatching'})
+        self.assertTrue(self.bridge.recovery_state()['recovery_required'])
+        self.assertEqual(self.bridge.recovery_state()['dispatch_state'],'unconfirmed')
     def test_late_success_keeps_timeout_but_exposes_terminal_result_after_restart(self):
         plan=self.plan();jobs=Jobs(self.bridge,self.root)
         submitted=jobs.submit('apply_mate',{'plan_id':plan,'confirmed':True});jobs._pool.shutdown(wait=True)
@@ -98,6 +115,11 @@ for line in sys.stdin:
 
 
 class ClockPublicTests(unittest.IsolatedAsyncioTestCase):
+    async def test_explicit_history_summary_never_calls_cad(self):
+        import motion_server as server
+        with patch.object(server.artifacts,'summary',return_value={'historical_data':True,'current_model_validity':'not_checked_offline'}) as read, patch.object(server,'call',side_effect=AssertionError('CAD must not be called')):
+            await server.get_motion_summary('a'*32,allow_unverified_history=True)
+            read.assert_called_once_with('a'*32)
     async def test_default_async_reset_does_not_authorize_calculation(self):
         import motion_server as server
         with patch.object(server.jobs,'submit',return_value={'job_id':'a'*32}) as submit:

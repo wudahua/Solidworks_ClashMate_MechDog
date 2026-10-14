@@ -105,16 +105,24 @@ class Bridge:
             except (ValueError, OSError):
                 return {"status": "unreadable", "recovery_required": True}
             own_active = state["status"] == "active" and state.get("owner_id") == self._owner_id
+            expected_dispatch = {"idle": "completed", "active": "dispatching", "unknown": "unconfirmed"}[state["status"]]
+            recovery_consistent = state.get("recovery_required", state["status"] != "idle") == (state["status"] != "idle")
+            dispatch_consistent = state.get("dispatch_state", expected_dispatch) == expected_dispatch
             return {**state, "recovery_required": state["status"] != "idle",
-                    "journal_derived_fields_consistent": state.get("recovery_required", state["status"] != "idle") == (state["status"] != "idle"),
+                    "journal_derived_fields_consistent": recovery_consistent and dispatch_consistent,
+                    "recovery_field_consistent": recovery_consistent,
+                    "dispatch_field_consistent": dispatch_consistent,
+                    "observed_dispatch_state": state.get("dispatch_state"),
+                    "current_request_state": expected_dispatch,
                     "state_scope": "current_owner_request_in_progress" if own_active else "idle" if state["status"] == "idle" else "prior_or_unknown_operation",
                     "requires_checkpoint_restore": state["status"] != "idle" and not own_active,
                     "cad_request_policy": "wait_for_current_request" if own_active else "available" if state["status"] == "idle" else "recovery_only"}
 
     def _journal(self, state):
         with self._journal_lock:
-            state = {k: v for k, v in state.items() if k not in {"state_scope", "requires_checkpoint_restore", "cad_request_policy", "journal_derived_fields_consistent"}}
-            state = {**state, "recovery_required": state.get("status") != "idle", "schema_version": 2}
+            state = {k: v for k, v in state.items() if k not in {"state_scope", "requires_checkpoint_restore", "cad_request_policy", "journal_derived_fields_consistent", "recovery_field_consistent", "dispatch_field_consistent", "observed_dispatch_state", "current_request_state"}}
+            state = {**state, "recovery_required": state.get("status") != "idle", "schema_version": 3,
+                     "dispatch_state": {"idle": "completed", "active": "dispatching", "unknown": "unconfirmed"}.get(state.get("status"), "unconfirmed")}
             self._journal_path.parent.mkdir(parents=True, exist_ok=True)
             temporary = self._journal_path.with_name(self._journal_path.name + "." + uuid.uuid4().hex + ".tmp")
             temporary.write_text(json.dumps({**state, "updated_at": time.time()}, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -397,7 +405,12 @@ class Bridge:
             replacement = recovering and self._startup.result().get("process_id") != state.get("solidworks_pid")
             if replacement:
                 if not params.get("allow_replacement_session"):
-                    raise CadError("RECOVERY_SESSION_MISMATCH", "恢复默认绑定故障时相同的 SolidWorks 实例；旧实例已退出时可显式请求替代会话恢复。")
+                    raise CadError("RECOVERY_SESSION_MISMATCH", "恢复默认绑定故障时相同的 SolidWorks 实例；核对旧实例已退出后可显式设置 allow_replacement_session=true。", diagnostics={
+                        "required_param": "allow_replacement_session", "required_value": True,
+                        "model_id": params.get("model_id"), "checkpoint_id": params.get("checkpoint_id"),
+                        "previous_solidworks_pid": state.get("solidworks_pid"), "current_solidworks_pid": hello["process_id"],
+                        "preconditions": ["previous_instance_exited_and_identity_verified", "explicit_checkpoint_selection"],
+                        "next_tools": ["get_recovery_state", operation], "automatic_replacement": False})
                 if self._pid_alive(state.get("solidworks_pid")):
                     raise CadError("PREVIOUS_SOLIDWORKS_ALIVE", "旧SolidWorks实例仍存活或身份无法核实，拒绝替代会话恢复。")
             if operation in {"apply_mate", "_test_mate_rollback"}:

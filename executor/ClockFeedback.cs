@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using SolidWorks.Interop.sldworks;
 
 public partial class Cad {
-    readonly Dictionary<string,List<object>> ownedSaveObservations=new Dictionary<string,List<object>>();
     void WriteStage(string stage,string modelId=null,string planId=null,string checkpointId=null){
         Log("WRITE_STAGE "+stage);Progress(activeJobId,stage,0,0,null);
         if(!string.IsNullOrEmpty(activeJobId)&&modelId!=null)AtomicJson(Path.Combine(Root,"runs","progress",activeJobId+".json"),new{job_id=activeJobId,stage=stage,model_id=modelId,plan_id=planId,checkpoint_id=checkpointId,updated_at=(DateTime.UtcNow-new DateTime(1970,1,1,0,0,0,DateTimeKind.Utc)).TotalSeconds});
@@ -14,7 +13,7 @@ public partial class Cad {
     CadFault MissingEntity(UserModel m,string id,bool mate){
         int? registered=null;int old;if(m.EntityRegistrationRevisions.TryGetValue(id??"",out old))registered=old;
         int? removed=null;bool rollback=m.RemovedEntityRegistrations.TryGetValue(id??"",out removed);
-        return new CadFault(mate?"MATE_REFERENCE_NOT_REGISTERED":"DRIVE_ENTITY_NOT_FOUND",rollback?"检查点恢复回退了该参考的登记；请重新查询本模型的参考。":"本模型未登记该参考；请查询对应页面，不能复用其他模型的ID。",new{model_id=m.Id,entity_id=id,current_revision=m.Revision,last_known_registration_revision=rollback?removed:registered,reason=rollback?"registration_removed_by_checkpoint_restore":"not_registered_in_current_model",checkpoint_id=rollback?m.LastRestoredCheckpoint:null,required_tool=mate?"list_mate_references":"list_drive_candidates",automatic_rebinding=false});
+        return new CadFault(mate?"MATE_REFERENCE_NOT_REGISTERED":"DRIVE_ENTITY_NOT_FOUND",rollback?"检查点恢复回退了该参考的登记；请重新查询本模型的参考。":(mate?"本模型尚未登记该参考；先用 list_mate_references 查询相应页面。inspect_model 的 inspection-only ID 不会因可解析就自动登记。":"本模型尚未登记该参考；先用 list_drive_candidates 查询相应页面，inspect_model 的 ID 须核对登记。"),new{model_id=m.Id,entity_id=id,current_revision=m.Revision,last_known_registration_revision=rollback?removed:registered,reason=rollback?"registration_removed_by_checkpoint_restore":"not_registered_in_current_model",checkpoint_id=rollback?m.LastRestoredCheckpoint:null,required_tool=mate?"list_mate_references":"list_drive_candidates",reference_source="unregistered_or_inspection_only",registration_status=rollback?"removed_by_restore":"not_registered",required_query=mate?(object)new{model_id=m.Id,limit=20}:new{model_id=m.Id,group_faces=false,limit=20},automatic_rebinding=false});
     }
     object RestoreDifference(UserModel m,Dictionary<string,object> checkpoint){
         var target=Json.Deserialize<StudyState[]>(Json.Serialize(checkpoint["studies"]));
@@ -27,12 +26,9 @@ public partial class Cad {
         }catch(Exception e){return new{status="current_difference_unavailable",target_studies=target,current_study_difference_verified=false,error=HistoryErrorCode(e),message=e.Message};}
     }
     void ObserveOwnedSave(UserModel m,string stage){
-        var observation=new StudyHistory.Observation();ObserveHistory(m,observation,stage);
-        List<object> trace;if(!ownedSaveObservations.TryGetValue(m.Id,out trace)){trace=new List<object>();ownedSaveObservations[m.Id]=trace;}
-        trace.Add(new{stage=stage,model_revision=m.Revision,observation=observation.Export(),file_hashes=HistoryCurrentHashes(m)});if(trace.Count>32)trace.RemoveAt(0);
-        AtomicJson(Path.Combine(m.Directory,"last-save-observation.json"),SaveObservation(m));
+        if(saveOperation==null){using(var scope=BeginSaveObservationOperation("direct_save_observation")){ObserveOwnedSave(m,stage);}return;}
+        var observation=new StudyHistory.Observation();ObserveHistory(m,observation,stage);RecordSaveObservation(m,stage,observation.Export(),HistoryCurrentHashes(m));
     }
-    object SaveObservation(UserModel m){List<object> trace;ownedSaveObservations.TryGetValue(m.Id,out trace);return new{model_id=m.Id,stages=trace==null?new object[0]:trace.ToArray(),stage_limit=32,warning="dirty_copy_does_not_imply_source_modified; unknown_is_not_stale"};}
     void RecordReplayRestoration(Run run,string attempt,int frame,string outcome){
         var model=GetUserModel(run.Assembly);if(model.Revision!=run.EditVersion)throw new CadFault("REPLAY_INPUT_STATE_CHANGED","恢复后模型版本已改变，不更新旧结果输入身份。",new{run_id=run.Id,recorded_revision=run.EditVersion,current_revision=model.Revision});
         var before=run.FileHashes;run.FileHashes=model.Files.ToDictionary(p=>p,p=>FileHash(p));
