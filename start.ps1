@@ -1,5 +1,7 @@
-param([int]$SolidWorksProcessId = 0, [switch]$Legacy)
+param([int]$SolidWorksProcessId = 0, [switch]$AutoDetect, [switch]$Legacy)
 $ErrorActionPreference = 'Stop'
+if ($AutoDetect -and $SolidWorksProcessId -ne 0) { throw 'Choose AutoDetect or a specific SolidWorksProcessId, not both.' }
+if ($AutoDetect) { $env:SW_MCP_PROCESS_ID = 'auto' }
 if ($SolidWorksProcessId -gt 0) { $env:SW_MCP_PROCESS_ID = [string]$SolidWorksProcessId }
 $projectPython = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
 $executorPath = Join-Path $PSScriptRoot 'executor\bin\SwExecutor.exe'

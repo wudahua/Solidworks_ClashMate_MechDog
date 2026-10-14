@@ -1,5 +1,5 @@
 {
-  "version": "0.4.1-alpha.3",
+  "version": "0.4.1-alpha.5",
   "kind": "source_only",
   "includes_user_cad": false,
   "includes_runtime_data": false,
@@ -7,13 +7,13 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 34302,
-      "sha256": "1b48ab3e8f1eeaf4423ef19366fdc5910980de5230d1a0713d88ab5a74e6cc7b"
+      "bytes": 43385,
+      "sha256": "a6efb2d8fae67f6942bb8f68e14efe4928c8782b46edce9bb9745f0f3e6c00b2"
     },
     {
-      "path": "发布说明_v0.4.1-alpha.3.md",
-      "bytes": 6226,
-      "sha256": "f6729a9ae769f44362ed7e808e322c28ed69037b32fa52cf776f82256becd819"
+      "path": "发布说明_v0.4.1-alpha.5.md",
+      "bytes": 5163,
+      "sha256": "d5effa1a6dd6f7a88db67cc17165a3f69c82e67fc2970f0ce90d23f5cef864d1"
     },
     {
       "path": "LICENSE",
@@ -37,13 +37,13 @@
     },
     {
       "path": "motion_server.py",
-      "bytes": 18153,
-      "sha256": "726872046d1172744dbc7c7e82c746a81dab6185c7623e9e4c12540e57949f8f"
+      "bytes": 21249,
+      "sha256": "6a7cbd7a6e8b7b36fa40d35fdc9f781d31ba3f46899f6a3dd7d8427f2344a30a"
     },
     {
       "path": "mcp-config.example.json",
-      "bytes": 251,
-      "sha256": "7f1c42116361c17b39e239da447a88d410828c06caa4d028a80654a5433edb81"
+      "bytes": 259,
+      "sha256": "a3120bb4dc7d1691340d85be0a58d4e70f34ce3336911dd689679ffbf5f91eb7"
     },
     {
       "path": "install.ps1",
@@ -52,8 +52,13 @@
     },
     {
       "path": "start.ps1",
-      "bytes": 828,
-      "sha256": "c84e5c02f4fcad0bf2195157de89c18cf8783c411ce9f27e117936912794b676"
+      "bytes": 1026,
+      "sha256": "f52bcf0015f88e755a13772997e92cf35345b6ae919ff272c48fe8b853875866"
+    },
+    {
+      "path": "upgrade.ps1",
+      "bytes": 629,
+      "sha256": "0dbcbcff22ab4c7434c771b6796de11353576ec59e6809ed39c25aeaa026cd50"
     },
     {
       "path": "初始化环境.ps1",
@@ -82,8 +87,8 @@
     },
     {
       "path": "executor/BasicMates.cs",
-      "bytes": 27489,
-      "sha256": "4641ec2c10b5f4912f72df69fb9e64e7314f2778304f4393f1628b4deb826c08"
+      "bytes": 31446,
+      "sha256": "30f13910e3ae2e775936514cd308da3d802fa888571b75898cd31fe26c1d1116"
     },
     {
       "path": "executor/Cad.cs",
@@ -101,14 +106,24 @@
       "sha256": "548acc82a9d40aacb24f2d5472a4a7ac4f14f859d7826753db6bf0ed57e7f396"
     },
     {
+      "path": "executor/CheckpointPreflight.cs",
+      "bytes": 7291,
+      "sha256": "c0d4cb9f00154ac15a2a8d6411116fe0e19fb0ac898f6d20ffbeda7b39ff9961"
+    },
+    {
       "path": "executor/ClockFeedback.cs",
-      "bytes": 5110,
-      "sha256": "3a3d88047416db16e3e8d033e6e6d79786a38ba1bda07e94fe752f5c89c1f471"
+      "bytes": 5334,
+      "sha256": "7df50b2904c3c0b94bb9ba8288579eefaafbfbb2d22f537609730520c279f9e3"
+    },
+    {
+      "path": "executor/CompatibilityProbe.cs",
+      "bytes": 5374,
+      "sha256": "18f70974083209be5abb0c0476522f0a16a146c29669ff7a2a820b6902dd25f1"
     },
     {
       "path": "executor/DriveCandidates.cs",
-      "bytes": 6745,
-      "sha256": "45ea1cf47096795e1be2deffa4b65c67af2a40bca0f65f885abfd9a89075ffbc"
+      "bytes": 6799,
+      "sha256": "da5f818c302aab05c32f5dabecb6ba5403463dc772560091323040b909c2ad75"
     },
     {
       "path": "executor/Examples.cs",
@@ -131,9 +146,29 @@
       "sha256": "d3eb9c9d88f42dd0606cc132daeb7fd431523416dc1ffd17d4339de8707418c7"
     },
     {
+      "path": "executor/InspectedReferences.cs",
+      "bytes": 1898,
+      "sha256": "c3bbaa2bd38d2a25da2b64362b6a15974b6c6af0a8ea0da45f4246f9ee9f0006"
+    },
+    {
+      "path": "executor/MateExecutionEvidence.cs",
+      "bytes": 1760,
+      "sha256": "e9448304b6a9d5829100e6835b354e77590867dc930791f0c668b5301037fa42"
+    },
+    {
+      "path": "executor/MateHealth.cs",
+      "bytes": 2576,
+      "sha256": "2103ea3f8cf192055c802b6aba9059bc16c73ae564527a52c44e80f15baec4cf"
+    },
+    {
       "path": "executor/MateInspection.cs",
-      "bytes": 2015,
-      "sha256": "073bfb5669b83c39876c920d878fed110cedbbc1b35727347326d9f64ed152d1"
+      "bytes": 2708,
+      "sha256": "0d41f6f4b4a15d0e8e8227dc84d496599c65d7e4f2878223da9cebde579c7840"
+    },
+    {
+      "path": "executor/MatePreflight.cs",
+      "bytes": 3140,
+      "sha256": "a59d59deb9893d6d8ab5236741c37418865b957006ed96618ff1f53e5da536a8"
     },
     {
       "path": "executor/MotionFeatureEvidence.cs",
@@ -142,13 +177,13 @@
     },
     {
       "path": "executor/MotionIntent.cs",
-      "bytes": 3575,
-      "sha256": "b259c75d95ae81812b8bdac0556ffc27ad3bfbd27597e33920cefe4401753e9e"
+      "bytes": 4570,
+      "sha256": "b1d33d701fd1ce61e9dc2c47501d035289d4b75d15f589eb780b75c1bee6754a"
     },
     {
       "path": "executor/MotionState.cs",
-      "bytes": 11217,
-      "sha256": "da2107bc324f863df6714b6b5bef64141d28d36cf0589e02bc4ae10f6c84f00b"
+      "bytes": 12385,
+      "sha256": "55bf2ed2e83bf5bdb4b6d29f0bdfbc8ee19df008b228ee97550bad292d59448a"
     },
     {
       "path": "executor/MotionTimeSelection.cs",
@@ -162,8 +197,13 @@
     },
     {
       "path": "executor/Program.cs",
-      "bytes": 8912,
-      "sha256": "8535ab4af3a2c8aaafe763546d49c4b23d242c8cd317e9ba7df861683f74dbe3"
+      "bytes": 9119,
+      "sha256": "a24c567e5ca9f9f4d8f0eb4c7522bb56d2fbd191c6988fb1c21576593936c703"
+    },
+    {
+      "path": "executor/RecoveryEvidence.cs",
+      "bytes": 1274,
+      "sha256": "27d716d3f175df1bc34591f522b9aa885c692fe46dca0c48ff5850cabaa8cd24"
     },
     {
       "path": "executor/RelativeMotion.cs",
@@ -171,19 +211,39 @@
       "sha256": "ef466d860a3afd8b01cdb2da92c8ab1f1b74ceecbd9ff7674fc2931eea8ecc76"
     },
     {
+      "path": "executor/ReplayImageEvidence.cs",
+      "bytes": 2885,
+      "sha256": "949068ac7114d73d7025a4f175f804b2cd68929f3b73fff9ab9ac53486ea08c2"
+    },
+    {
       "path": "executor/Runtime.cs",
-      "bytes": 35563,
-      "sha256": "b90fab2db4f66d1f2f191f230114d970d58ae5e47caacda82efc596d733a573d"
+      "bytes": 35910,
+      "sha256": "d60894d7b6caa454980f8d2901c55893af684ab577cc0d67120399e46a9f61d7"
+    },
+    {
+      "path": "executor/SaveObservationOperations.cs",
+      "bytes": 6913,
+      "sha256": "31092789770163c0a0056e0aacd0f6d7e9f87b800ea1ad8053beb391325effa0"
     },
     {
       "path": "executor/SessionConnection.cs",
-      "bytes": 5949,
-      "sha256": "facca08723234ce4b2cf89eb645a0aa6a798420c29ea80a574c5c33a65407dd8"
+      "bytes": 7992,
+      "sha256": "919c3888acec84422ae51bc54da04be51ea20b51b927e8d524f58ecd51a33766"
+    },
+    {
+      "path": "executor/SessionInventory.cs",
+      "bytes": 1850,
+      "sha256": "d763c498b964e7e60e01e4d6a9d95e94073863303d9db5cef4ddd77b1de4be02"
+    },
+    {
+      "path": "executor/SolverEvidence.cs",
+      "bytes": 3020,
+      "sha256": "49d8203afd8f1ee5fd1993613c7c1a3059c56f5f2627d442bb9ed97e639acb03"
     },
     {
       "path": "executor/StudyConversion.cs",
-      "bytes": 2248,
-      "sha256": "d7bbe3b76ae5f54f42ac31cc989ba1101080c7509368b2fd516a90a11ff2e3bc"
+      "bytes": 2335,
+      "sha256": "4b5744b38eded992933b52be689ba0f80359912a29cb32221d58697a5144e123"
     },
     {
       "path": "executor/StudyHistory.cs",
@@ -192,8 +252,8 @@
     },
     {
       "path": "executor/StudyReset.cs",
-      "bytes": 6000,
-      "sha256": "09291285f6ba0da041379a24157e55f9e131cf0ce5e1c5df9f45c408df6d1cfb"
+      "bytes": 8073,
+      "sha256": "0c6ce0dbb4ef5928c9ce0fd6d9c84aa85580e4895d988afbb790b71b8b0a93cd"
     },
     {
       "path": "executor/TimeAxis.cs",
@@ -207,8 +267,8 @@
     },
     {
       "path": "executor/UserMotion.cs",
-      "bytes": 51021,
-      "sha256": "7083e910f13281f7fb068c947bf962a9e224df5686d89a79f4e2a706488f20d6"
+      "bytes": 55050,
+      "sha256": "97ad06d29b59e76188a586e425041ddac0c7209e36b18e67c12faff887c04a3c"
     },
     {
       "path": "executor/Workflow.cs",
@@ -217,8 +277,8 @@
     },
     {
       "path": "executor/build.ps1",
-      "bytes": 2202,
-      "sha256": "734e234dae9a43b605407270a027b9c21d0414f0f3605ab5b3a5b2ee08e06c17"
+      "bytes": 2481,
+      "sha256": "91a628ed98b14da7efd389f10341a99747e5a253672005daa4fa76a7ea62c987"
     },
     {
       "path": "sw_mcp/__init__.py",
@@ -227,18 +287,28 @@
     },
     {
       "path": "sw_mcp/artifacts.py",
-      "bytes": 14611,
-      "sha256": "2d515c19f6c35df00e5cbd6d8344eccad1e1b5217d5a66380331a53d2439f044"
+      "bytes": 15547,
+      "sha256": "b9e550e7143b32477749c022421cc357132deff29aae47655c34b07496351e06"
     },
     {
       "path": "sw_mcp/bridge.py",
-      "bytes": 30283,
-      "sha256": "d3ca8bd23697bfbcffb4fe9eba82dc942d7fd73dcea96124de3dc709212ddcf1"
+      "bytes": 33380,
+      "sha256": "5d34a26b7e48b94aa81b256531dd150d772c70c016c89a7be6de3239aaa4fb47"
     },
     {
       "path": "sw_mcp/jobs.py",
-      "bytes": 6544,
-      "sha256": "d423c4a981d4ba8544718d13982be53fc71d1a42fd54f565a50a19c33f004584"
+      "bytes": 6574,
+      "sha256": "3e544e5a760d5674af1bcebbc6348be82b894542681a1129e713e9f4edbeabf8"
+    },
+    {
+      "path": "sw_mcp/replay_images.py",
+      "bytes": 8543,
+      "sha256": "a6886ff59e3b8e8eb1ac7a950bc370ce432f74d5fe97834500f19f85614ca90b"
+    },
+    {
+      "path": "sw_mcp/save_observations.py",
+      "bytes": 8394,
+      "sha256": "3f5b26468bbaab56a9b98497b66f2f4e5dc5db6efaa848cb8e45ab0f0c68aa2f"
     },
     {
       "path": "sw_mcp/startup.py",
@@ -257,8 +327,18 @@
     },
     {
       "path": "scripts/build_release.py",
-      "bytes": 4208,
-      "sha256": "4587e7226979155083b57eb37a7744362c0d616d6d28fc2e4925988f8661ce99"
+      "bytes": 5161,
+      "sha256": "c9b14f1c400a9a4c8609b1472fc4ae226e00e5fd3d1c79356c3c0c1a975ad93a"
+    },
+    {
+      "path": "scripts/verify_release.py",
+      "bytes": 4115,
+      "sha256": "1f3c0f85a6310efd519db7822154d884c4268d486f2015f56a0e84cc41badd86"
+    },
+    {
+      "path": "scripts/upgrade.py",
+      "bytes": 8815,
+      "sha256": "82fdb8d802923d1a9992cd4741399f7611c91ee3c77948a6127e7001a8f52dca"
     },
     {
       "path": "scripts/recover.py",
@@ -272,8 +352,8 @@
     },
     {
       "path": "tests/test_service.py",
-      "bytes": 12614,
-      "sha256": "a9f42330ff94b9bba0c66e2a237f41a6cb02d98000d476585ce2e48106109d44"
+      "bytes": 12888,
+      "sha256": "c7dbab25904004cc04b12d1965f99759ec3126696e206403520b846c9020f1ff"
     },
     {
       "path": "tests/test_reliability.py",
@@ -367,13 +447,13 @@
     },
     {
       "path": "tests/SessionConnectionTests.cs",
-      "bytes": 5741,
-      "sha256": "577834f62c8f1e4a0ebcb9668fea96d2e43c0a237b8b625edae50a9b46b3b53d"
+      "bytes": 7734,
+      "sha256": "4c39e94f216af82739f7d1f8a32a33f3c4743a90558a090fa80cad51764eaefc"
     },
     {
       "path": "tests/session_connection_checks.py",
-      "bytes": 1946,
-      "sha256": "b76cf3f9feed582bf5a380b356be6352c764cd96e9ba3671df784d2d3409f498"
+      "bytes": 2031,
+      "sha256": "194b5a50ca4ed2b6e1af7b1105fd52425cfeb5d386036f60e6ef9bf04b70174e"
     },
     {
       "path": "tests/session_connection_native.py",
@@ -402,13 +482,58 @@
     },
     {
       "path": "tests/test_clock_feedback.py",
-      "bytes": 8110,
-      "sha256": "857e803f0ef9277af4404779d697485b770544df98344efc881079c092055c9d"
+      "bytes": 9824,
+      "sha256": "37e51dea603b22a2e900515853dfcd5b3059dfa5c6388cdf95b33ec9a6e24b9c"
+    },
+    {
+      "path": "tests/transport_cleanup.py",
+      "bytes": 1181,
+      "sha256": "a604c61dd9f52a87c7cba8b94bd04d31c2cb79d3b1ec2b61d5fb6a4e68d6b524"
+    },
+    {
+      "path": "tests/test_qzc_feedback.py",
+      "bytes": 11791,
+      "sha256": "f3022e8741db8d0518e551bbc6cda327c9568dc6a1f90e4727c80645896fa91a"
+    },
+    {
+      "path": "tests/qzc_evidence_checks.py",
+      "bytes": 5802,
+      "sha256": "d1cda2b5b3c9d9885a3907036fdf1fb5227e793dbf7b394e7d0cae66e1ea814f"
+    },
+    {
+      "path": "tests/recovery_evidence_checks.py",
+      "bytes": 3576,
+      "sha256": "90e8d5589b93527f10528a611501929162d9660ff22cafcc7d9d5c9890bcf073"
+    },
+    {
+      "path": "tests/qzc_protocol_checks.py",
+      "bytes": 4071,
+      "sha256": "632310fef348e21b8d39a7d1c9ae297690271f4227a5a2842d72f98e4f9021ea"
     },
     {
       "path": "tests/clock_time_selection_checks.py",
       "bytes": 2998,
       "sha256": "40aa84f95f47e080177804c0b60be474bf150fda64180f4909e6028808719abc"
+    },
+    {
+      "path": "tests/test_alpha5.py",
+      "bytes": 9555,
+      "sha256": "ce657b14becfea6008d387916fd51c1b1771f5d011ca156f109807755f132b4d"
+    },
+    {
+      "path": "tests/alpha5_evidence_checks.py",
+      "bytes": 4280,
+      "sha256": "a26cf3c80fb9302ace91e87fdc9b8376b4fb16742f00fd24a4c469bca2e887d6"
+    },
+    {
+      "path": "tests/alpha5_native_checks.py",
+      "bytes": 10717,
+      "sha256": "1e2cd50089369cf84f8bcc376668b7432f1efcf3f9f85109c5c050960ce30f7c"
+    },
+    {
+      "path": ".github/workflows/release-validation.yml",
+      "bytes": 418,
+      "sha256": "7401ed1f09819da45429a67fc1f3a67358ee4fa5bc33a4cf487e202dd00b189b"
     },
     {
       "path": "server.py",
