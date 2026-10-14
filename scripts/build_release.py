@@ -6,11 +6,11 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.1-alpha.3"
+VERSION = "0.4.1-alpha.4"
 
 
 def build():
-    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.1-alpha.3.md", "LICENSE", ".gitignore", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
+    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.1-alpha.4.md", "LICENSE", ".gitignore", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
     sources += sorted((ROOT/"executor").glob("*.cs"))
     sources += [ROOT/"executor/build.ps1"]
     sources += sorted((ROOT/"sw_mcp").glob("*.py"))
@@ -19,6 +19,7 @@ def build():
     sources += [ROOT/"tests"/name for name in ("test_installation.py", "SessionConnectionTests.cs", "session_connection_checks.py", "session_connection_native.py", "installation_powershell_checks.py")]
     sources += [ROOT/"tests"/name for name in ("relative_motion_checks.py", "test_mechanism_feedback.py", "mechanism_protocol_checks.py")]
     sources += [ROOT/"tests/test_clock_feedback.py"]
+    sources += [ROOT/"tests"/name for name in ("transport_cleanup.py", "test_qzc_feedback.py", "qzc_evidence_checks.py", "recovery_evidence_checks.py", "qzc_protocol_checks.py")]
     sources += [ROOT/"tests/clock_time_selection_checks.py"]
     releases = ROOT/"releases"
     releases.mkdir(exist_ok=True)
