@@ -21,7 +21,7 @@ from transport_cleanup import remove_test_root
 class QzcHistoryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         # Keep SHA-named legacy fixtures below Windows MAX_PATH in long release checkouts.
-        self.base=Path(tempfile.gettempdir())/'cm-qzc';self.root=self.base/uuid.uuid4().hex[:8];self.root.mkdir(parents=True)
+        self.base=Path(tempfile.gettempdir()).resolve()/'cm-qzc';self.root=self.base/uuid.uuid4().hex[:8];self.root.mkdir(parents=True)
         self.addCleanup(remove_test_root,self.root,self.base)
         self.model='user_'+'c'*32;self.operation='d'*32
         self.model_root=self.root/'experiments/user_assemblies'/self.model[5:]
@@ -116,7 +116,7 @@ class QzcHistoryTests(unittest.IsolatedAsyncioTestCase):
         image,_,_=self.make_image();bridge=Bridge(self.root);bridge._journal({'status':'unknown'});bridge.close()
         with patch.object(server,'artifacts',Artifacts(self.root)),patch.object(server.bridge,'request',side_effect=AssertionError('COM forbidden')):
             result=await server.replay_motion_frame(self.run,1,saved_image_only=True)
-        self.assertFalse(result.is_error);data=result.structured_content['result'];self.assertEqual(data['image_path'],str(image))
+        self.assertFalse(result.is_error);data=result.structured_content['result'];self.assertEqual(Path(data['image_path']).resolve(),image.resolve())
         self.assertTrue(data['historical_image']);self.assertFalse(data['fresh_cad_replay_performed']);self.assertEqual(data['current_model_validity'],'not_checked_offline')
 
     def test_saved_image_and_csv_tamper_are_rejected(self):
