@@ -20,18 +20,23 @@ def package_files(package):
     package=Path(package);sidecar=package.with_suffix(package.suffix+'.sha256')
     text=sidecar.read_text(encoding='utf-8-sig').strip();parts=text.split()
     if not parts or not re.fullmatch(r'[a-fA-F0-9]{64}',parts[0]):raise ValueError('Invalid ZIP SHA256 sidecar')
-    if len(parts)>1 and ' '.join(parts[1:]).lstrip('*')!=package.name:raise ValueError('SHA256 filename mismatch')
+    if len(parts)>1 and ' '.join(parts[1:]).lstrip('*')!=package.name:
+        expected=' '.join(parts[1:]).lstrip('*')
+        raise ValueError('SHA256 filename mismatch: expected '+expected+'; actual '+package.name+'. Rename the local ZIP to the expected filename, retain the matching .sha256 sidecar, and retry. Filename and digest checks remain strict.')
     if package.stat().st_size>50_000_000:raise ValueError('ZIP exceeds source package budget')
     digest=hashlib.sha256(package.read_bytes()).hexdigest()
     if digest!=parts[0].lower():raise ValueError('ZIP SHA256 mismatch')
-    contents={};total=0
+    contents={};total=0;archive_root=None
     with zipfile.ZipFile(package) as z:
         if len(z.infolist())>1000:raise ValueError('Too many source entries')
         for entry in z.infolist():
             if entry.is_dir():continue
             name=entry.filename
-            if not name.startswith('SolidWorksMotionMCP/'):raise ValueError('Unexpected ZIP root')
-            relative=safe_relative(name[len('SolidWorksMotionMCP/'):]).as_posix()
+            prefix, separator, remainder=name.partition('/')
+            if not separator or prefix not in {'Solidworks_ClashMate_MechDog','SolidWorksMotionMCP'}:raise ValueError('Unexpected ZIP root')
+            if archive_root is not None and archive_root!=prefix:raise ValueError('Mixed ZIP roots refused')
+            archive_root=prefix
+            relative=safe_relative(remainder).as_posix()
             if entry.external_attr>>16&0o170000==0o120000:raise ValueError('Linked ZIP entry refused')
             if relative.casefold() in {n.casefold() for n in contents}:raise ValueError('Duplicate ZIP path')
             total+=entry.file_size
@@ -107,9 +112,10 @@ def upgrade(package,target,python,solidworks_dir='',dry_run=False,install=True):
                 command=['powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',str(target/'install.ps1'),'-PythonPath',str(python)]
                 if solidworks_dir:command+=['-SolidWorksInstallDir',solidworks_dir]
                 subprocess.run(command,check=True)
+            final_integrity=verify(target)
             after=journal.read_bytes() if journal.exists() else None
             if before!=after:raise RuntimeError('Recovery journal changed unexpectedly; preserve backup and inspect')
-            status.update(committed=True,recovery_journal_unchanged=True,environment_scope='existing_venv_validated_by_install_not_snapshot_rollback',executor_compiled=install)
+            status.update(committed=True,recovery_journal_unchanged=True,source_integrity_verified=True,final_source_files=final_integrity['source_files'],environment_scope='existing_venv_validated_by_install_not_snapshot_rollback',executor_compiled=install)
         except Exception as error:
             # Delete only newly introduced managed files, with bounds checked individually.
             rollback_errors=[]
