@@ -1,5 +1,5 @@
 {
-  "version": "0.4.1-alpha.5",
+  "version": "0.4.1-alpha.6",
   "kind": "source_only",
   "includes_user_cad": false,
   "includes_runtime_data": false,
@@ -7,13 +7,13 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 43471,
-      "sha256": "dd43a431ebab688129be16538743898ebee75920adb96e2cdf5b2d16ace5d693"
+      "bytes": 49584,
+      "sha256": "9a5987e161fccbbf4306eee5ba4d4336111b539ca6dc13dfb4785c5517e47ac8"
     },
     {
-      "path": "发布说明_v0.4.1-alpha.5.md",
-      "bytes": 5163,
-      "sha256": "d5effa1a6dd6f7a88db67cc17165a3f69c82e67fc2970f0ce90d23f5cef864d1"
+      "path": "发布说明_v0.4.1-alpha.6.md",
+      "bytes": 5930,
+      "sha256": "1090bbe58cde39663e79d122080c40a72b2687d8d274adbec5b7f6ab83aea262"
     },
     {
       "path": "LICENSE",
@@ -42,8 +42,8 @@
     },
     {
       "path": "motion_server.py",
-      "bytes": 21249,
-      "sha256": "6a7cbd7a6e8b7b36fa40d35fdc9f781d31ba3f46899f6a3dd7d8427f2344a30a"
+      "bytes": 23733,
+      "sha256": "3ab9f25a9ba3fb60eefa35ba1b79d19083608300a4b937a1f491025347a2566f"
     },
     {
       "path": "mcp-config.example.json",
@@ -92,8 +92,8 @@
     },
     {
       "path": "executor/BasicMates.cs",
-      "bytes": 31446,
-      "sha256": "30f13910e3ae2e775936514cd308da3d802fa888571b75898cd31fe26c1d1116"
+      "bytes": 33071,
+      "sha256": "a0b0bd7f56b9ae7d5405183e1fe16e06e049ec0e40a632e23e4a6b553f2fba83"
     },
     {
       "path": "executor/Cad.cs",
@@ -112,8 +112,8 @@
     },
     {
       "path": "executor/CheckpointPreflight.cs",
-      "bytes": 7291,
-      "sha256": "c0d4cb9f00154ac15a2a8d6411116fe0e19fb0ac898f6d20ffbeda7b39ff9961"
+      "bytes": 15318,
+      "sha256": "9af170be59908298de68c21c77c7e16fac279aa473c57ffe5ec9484a0609ea1a"
     },
     {
       "path": "executor/ClockFeedback.cs",
@@ -126,9 +126,14 @@
       "sha256": "18f70974083209be5abb0c0476522f0a16a146c29669ff7a2a820b6902dd25f1"
     },
     {
+      "path": "executor/ComponentMotionOverview.cs",
+      "bytes": 2754,
+      "sha256": "0a18af199c1ca7d899c7bc60d0c752a1b467e5d05c91afd017aa46e9b2b68360"
+    },
+    {
       "path": "executor/DriveCandidates.cs",
-      "bytes": 6799,
-      "sha256": "da5f818c302aab05c32f5dabecb6ba5403463dc772560091323040b909c2ad75"
+      "bytes": 6997,
+      "sha256": "856b65e326120bc66cc22e374e8666f06f27ee526df7e10adccfd68640d55d49"
     },
     {
       "path": "executor/Examples.cs",
@@ -151,6 +156,11 @@
       "sha256": "d3eb9c9d88f42dd0606cc132daeb7fd431523416dc1ffd17d4339de8707418c7"
     },
     {
+      "path": "executor/ImportReferences.cs",
+      "bytes": 1812,
+      "sha256": "c22b84427118226195a2ca83f3076bd872e8100b0b76ac11451659b3d9bc2342"
+    },
+    {
       "path": "executor/InspectedReferences.cs",
       "bytes": 1898,
       "sha256": "c3bbaa2bd38d2a25da2b64362b6a15974b6c6af0a8ea0da45f4246f9ee9f0006"
@@ -162,13 +172,18 @@
     },
     {
       "path": "executor/MateHealth.cs",
-      "bytes": 2576,
-      "sha256": "2103ea3f8cf192055c802b6aba9059bc16c73ae564527a52c44e80f15baec4cf"
+      "bytes": 1288,
+      "sha256": "509b59fb7863a61dea39719242147999eea529603288273349a8e77ef59235bb"
+    },
+    {
+      "path": "executor/MateHealthEvidence.cs",
+      "bytes": 1387,
+      "sha256": "06fd1add93ee2a1eace211eb14c293de61abf75585587c4b47bb7904695d7418"
     },
     {
       "path": "executor/MateInspection.cs",
-      "bytes": 2708,
-      "sha256": "0d41f6f4b4a15d0e8e8227dc84d496599c65d7e4f2878223da9cebde579c7840"
+      "bytes": 3605,
+      "sha256": "15e182122d2e74e593ddfd4593d79857468e0a4867496c112a2cf8d0354224be"
     },
     {
       "path": "executor/MatePreflight.cs",
@@ -179,6 +194,11 @@
       "path": "executor/MotionFeatureEvidence.cs",
       "bytes": 351,
       "sha256": "50b3e2089cdec4f6864996649b110ff1cf8ca501e56e27df32a8167e2d996ea6"
+    },
+    {
+      "path": "executor/MotionFeatureInventory.cs",
+      "bytes": 3835,
+      "sha256": "f64ad3ab227d5964b2fbad2306f7cedd1acdceb7eaf680e0b572ea7ade420184"
     },
     {
       "path": "executor/MotionIntent.cs",
@@ -216,14 +236,19 @@
       "sha256": "ef466d860a3afd8b01cdb2da92c8ab1f1b74ceecbd9ff7674fc2931eea8ecc76"
     },
     {
+      "path": "executor/ReplayDiagnostics.cs",
+      "bytes": 1927,
+      "sha256": "e67a395b2ca106047d0db6916974b02677916e1b804196b8af53f58acc201ff7"
+    },
+    {
       "path": "executor/ReplayImageEvidence.cs",
       "bytes": 2885,
       "sha256": "949068ac7114d73d7025a4f175f804b2cd68929f3b73fff9ab9ac53486ea08c2"
     },
     {
       "path": "executor/Runtime.cs",
-      "bytes": 35910,
-      "sha256": "d60894d7b6caa454980f8d2901c55893af684ab577cc0d67120399e46a9f61d7"
+      "bytes": 36241,
+      "sha256": "6d8bde7fade3847422170718da02ba8373b416457d57e2b5aaa9d7424afb1343"
     },
     {
       "path": "executor/SaveObservationOperations.cs",
@@ -232,8 +257,8 @@
     },
     {
       "path": "executor/SessionConnection.cs",
-      "bytes": 7992,
-      "sha256": "919c3888acec84422ae51bc54da04be51ea20b51b927e8d524f58ecd51a33766"
+      "bytes": 3273,
+      "sha256": "57f1b807cd0da7caa14f92fe30211078c86d8d9ca1fce2da64313f940872eee6"
     },
     {
       "path": "executor/SessionInventory.cs",
@@ -241,9 +266,19 @@
       "sha256": "d763c498b964e7e60e01e4d6a9d95e94073863303d9db5cef4ddd77b1de4be02"
     },
     {
+      "path": "executor/SessionSelection.cs",
+      "bytes": 5249,
+      "sha256": "e7c15e841a3e384b49ea5d2b3b3421518e5f606d13d8f568b4bdf64bf8feb98e"
+    },
+    {
       "path": "executor/SolverEvidence.cs",
-      "bytes": 3020,
-      "sha256": "49d8203afd8f1ee5fd1993613c7c1a3059c56f5f2627d442bb9ed97e639acb03"
+      "bytes": 2789,
+      "sha256": "f412df2fac49a4bc357a81daa9701a869f31371f80e60d08f259552775656fe9"
+    },
+    {
+      "path": "executor/SolverStatus.cs",
+      "bytes": 334,
+      "sha256": "4225121acf72a0038fefb468c1d22eccb4a105686c82cf9e24c2b33a515d4f89"
     },
     {
       "path": "executor/StudyConversion.cs",
@@ -272,8 +307,13 @@
     },
     {
       "path": "executor/UserMotion.cs",
-      "bytes": 55050,
-      "sha256": "97ad06d29b59e76188a586e425041ddac0c7209e36b18e67c12faff887c04a3c"
+      "bytes": 58050,
+      "sha256": "b61c4294af24ae7c30931940b8403641df2b0f3196ffa50fabe3fdfde80549cd"
+    },
+    {
+      "path": "executor/VirtualImport.cs",
+      "bytes": 20142,
+      "sha256": "1ad3196850f8c887fd9c64046e84f089f1df961321cb312e6573af21e36418c8"
     },
     {
       "path": "executor/Workflow.cs",
@@ -292,18 +332,23 @@
     },
     {
       "path": "sw_mcp/artifacts.py",
-      "bytes": 15547,
-      "sha256": "b9e550e7143b32477749c022421cc357132deff29aae47655c34b07496351e06"
+      "bytes": 15791,
+      "sha256": "5b84ab7f2a0aec3ecd018bcf88f0849a34ecdf7b88f8f0ecd8af9ef3c7dafa0c"
     },
     {
       "path": "sw_mcp/bridge.py",
-      "bytes": 33380,
-      "sha256": "5d34a26b7e48b94aa81b256531dd150d772c70c016c89a7be6de3239aaa4fb47"
+      "bytes": 38556,
+      "sha256": "4363375fc67e906141e4e05b195f2ea867f2de1d5743c5f113b70d0e829fd950"
     },
     {
       "path": "sw_mcp/jobs.py",
-      "bytes": 6574,
-      "sha256": "3e544e5a760d5674af1bcebbc6348be82b894542681a1129e713e9f4edbeabf8"
+      "bytes": 6670,
+      "sha256": "e25adbf091ac50cee9a744d32d3d5380d7b8b20f3c6ca1a097a2a6f05bd19197"
+    },
+    {
+      "path": "sw_mcp/replay_diagnostics.py",
+      "bytes": 3807,
+      "sha256": "c9bbf576e925093ef779cf402395b6e229bab032bfeefe8f761bacbd70a91d73"
     },
     {
       "path": "sw_mcp/replay_images.py",
@@ -332,18 +377,18 @@
     },
     {
       "path": "scripts/build_release.py",
-      "bytes": 5179,
-      "sha256": "a41cf07603012827f505fb7e2a2d253ad4c939847006b46a83f57d65ec221a4f"
+      "bytes": 6096,
+      "sha256": "733c6b8f9e13fc633f35442d1fc09282a5eef4b96886fe296b5c1e815152791d"
     },
     {
       "path": "scripts/verify_release.py",
-      "bytes": 4132,
-      "sha256": "8bbc640caea4f8650caf3f5d6ce739a66a9334f87d0dc0ce446f580f3deeb7e7"
+      "bytes": 6663,
+      "sha256": "2a6f99e4aca16cb028bd4d4c5b74abda14526513960e92de6a5b804a5638ff3d"
     },
     {
       "path": "scripts/upgrade.py",
-      "bytes": 8815,
-      "sha256": "82fdb8d802923d1a9992cd4741399f7611c91ee3c77948a6127e7001a8f52dca"
+      "bytes": 9421,
+      "sha256": "fa5bc49880550626d2efebb42042a006c2baa661780bcbeb7e672f794a3fa0ff"
     },
     {
       "path": "scripts/recover.py",
@@ -452,13 +497,13 @@
     },
     {
       "path": "tests/SessionConnectionTests.cs",
-      "bytes": 7734,
-      "sha256": "4c39e94f216af82739f7d1f8a32a33f3c4743a90558a090fa80cad51764eaefc"
+      "bytes": 8307,
+      "sha256": "f4befc1b704b732d27dcc296b2aeb0536f9c7fd8d938b156ade116a0d4385513"
     },
     {
       "path": "tests/session_connection_checks.py",
-      "bytes": 2031,
-      "sha256": "194b5a50ca4ed2b6e1af7b1105fd52425cfeb5d386036f60e6ef9bf04b70174e"
+      "bytes": 2356,
+      "sha256": "e35ea011ba756e33b38b4cf9270c4b6b3ce761cb236759f7f6f689b5ed56cd7d"
     },
     {
       "path": "tests/session_connection_native.py",
@@ -491,19 +536,24 @@
       "sha256": "37e51dea603b22a2e900515853dfcd5b3059dfa5c6388cdf95b33ec9a6e24b9c"
     },
     {
+      "path": "tests/test_release_feedback.py",
+      "bytes": 9015,
+      "sha256": "04bd3867e50436504d251655d3ff68aba984120694cc264fc53e9a57b17d71ac"
+    },
+    {
       "path": "tests/transport_cleanup.py",
       "bytes": 1181,
       "sha256": "a604c61dd9f52a87c7cba8b94bd04d31c2cb79d3b1ec2b61d5fb6a4e68d6b524"
     },
     {
       "path": "tests/test_qzc_feedback.py",
-      "bytes": 11791,
-      "sha256": "f3022e8741db8d0518e551bbc6cda327c9568dc6a1f90e4727c80645896fa91a"
+      "bytes": 11915,
+      "sha256": "d038b293a3b73d2e16ef178b21a184e52167aa50b1fafa70ce994ac6dfa6e3e9"
     },
     {
       "path": "tests/qzc_evidence_checks.py",
-      "bytes": 5802,
-      "sha256": "d1cda2b5b3c9d9885a3907036fdf1fb5227e793dbf7b394e7d0cae66e1ea814f"
+      "bytes": 6112,
+      "sha256": "4f5e9267509700c208d494570cee7c8293dd780cd20b9a0153481a6d147b98f6"
     },
     {
       "path": "tests/recovery_evidence_checks.py",
@@ -527,8 +577,8 @@
     },
     {
       "path": "tests/alpha5_evidence_checks.py",
-      "bytes": 4280,
-      "sha256": "a26cf3c80fb9302ace91e87fdc9b8376b4fb16742f00fd24a4c469bca2e887d6"
+      "bytes": 4302,
+      "sha256": "fd248e8fc5ec893b638c05d81cab0d581c3d55fcd8b0b0405966f067ab67a9d5"
     },
     {
       "path": "tests/alpha5_native_checks.py",
@@ -536,14 +586,50 @@
       "sha256": "1e2cd50089369cf84f8bcc376668b7432f1efcf3f9f85109c5c050960ce30f7c"
     },
     {
+      "path": "tests/test_kulisse_feedback.py",
+      "bytes": 9258,
+      "sha256": "80116d494e41af0253c7082c674dfc9d7bff8d8c2d3d66e0189f08910bdea1d1"
+    },
+    {
+      "path": "tests/kulisse_evidence_checks.py",
+      "bytes": 5339,
+      "sha256": "0e09cff002d52f6ec5ea4c8af8063d939c98e76678319a3d4481b8c9493a8676"
+    },
+    {
+      "path": "tests/virtual_import_native_checks.py",
+      "bytes": 8660,
+      "sha256": "2a24e8b78c3b493a77ad1878cb0e05b4ec399ec095fbf6fb1950d3301083ce26"
+    },
+    {
+      "path": "tests/kulisse_protocol_checks.py",
+      "bytes": 5967,
+      "sha256": "87245955e6c6f1eaddcf2159b2e60c8e2e15d905ab1a3502afdf863f9bee6cad"
+    },
+    {
+      "path": "tests/virtual_import_matrix_checks.py",
+      "bytes": 6529,
+      "sha256": "4b127b21f953e5b87b094432dd4078f545fd2067b2661f5c06f719acfe2ab91c"
+    },
+    {
+      "path": "tests/checkpoint_probe_native_checks.py",
+      "bytes": 13105,
+      "sha256": "e67e2edfd648deb068ffde342d9fd8a4a8a6729a933b46155063ddf4ceb32250"
+    },
+    {
+      "path": "tests/test_checkpoint_preparation.py",
+      "bytes": 3434,
+      "sha256": "66ce449246fcb290bf1dcfb3ab5a7d4b0b0522fb55f49bccde79e0e3d9124db7"
+    },
+    {
       "path": ".github/workflows/release-validation.yml",
-      "bytes": 418,
-      "sha256": "7401ed1f09819da45429a67fc1f3a67358ee4fa5bc33a4cf487e202dd00b189b"
+      "bytes": 709,
+      "sha256": "e7554176eaee9b3e677d6a6e665724b11521641f11d6a75d7248cd464c4bedc0"
     },
     {
       "path": "server.py",
       "bytes": 89,
       "sha256": "0eb05ce5aa2a792aa78a6f564586dd159f2312f3e8173c4fa5e49a21e39d0409"
     }
-  ]
+  ],
+  "distribution_status": "release_package"
 }
