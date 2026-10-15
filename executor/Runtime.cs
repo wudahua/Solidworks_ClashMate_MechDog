@@ -311,10 +311,10 @@ public partial class Cad {
             case "apply_mate": return ApplyBasicMate((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));
             case "verify_motion_preservation": return VerifyRequestedMotion((string)p["model_id"],(string)p["study"],(string)p["component_id"],(string)p["entity_id"],(string)p["expected_motion"],Convert.ToDouble(p["minimum_travel"]),Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"],(string)p["plan_id"],p.ContainsKey("reference_component_id")?(string)p["reference_component_id"]:"");
             case "_test_mate_rollback": return ApplyBasicMate((string)p["plan_id"],true,true);
-            case "import_assembly": return ImportUserAssembly((string)p["path"],p.ContainsKey("configuration")?(string)p["configuration"]:null);
+            case "import_assembly": return ImportUserAssembly((string)p["path"],p.ContainsKey("configuration")?(string)p["configuration"]:null,null,null,p.ContainsKey("import_id")?(string)p["import_id"]:null,p.ContainsKey("materialize_virtual_components")&&Convert.ToBoolean(p["materialize_virtual_components"]));
             case "list_models": return UserListModels();
             case "inspect_model": return InspectUserModel((string)p["model_id"]);
-            case "list_motion_studies": return UserStudies((string)p["model_id"]);
+            case "list_motion_studies": return UserStudies((string)p["model_id"],p.ContainsKey("inspect_native_drives")&&Convert.ToBoolean(p["inspect_native_drives"]));
             case "probe_motion_compatibility": return ProbeUserCompatibility((string)p["model_id"],(string)p["study"],Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"]);
             case "preflight_motion": return PreflightUserMotion((string)p["model_id"],p.ContainsKey("study")?(string)p["study"]:null);
             case "list_drive_candidates": return UserDriveCandidates((string)p["model_id"],p.ContainsKey("component_id")?(string)p["component_id"]:"",p.ContainsKey("kind")?(string)p["kind"]:"",p.ContainsKey("limit")?Convert.ToInt32(p["limit"]):20,p.ContainsKey("cursor")?(string)p["cursor"]:null,p.ContainsKey("group_faces")?Convert.ToBoolean(p["group_faces"]):true,p.ContainsKey("detail_level")&&(string)p["detail_level"]=="compact");
@@ -323,7 +323,7 @@ public partial class Cad {
             case "run_user_study": return RunUserStudy((string)p["model_id"],(string)p["study"],Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"]);
             case "get_motion_summary": return UserRunSummary((string)p["run_id"]);
             case "export_motion_curve": return ExportUserCurve((string)p["run_id"],(string)p["component_id"],(string)p["quantity"],(string)p["axis"]);
-            case "replay_motion_frame": return ReplayUserFrame((string)p["run_id"],Convert.ToInt32(p["frame"]));
+            case "replay_motion_frame": return ReplayUserFrame((string)p["run_id"],Convert.ToInt32(p["frame"]),p.ContainsKey("diagnostic_limit")?Convert.ToInt32(p["diagnostic_limit"]):20);
             case "create_model_checkpoint": return CreateUserCheckpoint((string)p["model_id"]);
             case "reset_study_time": return ResetUserStudyTime((string)p["model_id"],(string)p["study"],p.ContainsKey("allow_recalculate")&&Convert.ToBoolean(p["allow_recalculate"]));
             case "restore_model_checkpoint": try{return RestoreUserCheckpoint((string)p["model_id"],(string)p["checkpoint_id"]);}catch{LastOperationRestoration="unknown";throw;}

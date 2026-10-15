@@ -106,7 +106,7 @@ class Artifacts:
 
     def summary(self, run_id):
         data, manifest, poses = self._load(run_id)
-        keys = ("run_id", "model_id", "study", "solver_status", "calculate_returned_success", "physics_validation_status", "result_validity_scope", "sampling_status", "restoration_status", "result_validity", "duration_s", "output_fps", "frames", "components", "motion_detected", "maximum_translation_from_frame0_m", "maximum_rotation_coefficient_delta_from_frame0", "input_pose_to_frame0_difference", "failure", "failure_diagnostics", "restoration_failure", "drive_validation", "validation_scope", "motion_validation")
+        keys = ("run_id", "model_id", "study", "solver_status", "calculate_returned_success", "physics_validation_status", "result_validity_scope", "sampling_status", "restoration_status", "result_validity", "duration_s", "output_fps", "frames", "components", "motion_detected", "maximum_translation_from_frame0_m", "maximum_rotation_coefficient_delta_from_frame0", "input_pose_to_frame0_difference", "failure", "failure_diagnostics", "restoration_failure", "drive_validation", "validation_scope", "motion_validation", "component_motion_overview", "history_usage")
         info = self._csv_info(data, poses) if poses.is_file() else {}
         from sw_mcp.replay_images import ReplayImages
         try:
@@ -114,6 +114,11 @@ class Artifacts:
         except (ArtifactError, OSError) as error:
             images = {"status":"unavailable", "images":[], "error_code":getattr(error,"code","IMAGE_ACCESS_FAILED"), "message":str(error), "claim":"image_failure_does_not_invalidate_independently_verified_pose_csv"}
         return {**{k: data[k] for k in keys if k in data}, **info, "saved_frame_images": images, "manifest_status": data['manifest_status'], "legacy_without_manifest": data.get('legacy_without_manifest', False), "access": "saved_artifacts_without_COM", "historical_data": True, "physical_validation_claim": False, "current_model_validity": "not_checked_offline", "manifest_path": str(manifest) if manifest.is_file() else None, "poses_available": poses.is_file(), "poses_csv": str(poses) if poses.is_file() else None}
+
+    def replay_diagnostics(self, run_id, limit=20, cursor=''):
+        from sw_mcp.replay_diagnostics import read
+        self._load(run_id)
+        return read(self.root,run_id,limit,cursor)
 
     def save_observations(self, model_id, operation_id='', limit=5, cursor='', include_file_hashes=False):
         from sw_mcp.save_observations import SaveObservations

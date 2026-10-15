@@ -11,3 +11,7 @@ jobs:
       - run: python scripts/verify_release.py
       - run: python -m pip install -r requirements.lock.txt
       - run: python -m unittest discover -s tests -p "test_*.py"
+      # Compile pure production C# policies using the Windows .NET compiler.
+      # These checks do not load interop DLLs, enumerate live CAD, or require SolidWorks.
+      - run: python tests/alpha5_evidence_checks.py
+      - run: python tests/session_connection_checks.py

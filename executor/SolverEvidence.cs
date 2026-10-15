@@ -2,13 +2,6 @@ using System;
 using System.Collections.Generic;
 using SolidWorks.Interop.swmotionstudy;
 
-public static class SolverEvidence {
-    public static string FailedState(string state,string code){
-        if(code=="MOTION_RESULTS_INCOMPLETE")return "incomplete";
-        return state=="pending"?"not_started":state=="running"?"failed":state;
-    }
-}
-
 public partial class Cad {
     void ConfigureSolveSettings(IMotionStudy study,string modelId,string name,double duration,int fps) {
         var before=HistorySettings(study);bool active=study.IsActive,playing=study.IsPlaying;

@@ -2,9 +2,9 @@
 
 SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.1-alpha.5` 基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.1-alpha.6`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.5.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.6.md)。
 
 本版本保留另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
 
@@ -36,7 +36,23 @@ SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidwo
 这是供试用的运动仿真版本。已有有效配合的刚体机构可直接进入运动流程；缺少基础配合时可由设计者选定参考和类型，再让助手执行。尚未完成“大部分机械装配均可用”的样本覆盖验收。
 
 
-## alpha.5 使用变化
+## alpha.6 使用变化
+
+- `apply_mate` 的检查点准备、恢复预演、重建和写入纳入同一事务。准备失败且原副本已核验时返回未写入错误；恢复或清理未确认时仍要求恢复。已进入准备阶段的方案被消费，失败后重新预览，不自动重复写入。
+- 探测记录每个阶段的原副本身份、配置、配合、健康、时钟及全组件姿态。仅在文件、组件/配合身份和原生更新标记保持时，才尝试恢复自己的上下文；若原生时间选择仍留下错误姿态，再尝试一次探测前精确文件快照重开。必须核验原姿态与文件哈希，不强制摆位、不开放跳过探测参数。完整证据在检查点的 `restorability.json`。
+- 求解与运动验证返回 `history_usage`，提示后续写入/恢复可能使当前绑定失效，并给出离线摘要及曲线读取方法；不删除旧run，也不放松当前输入校验。驱动候选每项（含compact）明确未验证机构相容性并给出几何类型警示，列表统一列出单位。
+
+- 含虚拟组件的装配默认在导入时拒绝，诊断会区分虚拟引用线索与真正缺失的外部零件；不应去旧机器临时目录寻找内嵌零件。可先在自己的装配副本中“保存零件（在外部文件中）”，也可显式调用 `import_assembly(path, materialize_virtual_components=True)`。自动外部化首批只覆盖单配置、全部已加载的顶层实体/空零件装配，最多32个虚拟组件；不支持虚拟子装配、多配置虚拟零件、曲面体或未隔离的虚拟派生/外部依赖。转换、保存和重开核验成功后才允许后续运动操作。
+- 外部化可能改变组件名称、持久引用和模型ID；使用返回的model_id及重新检查后的component_id/entity_id。`materialization.conversions` 给出名称和原生引用迁移，最多20组，完整证据在登记目录。失败的 `import_status=incomplete` 副本只作为诊断保留，不能运行运动；复制阶段中断而尚无初始检查点时仍需人工检查隔离副本。
+- 旧整数PID配置不会自动迁移。建议在客户端服务配置中选择 `SW_MCP_PROCESS_ID=auto` 并重载；同一服务的首次握手明确失败且进程已结束时，可显式 `get_environment(solidworks_pid="auto")` 或传正整数PID字符串纠正。已有CAD派发、超时、unknown或成功会话不能通过此入口改实例；不会编辑WorkBuddy全局配置，也不停止旧进程。
+- `list_motion_studies(model_id, inspect_native_drives=True)` 可以增加原生马达特征及参数观测，不激活或求解。全装配特征可能跨多个算例，`study_membership_status=unproven` 不能视为当前算例的马达清单。按算例API返回null仍保持unknown；激活不能保证枚举成功。
+- `replay_motion_frame(run_id, frame, diagnostic_limit=20)` 默认展示最多20个最差组件，另受12000字节行预算限制；全部组件均参与姿态判定。排序使用 `max(平移差/平移门槛, 旋转角差/旋转门槛)`，并按实例名处理并列。要查看完整已保存诊断，用 `get_run_artifacts(run_id=..., replay_diagnostics=True, limit=20)`，再按返回cursor分页；不重新求解。旧版只存前五条时无法凭空补齐。
+- 求解摘要的 `component_motion_overview` 是采样运动观察，固定组件不参与从动件静止提示；未登记原生驱动的目标保持unknown。`REGISTERED_TARGET_MOVED_OTHER_MOVABLE_COMPONENTS_NOT_DETECTED` 不是缺陷判定，也不自动建议改摩擦或约束。
+- 同一安装目录的多个MCP服务不能同时持有CAD日志租约；各安装目录还共享执行器互斥锁，CAD控制只能由一个执行器承担。历史摘要、姿态、保存观测、既有图像及恢复日志的离线只读入口无需启动CAD执行器。不能通过删锁或改unknown日志开启并行写入。
+
+## 已有 alpha.5 使用变化
+
+以下为已发布alpha.5的兼容行为。
 
 - 最低行程的浮点尾差有受限数值预算，回显实测、门槛与残差；这不是机械精度容差。
 - `inspect_model` 返回 `registered_supported_inspected_face` 的面可直接用于配合或适用驱动，不用重复登记查询；失效引用与不支持的组件仍拒绝。检查不自动改配合或猜运动意图。
@@ -51,11 +67,25 @@ SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidwo
 先停用旧安装目录的MCP服务，保留SolidWorks打开；从新包目录调用：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.1-alpha.5_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.1-alpha.6_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
 # 核对后移除 -DryRun 执行升级，可另传 -SolidWorksInstallDir。
 ```
 
 ZIP与同目录`.sha256`须来自可信发布页。升级先核验清单/哈希/版本，备份将替换的源码与执行器；保留`.venv`、`runs`、`experiments`及未知恢复记录。安装校验基础解释器和旧venv身份后按锁定依赖重新编译。编译失败记录源码/二进制回滚；依赖环境变化不属于快照回滚。备份与收据在`upgrade-backups/`。不自动替换客户端全局配置、不终止用户进程或删除原恢复日志。
+
+ZIP与边车的文件名须逐字对应，浏览器自动加后缀或本地重命名也会被拒绝。报错会给出期望名称与本地名称；将ZIP恢复为边车记录的名称，并将边车命名为该ZIP文件名加`.sha256`，再重试；内容哈希仍须一致。
+
+源码包解压根目录统一为 `Solidworks_ClashMate_MechDog/`；新版升级器同时接受历史 `SolidWorksMotionMCP/` 包，拒绝混合根目录。从新包目录运行升级器，旧安装的升级器不保证理解新版包格式。安装完成后再次逐字节校验，收据必须有 `source_integrity_verified=true` 才算提交成功；失败则按收据记录回滚。
+
+### Git既有检出的行尾差异
+
+`python scripts/verify_release.py` 保持精确字节和SHA256校验。若所有源码差异仅由CRLF/LF转换造成，会以非零退出码返回 `LINE_ENDING_MISMATCH`，列出全部差异文件、实际/期望字节数与哈希；若还存在文本修改，则保留 `RELEASE_SOURCE_MISMATCH` 并逐文件区分原因。编码、BOM、空白或代码改动不会被当成行尾差异放行。
+
+`.gitattributes` 的 `* -text` 保护新检出的原始字节，但新增该文件或改变Git设置不保证已存在文件被重写。先备份自己的源码改动，使用可信ZIP及边车，按上面的 `upgrade.ps1` 流程恢复精确源码并重新编译；自动备份保留旧字节，`.venv`、`runs`、`experiments`及unknown日志保持。不要为排除这个诊断直接删除文件、强制reset或重建Git索引。标准ZIP安装正常情况下不需要行尾修复。
+
+### 无CAD的持续集成检查
+
+Windows CI除清单及 `test_*.py` 外，增加 `tests/alpha5_evidence_checks.py` 的18项与 `tests/session_connection_checks.py` 的30项生产策略检查。两者离线路径不需要安装SolidWorks或复制Interop DLL，使用Windows自带.NET编译器。`--solidworks-pid` 原生验证仍须操作者显式选择，在有SolidWorks的开发机执行，不放进无CAD CI。本地通过不代表尚未运行的远端CI已通过。
 
 同目录升级继续使用原路径与数据；另目录安装不会自动迁移绝对路径登记。名称仍为`SolidWorks ClashMate MechDog`/`solidworks-clashmate-mechdog`。
 
@@ -199,7 +229,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1 -SolidWorksProce
 
 默认最多 30 秒、1801 帧、500 个组件和 10 万条组件姿态；帧率 5–120。新建旋转驱动要求每帧小于等于 45°，避免角速度微分歧义。已有快速驱动可能发生采样混叠，应提高帧率并另行校验。
 
-虚拟零件、丢失引用、SpeedPak、未解析组件及未验收的柔性子装配会被拒绝。刚性嵌套装配、重复实例、复杂配置和外部参照的代码路径仍需扩大样本验收；首版不据此承诺通用支持。接触、弹簧、凸轮或多个驱动可通过已有算例尝试运行，但其物理精度与求解稳定性不在首版认证范围内。
+默认导入拒绝虚拟零件。显式外部化的限制见下文；丢失引用、SpeedPak、未解析组件及未验收的柔性子装配会被拒绝。刚性嵌套装配、重复实例、复杂配置和外部参照的代码路径仍需扩大样本验收；首版不据此承诺通用支持。接触、弹簧、凸轮或多个驱动可通过已有算例尝试运行，但其物理精度与求解稳定性不在首版认证范围内。
 
 超时意味着结果未知，不能解释为求解已停止，也不能强行并行重试。等待真实响应或查询恢复状态。执行器确认结束后，使用**同一模型**此前保存的 checkpoint_id 恢复；旧 run_id 必须重新求解。默认绑定原 SolidWorks PID，旧实例确实退出时才可显式允许替代实例。恢复会关闭该登记副本及其依赖文档，不关闭用户其他文件。
 

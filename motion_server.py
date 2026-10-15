@@ -20,7 +20,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.1-alpha.5", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.1-alpha.6", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 
 def packed(data, error=False):
@@ -42,21 +42,26 @@ def enqueue(operation, params):
 
 
 @mcp.tool()
-async def get_environment() -> CallToolResult:
-    """连接已有 SolidWorks 实例，读取版本、进程及实际支持范围。"""
+async def get_environment(solidworks_pid: str = "") -> CallToolResult:
+    """读取环境。可显式传正整数PID字符串或auto纠正首次连接：只允许本服务尚未派发任何CAD请求、无未知恢复且旧启动进程已结束时重新选择；不修改客户端配置，不自动换实例。"""
+    if solidworks_pid:
+        try:
+            await asyncio.to_thread(bridge.select_startup_session, solidworks_pid)
+        except CadError as exc:
+            return packed({"ok": False, "error": {"code": exc.code, "message": str(exc), "restoration_status": exc.restoration_status, "diagnostics": exc.diagnostics}}, True)
     return await call("get_environment")
 
 
 @mcp.tool()
-async def import_assembly(path: str, configuration: str = "") -> CallToolResult:
-    """复制已保存 SLDASM 和依赖、在副本重定向引用并登记。源文件有未保存修改则拒绝。异步返回 job_id。"""
+async def import_assembly(path: str, configuration: str = "", materialize_virtual_components: bool = False) -> CallToolResult:
+    """复制已保存SLDASM和依赖。显式materialize_virtual_components=True才允许在隔离副本外部化顶层虚拟零件；虚拟子装配、未校准配置/依赖拒绝，完整核验后登记。源文件有未保存修改拒绝。返回job_id。"""
     if not Path(path).is_absolute():
         raise ToolError("路径必须是绝对路径。")
     if Path(path).suffix.lower() != ".sldasm":
         raise ToolError(f"仅支持 .SLDASM 装配文件；收到 {Path(path).suffix or '无扩展名'}。")
     if not Path(path).is_file():
         raise ToolError("装配文件不存在或无法读取，请核对路径。")
-    return enqueue("import_assembly", {"path": path, "configuration": configuration})
+    return enqueue("import_assembly", {"path": path, "configuration": configuration, "materialize_virtual_components": materialize_virtual_components})
 
 
 @mcp.tool()
@@ -72,9 +77,9 @@ async def inspect_model(model_id: str) -> CallToolResult:
 
 
 @mcp.tool()
-async def list_motion_studies(model_id: str) -> CallToolResult:
-    """列出算例、时间、登记驱动及历史。发现一个马达不证明清单完整或登记身份已匹配，空特征不代表无驱动；历史独立核对见get_run_artifacts.drive_validation。输入匹配带脏标志诊断，unknown不等于已变化。"""
-    return await call("list_motion_studies", model_id=model_id)
+async def list_motion_studies(model_id: str, inspect_native_drives: bool = False) -> CallToolResult:
+    """列出算例、时间、登记驱动及历史。inspect_native_drives=True显式回读有预算的原生马达观测，不激活或求解；全装配观测不证明算例归属。发现一个马达不证明清单完整或登记身份已匹配，空特征不代表无驱动；历史独立核对见get_run_artifacts.drive_validation。输入匹配带脏标志诊断，unknown不等于已变化。"""
+    return await call("list_motion_studies", model_id=model_id, inspect_native_drives=inspect_native_drives)
 
 
 @mcp.tool()
@@ -187,14 +192,16 @@ async def export_motion_curve(run_id: str, component_id: str, quantity: Literal[
 
 
 @mcp.tool()
-async def replay_motion_frame(run_id: str, frame: int, saved_image_only: bool = False) -> CallToolResult:
-    """默认仅回放本会话输入匹配的run：重算、全组件姿态核验、截图并恢复。saved_image_only=True离线读取该帧已记录且哈希通过的历史BMP，不调用COM、不检查当前模型；未曾生成该帧图像则明确报缺失，不强行摆位。"""
+async def replay_motion_frame(run_id: str, frame: int, saved_image_only: bool = False, diagnostic_limit: int = 20) -> CallToolResult:
+    """默认仅回放本会话输入匹配的run：重算、全组件姿态核验、截图并恢复。diagnostic_limit默认20、范围1–100，字节预算可能缩短展示；全部组件仍核验，完整诊断可用get_run_artifacts(replay_diagnostics=True)离线分页。saved_image_only=True离线读取该帧已记录且哈希通过的历史BMP，不调用COM、不检查当前模型；未曾生成该帧图像则明确报缺失，不强行摆位。"""
     if saved_image_only:
         try:
             return packed({"ok": True, "result": await asyncio.to_thread(artifacts.saved_frame_image, run_id, frame)})
         except (ArtifactError, ValueError, OSError) as exc:
             return packed({"ok": False, "error": {"code": getattr(exc, "code", "SAVED_IMAGE_ACCESS_FAILED"), "message": str(exc), "assertion": "inconclusive", "restoration_status": "not_required"}}, True)
-    return await call("replay_motion_frame", run_id=run_id, frame=frame)
+    if type(diagnostic_limit) is not int or not 1 <= diagnostic_limit <= 100:
+        raise ToolError("diagnostic_limit须为1–100整数。")
+    return await call("replay_motion_frame", run_id=run_id, frame=frame, diagnostic_limit=diagnostic_limit)
 
 
 @mcp.tool()
@@ -212,13 +219,26 @@ async def reset_study_time(model_id: str, study: str, allow_recalculate: bool = 
 
 
 @mcp.tool()
-async def get_run_artifacts(run_id: str = "", model_id: str = "", operation_id: str = "", limit: int = 5, cursor: str = "", include_file_hashes: bool = False) -> CallToolResult:
-    """离线：传run_id读求解摘要及已记录截图；或传model_id/operation_id分页读本次保存观测（operation_id为空选最近已记录操作）。完整哈希须include_file_hashes=True，限1–20条/16KB；大记录给受限摘要和文件路径。两种身份不可混用。重启/隔离可用，不证明当前CAD状态或物理精度。"""
+async def get_run_artifacts(run_id: str = "", model_id: str = "", operation_id: str = "", limit: int = 5, cursor: str = "", include_file_hashes: bool = False, replay_diagnostics: bool = False) -> CallToolResult:
+    """离线：传run_id读求解摘要及已记录截图，摘要忽略limit；replay_diagnostics=True按limit（1–100）/cursor分页读取哈希绑定的完整回放诊断。或传model_id/operation_id分页读本次保存观测（operation_id为空选最近已记录操作）。完整哈希须include_file_hashes=True，限1–20条/16KB；大记录给受限摘要和文件路径。两种身份不可混用。重启/隔离可用，不证明当前CAD状态或物理精度。"""
     try:
         if model_id:
             if run_id:
                 raise ValueError("run_id 与 model_id 保存观测查询不能混用。")
+            if replay_diagnostics:
+                raise ValueError("回放诊断分页须指定run_id，不能与model_id保存观测混用。")
             return packed(await asyncio.to_thread(artifacts.save_observations, model_id, operation_id, limit, cursor, include_file_hashes))
+        if run_id:
+            if replay_diagnostics:
+                if operation_id or include_file_hashes:
+                    raise ValueError("回放诊断查询不使用operation_id/include_file_hashes。")
+                return packed(await asyncio.to_thread(artifacts.replay_diagnostics, run_id, limit, cursor))
+            if operation_id or cursor or include_file_hashes:
+                raise ValueError("run_id摘要不使用operation_id/cursor/include_file_hashes；保存观测分页请改用model_id，回放诊断分页请显式replay_diagnostics=True。")
+            data = await asyncio.to_thread(artifacts.summary, run_id)
+            return packed({**data, "query_scope": "run_summary", "limit_applied": False})
+        if replay_diagnostics:
+            raise ValueError("回放诊断分页须指定run_id。")
         if operation_id or cursor or include_file_hashes or limit != 5:
             raise ValueError("保存观测分页参数须同时指定 model_id。")
         return packed(await asyncio.to_thread(artifacts.summary, run_id))
