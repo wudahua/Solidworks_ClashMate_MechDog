@@ -8,15 +8,15 @@ from pathlib import Path
 from verify_release import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.1-alpha.6"
+VERSION = "0.4.1-alpha.7"
 
 
 def build(candidate=False):
-    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.1-alpha.6.md", "LICENSE", ".gitignore", ".gitattributes", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
+    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.1-alpha.7.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
     sources += sorted((ROOT/"executor").glob("*.cs"))
     sources += [ROOT/"executor/build.ps1"]
     sources += sorted((ROOT/"sw_mcp").glob("*.py"))
-    sources += [ROOT/"scripts"/name for name in ("self_check.py", "validate_runtime.py", "build_release.py", "verify_release.py", "upgrade.py", "recover.py", "local_storage.py")]
+    sources += [ROOT/"scripts"/name for name in ("self_check.py", "validate_runtime.py", "install_preflight.py", "build_release.py", "verify_release.py", "upgrade.py", "recover.py", "local_storage.py")]
     sources += [ROOT/"tests"/name for name in ("test_service.py", "test_reliability.py", "motion_acceptance_v04.py", "motion_protocol_v04.py", "motion_recovery_v04.py", "motion_source_revision_v04.py", "motion_reliability_v04.py", "motion_reset_recovery_v04.py", "motion_time_axis_v04.py", "candidate_geometry_v04.py", "study_history_v04.py", "motion_startup_retry_v04.py", "motion_history_v04.py", "motion_feature_evidence_v04.py", "motion_history_diagnostics_v04.py", "motion_intent_v041.py", "basic_mates_v041.py", "mate_protocol_v041.py")]
     sources += [ROOT/"tests"/name for name in ("test_installation.py", "SessionConnectionTests.cs", "session_connection_checks.py", "session_connection_native.py", "installation_powershell_checks.py")]
     sources += [ROOT/"tests"/name for name in ("relative_motion_checks.py", "test_mechanism_feedback.py", "mechanism_protocol_checks.py")]
@@ -26,6 +26,7 @@ def build(candidate=False):
     sources += [ROOT/"tests"/name for name in ("test_alpha5.py", "alpha5_evidence_checks.py", "alpha5_native_checks.py")]
     sources += [ROOT/"tests"/name for name in ("test_kulisse_feedback.py", "kulisse_evidence_checks.py", "virtual_import_native_checks.py", "kulisse_protocol_checks.py", "virtual_import_matrix_checks.py", "checkpoint_probe_native_checks.py", "test_checkpoint_preparation.py")]
     sources += [ROOT/".github/workflows/release-validation.yml"]
+    sources += [ROOT/"tests/test_alpha7.py", ROOT/"tests/alpha7_native_checks.py", ROOT/"tests/axis_convention_checks.py"]
     releases = ROOT/"releases"
     releases.mkdir(exist_ok=True)
     stage = releases/("Solidworks_ClashMate_MechDog_v"+VERSION+("_本地候选源码_" if candidate else "_源码_")+uuid.uuid4().hex[:8])
@@ -35,6 +36,7 @@ def build(candidate=False):
         relative = source.relative_to(ROOT)
         assert source.is_file() and not source.is_symlink()
         data = source.read_bytes()
+        if b"\r" in data: raise ValueError("Release text must use LF: "+relative.as_posix())
         normalized = data.decode("utf-8-sig").replace("\\\\", "\\").replace("\\", "/").casefold()
         for private_root in (ROOT, Path.home()):
             assert private_root.as_posix().casefold() not in normalized, relative
@@ -52,7 +54,7 @@ def build(candidate=False):
         if not backup.exists(): backup.write_bytes(previous_alias.read_bytes())
     previous_alias.write_bytes(alias)
     manifest.append({"path": "server.py", "bytes": len(alias), "sha256": hashlib.sha256(alias).hexdigest()})
-    (stage/"发布清单.json").write_text(json.dumps({"version": VERSION, "kind": "source_only", "includes_user_cad": False, "includes_runtime_data": False, "includes_solidworks_binaries": False, "files": manifest, "distribution_status": "local_candidate" if candidate else "release_package"}, ensure_ascii=False, indent=2), encoding="utf-8")
+    (stage/"发布清单.json").write_text(json.dumps({"version": VERSION, "kind": "source_only", "text_line_endings": "LF", "includes_user_cad": False, "includes_runtime_data": False, "includes_solidworks_binaries": False, "files": manifest, "distribution_status": "local_candidate" if candidate else "release_package"}, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
     verify(stage)
     (ROOT/"发布清单.json").write_bytes((stage/"发布清单.json").read_bytes())
     archive = releases/("Solidworks_ClashMate_MechDog_v"+VERSION+("_本地候选包.zip" if candidate else "_source.zip"))
@@ -60,11 +62,11 @@ def build(candidate=False):
         for file in sorted(stage.rglob("*")):
             if file.is_file(): z.write(file, (Path("Solidworks_ClashMate_MechDog")/file.relative_to(stage)).as_posix())
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    archive.with_suffix(".zip.sha256").write_text(digest+"  "+archive.name+"\n", encoding="utf-8")
+    archive.with_suffix(".zip.sha256").write_text(digest+"  "+archive.name+"\n", encoding="utf-8", newline="\n")
     result = {"version": VERSION, "directory": str(stage), "archive": str(archive), "sha256": digest, "source_files": len(manifest), "zip_members": len(manifest)+1, "bytes": archive.stat().st_size}
     if candidate: result.update(published=False, distribution_status="local_candidate")
     metadata = releases/("本地候选包信息_v"+VERSION+".json" if candidate else "最新发布包.json")
-    metadata.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    metadata.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

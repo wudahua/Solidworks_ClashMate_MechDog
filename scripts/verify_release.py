@@ -58,18 +58,22 @@ def reject_links(path,root):
 def validate_manifest(manifest,read):
     if not isinstance(manifest,dict) or not isinstance(manifest.get('files'),list):raise ValueError('Invalid release manifest')
     if any(manifest.get(k,False) is not False for k in ('includes_user_cad','includes_runtime_data','includes_solidworks_binaries')):raise ValueError('Release includes unsupported private/runtime content')
-    names=set();folded=set();mismatches=[]
+    names=set();folded=set();mismatches=[];line_ending_violations=[]
+    policy=manifest.get("text_line_endings")
+    if policy not in (None,"LF"):raise ValueError("Unsupported release text line ending policy")
     for record in manifest['files']:
         name=safe_relative(record['path']).as_posix()
         path=PurePosixPath(name)
-        root_files={'README.md','LICENSE','.gitignore','.gitattributes','requirements.txt','requirements.lock.txt','motion_server.py','server.py','mcp-config.example.json','install.ps1','start.ps1','upgrade.ps1','初始化环境.ps1','启动MCP.ps1','生成运动示例.ps1'}
+        root_files={'README.md','LICENSE','.gitignore','.gitattributes','.editorconfig','requirements.txt','requirements.lock.txt','motion_server.py','server.py','mcp-config.example.json','install.ps1','start.ps1','upgrade.ps1','初始化环境.ps1','启动MCP.ps1','生成运动示例.ps1'}
         allowed=(len(path.parts)==1 and (name in root_files or re.fullmatch(r'发布说明_v[0-9A-Za-z.\-]+\.md',name))) or (path.parts[0] in {'executor','sw_mcp','scripts','tests'} and len(path.parts)==2 and path.suffix in {'.cs','.py','.ps1'}) or (path.parts[:2]==('.github','workflows') and len(path.parts)==3 and path.suffix in {'.yml','.yaml'})
         if not allowed:raise ValueError('Non-public or runtime release path: '+name)
         if name=='发布清单.json' or name in names or name.casefold() in folded:raise ValueError('Duplicate or self-referential manifest entry')
         names.add(name);folded.add(name.casefold());data=read(name)
+        if policy=="LF" and b"\r" in data:line_ending_violations.append(name)
         mismatch=source_mismatch(name,data,record)
         if mismatch:mismatches.append(mismatch)
     if mismatches:raise ReleaseSourceMismatch(mismatches)
+    if line_ending_violations:raise ValueError("Release LF policy violated: "+",".join(line_ending_violations))
     for name in ('motion_server.py','executor/UserMotion.cs','scripts/build_release.py'):
         text=read(name).decode('utf-8-sig');pattern=r'VERSION\s*=\s*"([^"]+)"' if name.endswith('build_release.py') else r'version="([^"]+)"'
         match=re.search(pattern,text)

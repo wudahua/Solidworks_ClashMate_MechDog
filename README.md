@@ -1,10 +1,10 @@
 # Solidworks_ClashMate_MechDog
 
-SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
+SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.1-alpha.6`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.1-alpha.7`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.6.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.7.md)。
 
 本版本保留另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
 
@@ -36,10 +36,22 @@ SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidwo
 这是供试用的运动仿真版本。已有有效配合的刚体机构可直接进入运动流程；缺少基础配合时可由设计者选定参考和类型，再让助手执行。尚未完成“大部分机械装配均可用”的样本覆盖验收。
 
 
-## alpha.6 使用变化
+## alpha.7 使用变化
+
+- 激活动画检查点的恢复预演在**独立创建的临时 SolidWorks 进程**完成；原实例不打开探测装配，保留原生更新标记、组件/配合、配置、时钟和全部姿态的前后核验。临时进程使用明确PID，不选择用户的其他实例，不占用交互执行器互斥锁；只操作隔离副本。首次启动及插件加载有开销，不保证每次配合操作都更快。
+- 兼容性探测推荐显式快照：先 `create_model_checkpoint(model_id=...)`，取得成功响应内的 `checkpoint_id`，再调用 `preflight_motion(model_id=..., study=..., compatibility_probe=True, checkpoint_id=..., probe_duration_s=1, probe_output_fps=30)`。由独立进程复制、重定向和试算该快照，不要求原工作副本打开后瞬时 `save_flag=false`；不自动保存原副本或清除修改标志。
+- 快照结论明确为 `explicit_checkpoint_snapshot_not_current_unsaved_memory`，不能证明原模型后来未保存的内存编辑相容。旧检查点可能没有新建算例/驱动，须选择包含目标设置的检查点。没有显式检查点而输入脏时返回 `PROBE_REQUIRES_EXPLICIT_CHECKPOINT`，不再指引无限重复保存。结果的`saved_result_query`指向可离线读取的摘要/姿态；`probe_model_id`只属于已退出的隔离worker，不是主安装可继续控制的模型登记ID。最多1秒、121帧的短算预算不变；设置无法回读、结果过期或时间轴不完整仍是 inconclusive，不暗中扩成整段求解。
+- 临时实例的PID、退出确认、原生退出码、失败和清理证据均落盘。退出未确认或原副本变化时不继续配合写入；未强杀CAD，也不自动重放AddMate。检查点预演完整证据仍在 `restorability.json`，含独立worker证据及哈希。
+- `execution.stage_timings`、`total_elapsed_ms` 使用单调时钟记录配合准备、探测、原生添加、重建及回滚。诊断优先展示新增配合的错误落点，并分别报告 `add_mate_status`、`rebuild_status` 与 `transaction_outcome`。`swAddMateError_e` 的值1表示原生添加调用成功；后续特征健康失败属于不同阶段/错误码域，可以同时成立，不代表事务已提交。
+- 默认长操作等待600秒，可在客户端服务环境中设置 `SW_MCP_LONG_OPERATION_WAIT_S`（60–3600，重启MCP生效）。等待超时不是原生COM取消：响应标注 `client_wait_expired=true`、`cad_operation_finished=false`，继续通过原任务读取迟到结果。不要重试写入或删除隔离日志。
+- `upgrade.ps1 -DryRun` 与实际升级共用基础Python、既有venv、SW Interop DLL、x64编译器和目标目录访问检查，并核验执行器租约。环境错误在替换源码前拒绝；DryRun不保证未来pip网络、原生编译及安装一定成功。`-PythonPath` 必须是基础Python，此要求早于alpha.6；SW路径按显式参数、`SW_INSTALL_DIR`、默认安装目录解析，非默认安装需正确配置。
+- 发布清单列出的文本统一LF，`.editorconfig`约束编辑器；构建和CI拒绝CR行尾。仍按准确字节核验，不把CRLF/LF差异归一化成通过。旧版本包与标签不替换。
+- 姿态CSV的 `r00...r22` 保持SolidWorks ArrayData的**行基轴**约定，三行是局部X/Y/Z轴在目标系的分量；行向量通过右乘矩阵变换。现有旋转增量已在声明的参考坐标系，不翻转符号或再转一次全局。`signed_net_travel` 是相对声明轴的正负量，`direction_verified=false` 仍表示未独立认证马达箭头方向。新增倾斜安装、正反向及独立基轴叉积回归。
+
+## 沿用 alpha.6 的功能
 
 - `apply_mate` 的检查点准备、恢复预演、重建和写入纳入同一事务。准备失败且原副本已核验时返回未写入错误；恢复或清理未确认时仍要求恢复。已进入准备阶段的方案被消费，失败后重新预览，不自动重复写入。
-- 探测记录每个阶段的原副本身份、配置、配合、健康、时钟及全组件姿态。仅在文件、组件/配合身份和原生更新标记保持时，才尝试恢复自己的上下文；若原生时间选择仍留下错误姿态，再尝试一次探测前精确文件快照重开。必须核验原姿态与文件哈希，不强制摆位、不开放跳过探测参数。完整证据在检查点的 `restorability.json`。
+- 检查点恢复证据继续核验原姿态、机械输入与文件哈希；alpha.7将恢复预演迁入独立实例，原实例变化仍拒绝。
 - 求解与运动验证返回 `history_usage`，提示后续写入/恢复可能使当前绑定失效，并给出离线摘要及曲线读取方法；不删除旧run，也不放松当前输入校验。驱动候选每项（含compact）明确未验证机构相容性并给出几何类型警示，列表统一列出单位。
 
 - 含虚拟组件的装配默认在导入时拒绝，诊断会区分虚拟引用线索与真正缺失的外部零件；不应去旧机器临时目录寻找内嵌零件。可先在自己的装配副本中“保存零件（在外部文件中）”，也可显式调用 `import_assembly(path, materialize_virtual_components=True)`。自动外部化首批只覆盖单配置、全部已加载的顶层实体/空零件装配，最多32个虚拟组件；不支持虚拟子装配、多配置虚拟零件、曲面体或未隔离的虚拟派生/外部依赖。转换、保存和重开核验成功后才允许后续运动操作。
@@ -48,7 +60,7 @@ SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidwo
 - `list_motion_studies(model_id, inspect_native_drives=True)` 可以增加原生马达特征及参数观测，不激活或求解。全装配特征可能跨多个算例，`study_membership_status=unproven` 不能视为当前算例的马达清单。按算例API返回null仍保持unknown；激活不能保证枚举成功。
 - `replay_motion_frame(run_id, frame, diagnostic_limit=20)` 默认展示最多20个最差组件，另受12000字节行预算限制；全部组件均参与姿态判定。排序使用 `max(平移差/平移门槛, 旋转角差/旋转门槛)`，并按实例名处理并列。要查看完整已保存诊断，用 `get_run_artifacts(run_id=..., replay_diagnostics=True, limit=20)`，再按返回cursor分页；不重新求解。旧版只存前五条时无法凭空补齐。
 - 求解摘要的 `component_motion_overview` 是采样运动观察，固定组件不参与从动件静止提示；未登记原生驱动的目标保持unknown。`REGISTERED_TARGET_MOVED_OTHER_MOVABLE_COMPONENTS_NOT_DETECTED` 不是缺陷判定，也不自动建议改摩擦或约束。
-- 同一安装目录的多个MCP服务不能同时持有CAD日志租约；各安装目录还共享执行器互斥锁，CAD控制只能由一个执行器承担。历史摘要、姿态、保存观测、既有图像及恢复日志的离线只读入口无需启动CAD执行器。不能通过删锁或改unknown日志开启并行写入。
+- 同一安装目录的多个MCP服务不能同时持有CAD日志租约；各安装目录还共享执行器互斥锁，交互CAD控制只能由一个执行器承担；其内部临时探测worker只连接自己新建的实例。历史摘要、姿态、保存观测、既有图像及恢复日志的离线只读入口无需启动CAD执行器。不能通过删锁或改unknown日志开启并行写入。
 
 ## 已有 alpha.5 使用变化
 
@@ -57,7 +69,7 @@ SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidwo
 - 最低行程的浮点尾差有受限数值预算，回显实测、门槛与残差；这不是机械精度容差。
 - `inspect_model` 返回 `registered_supported_inspected_face` 的面可直接用于配合或适用驱动，不用重复登记查询；失效引用与不支持的组件仍拒绝。检查不自动改配合或猜运动意图。
 - `preflight_motion` 的 `basic_input_ready` 和兼容 `ready` 仅表示基础检查；`solver_compatibility_status=not_checked` 不能显示为求解保证。默认预检会重建副本，dirty 观测保留。
-- 显式 `compatibility_probe=True` 指定算例、`probe_duration_s`（最多1秒）和 `probe_output_fps`，在另一个副本异步短算；先满足已保存输入条件，返回 `job_id` 后用 `get_job` 查询。结果只覆盖该输入/短区间，网格异常为 inconclusive，原副本须核验不变。探测恢复未知时使用响应/恢复日志的受影响 `probe_model_id` 和检查点，不恢复到无关的原模型。
+- 显式 `compatibility_probe=True` 指定算例、`probe_duration_s`（最多1秒）和 `probe_output_fps`，在另一个副本异步短算；可按上面的alpha.7流程显式指定检查点，返回 `job_id` 后用 `get_job` 查询。结果只覆盖该输入/短区间，网格异常为 inconclusive，原副本须核验不变。原副本核验失败时按响应中的原模型和检查点恢复；临时实例退出未确认时先核对worker进程及完成证据，不将隔离worker的probe_model_id当作主安装的模型登记。
 - `SW_MCP_PROCESS_ID=auto` 或 `start.ps1 -AutoDetect` 可在每次服务启动时选择唯一、身份可核验的同用户会话实例。多个进程（含辅助实例）不按窗口标题猜选；仍可指定整数PID。已有会话丢失或 unknown 不能自动切换后继续写入。
 - 旧 journal 的原值在 `observed_dispatch_state`，兼容 `dispatch_state` 给当前派生值；`journal_schema_version` 与响应schema区分。只读显示不会把磁盘日志重写为idle。
 - 对原生未登记驱动，`drive_validation=null` 表示没有本项目的独立速度核对；不等于模型没有马达。矩阵系数差为全部组件/帧/矩阵元素的 `max|R_ij(t)-R_ij(0)|`，无量纲，不是角度。
@@ -67,8 +79,9 @@ SolidWorks 运动仿真 MCP。[GitHub 项目](https://github.com/wudahua/Solidwo
 先停用旧安装目录的MCP服务，保留SolidWorks打开；从新包目录调用：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.1-alpha.6_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
-# 核对后移除 -DryRun 执行升级，可另传 -SolidWorksInstallDir。
+powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.1-alpha.7_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
+# PythonPath填写基础Python；非默认SolidWorks安装请同时指定-SolidWorksInstallDir。
+# 预检通过后移除-DryRun；未来网络及编译仍可能失败，保留自动回滚。
 ```
 
 ZIP与同目录`.sha256`须来自可信发布页。升级先核验清单/哈希/版本，备份将替换的源码与执行器；保留`.venv`、`runs`、`experiments`及未知恢复记录。安装校验基础解释器和旧venv身份后按锁定依赖重新编译。编译失败记录源码/二进制回滚；依赖环境变化不属于快照回滚。备份与收据在`upgrade-backups/`。不自动替换客户端全局配置、不终止用户进程或删除原恢复日志。
@@ -167,7 +180,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1 -SolidWorksProce
 
 同样的配置可从 [mcp-config.example.json](mcp-config.example.json) 复制；请替换路径和 PID，项目不会自动修改 WorkBuddy 的全局配置。
 
-可先在终端运行 `.\.venv\Scripts\python.exe .\scripts\self_check.py --connect`；此前通过 `$env:SW_MCP_PROCESS_ID='12345'` 选择实例。服务不会自动启动或关闭 SolidWorks。
+可先在终端运行 `.\.venv\Scripts\python.exe .\scripts\self_check.py --connect`；此前通过 `$env:SW_MCP_PROCESS_ID='12345'` 选择实例。交互会话由用户启动和选择；检查点与兼容性探测会启动并关闭自己创建的临时SolidWorks实例，不关闭用户实例。
 
 连接优先使用 PID 注册项；选定 PID 缺少注册项时，才尝试 `GetActiveObject`，并严格核对返回实例的 PID 和可读 revision。不一致返回 `COM_SESSION_ID_MISMATCH`，不发送 CAD 请求。未配置 PID 且没有 PID 注册项时要求用户明确选择；通用活动对象不代表只有一个实例。连接诊断仅输出相关 PID、注册项总数、连接方式和 HRESULT，不列出其他应用的 ROT 对象名称。
 

@@ -8,6 +8,8 @@ if (-not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) { throw 'Specify a
 $runtimeCheck = Join-Path $PSScriptRoot 'scripts\validate_runtime.py'
 & $PythonPath -I $runtimeCheck --python $PythonPath
 if ($LASTEXITCODE -ne 0) { throw 'Unsupported Python runtime.' }
+& $PythonPath -I (Join-Path $PSScriptRoot 'scripts\install_preflight.py') --target $PSScriptRoot --python $PythonPath --solidworks-install-dir=$SolidWorksInstallDir
+if ($LASTEXITCODE -ne 0) { throw 'Installation prerequisites failed; no source or runtime files were replaced.' }
 $venvPath = Join-Path $PSScriptRoot '.venv'
 $venvPython = Join-Path $venvPath 'Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $venvPython)) {
