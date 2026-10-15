@@ -54,7 +54,7 @@ def build(candidate=False):
         if not backup.exists(): backup.write_bytes(previous_alias.read_bytes())
     previous_alias.write_bytes(alias)
     manifest.append({"path": "server.py", "bytes": len(alias), "sha256": hashlib.sha256(alias).hexdigest()})
-    (stage/"发布清单.json").write_text(json.dumps({"version": VERSION, "kind": "source_only", "includes_user_cad": False, "includes_runtime_data": False, "includes_solidworks_binaries": False, "files": manifest, "distribution_status": "local_candidate" if candidate else "release_package"}, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
+    (stage/"发布清单.json").write_text(json.dumps({"version": VERSION, "kind": "source_only", "text_line_endings": "LF", "includes_user_cad": False, "includes_runtime_data": False, "includes_solidworks_binaries": False, "files": manifest, "distribution_status": "local_candidate" if candidate else "release_package"}, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
     verify(stage)
     (ROOT/"发布清单.json").write_bytes((stage/"发布清单.json").read_bytes())
     archive = releases/("Solidworks_ClashMate_MechDog_v"+VERSION+("_本地候选包.zip" if candidate else "_source.zip"))
