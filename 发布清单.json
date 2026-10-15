@@ -178,8 +178,8 @@
     },
     {
       "path": "executor/IsolatedProbe.cs",
-      "bytes": 10369,
-      "sha256": "112fe501858efe314e9f5ea452671589527000bd1104b104a82e8f2f4b9e59da"
+      "bytes": 10399,
+      "sha256": "9d25ea429ec308ddad4c67c5d126cd28536ebe8ba96f05e87b566888572bdcca"
     },
     {
       "path": "executor/MateExecutionEvidence.cs",
