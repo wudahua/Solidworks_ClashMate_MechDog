@@ -18,14 +18,18 @@ def prepare(folder):
     for name in ("install.ps1", "初始化环境.ps1", "requirements.lock.txt"):
         shutil.copy2(ROOT / name, folder / name)
     (folder / "scripts").mkdir()
-    shutil.copy2(ROOT / "scripts/validate_runtime.py", folder / "scripts/validate_runtime.py")
+    for name in ('validate_runtime.py','install_preflight.py'):
+        shutil.copy2(ROOT / 'scripts' / name, folder / 'scripts' / name)
+    redist=folder/'test-sw/api/redist';redist.mkdir(parents=True)
+    for name in ('sldworks','swconst','swmotionstudy'):
+        (redist/('SolidWorks.Interop.'+name+'.dll')).write_bytes(b'fixture only; fake build never reads DLL')
     (folder / "executor").mkdir()
     (folder / "executor/build.ps1").write_text("Add-Content -LiteralPath (Join-Path $PSScriptRoot '../build-called.txt') -Value 'called'\n", encoding="ascii")
 
 
 def invoke(folder, entry, index):
     return subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(folder / entry),
-                           "-PythonPath", sys._base_executable, "-PipIndexUrl", index],
+                           "-PythonPath", sys._base_executable, "-PipIndexUrl", index,"-SolidWorksInstallDir",str(folder/"test-sw")],
                           capture_output=True, text=True, errors="replace", timeout=40)
 
 

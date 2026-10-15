@@ -75,7 +75,7 @@ class ReleaseFeedbackTests(unittest.TestCase):
         def installer(*a,**k):
             p=self.target/'LICENSE';p.write_bytes(p.read_bytes().replace(b'\n',b'\r\n'))
             return subprocess.CompletedProcess(a,0)
-        with patch('scripts.upgrade.idle_installation',return_value=nullcontext()),patch('scripts.upgrade.subprocess.run',side_effect=installer):
+        with patch('scripts.upgrade.preflight',return_value={'solidworks_install_dir':'test-sw'}),patch('scripts.upgrade.idle_installation',return_value=nullcontext()),patch('scripts.upgrade.subprocess.run',side_effect=installer):
             with self.assertRaisesRegex(RuntimeError,'rollback recorded'):upgrade(self.package,self.target,sys.executable)
         self.assertEqual((self.target/'motion_server.py').read_bytes(),b'old source');self.assertEqual((self.target/'executor/bin/SwExecutor.exe').read_bytes(),b'old binary');self.assertEqual(self.journal.read_bytes(),before)
         receipt=json.loads(next((self.target/'upgrade-backups').glob('*/receipt.json')).read_text(encoding='utf-8'));self.assertFalse(receipt['committed']);self.assertTrue(receipt['rollback_verified']);self.assertIn('LINE_ENDING_MISMATCH',receipt['error'])
