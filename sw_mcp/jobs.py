@@ -75,6 +75,10 @@ class Jobs:
                         "cad_operation_finished": job["status"] == "succeeded" or (
                             job["status"] == "failed" and job.get("error", {}).get("restoration_status") in {"restored", "not_required"}
                             and job["error"]["code"] != "EXECUTOR_PROTOCOL_ERROR")}
+            if "checkpoint_id" in job["params"]:
+                terminal["checkpoint_id"] = job["params"]["checkpoint_id"]
+            if "model_id" in job["params"]:
+                terminal["model_id"] = job["params"]["model_id"]
             if "run_id" in job["params"]:
                 terminal["run_id"] = job["params"]["run_id"]
             if "error" in job:
