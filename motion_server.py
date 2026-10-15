@@ -20,7 +20,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.1-alpha.6", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.1-alpha.7", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 
 def packed(data, error=False):
@@ -83,12 +83,14 @@ async def list_motion_studies(model_id: str, inspect_native_drives: bool = False
 
 
 @mcp.tool()
-async def preflight_motion(model_id: str, study: str = "", compatibility_probe: bool = False, probe_duration_s: float = 1.0, probe_output_fps: int = 30) -> CallToolResult:
-    """基础预检会重建副本；ready只是兼容的基础输入标志，求解相容性默认未检查。显式compatibility_probe=True异步短算另一个隔离副本（须已保存输入、指定算例，最多1秒121帧）；返回job_id，get_job读取结果。探测通过只覆盖短区间，不保证完整求解。"""
+async def preflight_motion(model_id: str, study: str = "", compatibility_probe: bool = False, probe_duration_s: float = 1.0, probe_output_fps: int = 30, checkpoint_id: str = "") -> CallToolResult:
+    """基础预检不保证求解相容。显式compatibility_probe异步短算，最多1秒121帧；推荐传create_model_checkpoint返回的checkpoint_id，在独立SolidWorks实例验证该快照，不能证明当前未保存内存。原副本不隐式保存；用get_job读取结果。"""
     if compatibility_probe:
         if not study or not 0 < probe_duration_s <= 1 or not 5 <= probe_output_fps <= 120 or abs(probe_duration_s * probe_output_fps - round(probe_duration_s * probe_output_fps)) > 1e-8:
             raise ToolError("指定算例和探测预算（最多1秒、121帧，时长乘fps须为整数）。")
-        return enqueue("probe_motion_compatibility", {"model_id": model_id, "study": study, "duration_s": probe_duration_s, "output_fps": probe_output_fps})
+        return enqueue("probe_motion_compatibility", {"model_id": model_id, "study": study, "duration_s": probe_duration_s, "output_fps": probe_output_fps, "checkpoint_id": checkpoint_id})
+    if checkpoint_id:
+        raise ToolError("checkpoint_id 仅用于 compatibility_probe=True 的快照探测。")
     return await call("preflight_motion", model_id=model_id, study=study)
 
 
