@@ -12,6 +12,7 @@ public partial class Cad {
         if(original.Files.Count(p=>p.EndsWith(".SLDASM",StringComparison.OrdinalIgnoreCase))!=1)throw new CadFault("COMPATIBILITY_PROBE_UNSUPPORTED","暂只验收顶层刚体零件装配。",new{model_id=id});
         var hashes=original.Files.ToDictionary(p=>p,p=>FileHash(p));var doc=Sw.GetOpenDocumentByName(original.Path) as IModelDoc2;
         var poses=doc==null?null:Transforms(doc);var states=doc==null?null:StudyStates(doc);
+        string mechanics=doc==null?null:Json.Serialize(new{input_documents=ProbeWorkingState.InputDocumentIdentity(doc),components=ProbeWorkingState.ComponentIdentity(doc),mates=ProbeWorkingState.MateIdentity(doc),health=ProbeWorkingState.MateHealthIdentity(doc),configuration=doc.ConfigurationManager.ActiveConfiguration.Name,stamp=doc.GetUpdateStamp()});
         string activePath=(Sw.ActiveDoc as IModelDoc2)==null?null:((IModelDoc2)Sw.ActiveDoc).GetPathName();
         var snapshots=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);UserModel source=original;string descriptorHash=null;
         if(!string.IsNullOrEmpty(checkpointId)) {
@@ -29,14 +30,31 @@ public partial class Cad {
         }
         string folder=Path.Combine(Root,"runs",runId);Directory.CreateDirectory(folder);Dictionary<string,string> renames;
         var probe=CopyProbeInputs(source,snapshots,folder,out renames);object worker=null;Exception failure=null;
-        try{WriteStage("compatibility_isolated_probe",id);worker=RunIsolatedProbe(folder,new Dictionary<string,object>{{"kind","compatibility"},{"model",probe},{"study",study},{"duration_s",duration},{"output_fps",fps},{"run_id",runId}});}catch(Exception error){failure=error;}
-        bool unchanged=hashes.All(p=>FileHash(p.Key)==p.Value);if(doc!=null){var actual=Transforms(doc);unchanged&=poses.Count==actual.Count&&poses.All(p=>actual.ContainsKey(p.Key)&&PoseValidation.Matches(p.Value,actual[p.Key]));try{VerifyStudyStates(doc,states);}catch{unchanged=false;}}
-        string now=(Sw.ActiveDoc as IModelDoc2)==null?null:((IModelDoc2)Sw.ActiveDoc).GetPathName();unchanged&=string.Equals(activePath,now,StringComparison.OrdinalIgnoreCase);
+        try{LastOperationRestoration="pending";WriteStage("compatibility_isolated_probe",id);worker=RunIsolatedProbe(folder,new Dictionary<string,object>{{"kind","compatibility"},{"model",probe},{"study",study},{"duration_s",duration},{"output_fps",fps},{"run_id",runId}});}catch(Exception error){failure=error;}
+        bool unchanged=hashes.All(p=>FileHash(p.Key)==p.Value);
+        try {
+            var afterDoc=Sw.GetOpenDocumentByName(original.Path) as IModelDoc2;unchanged&=(doc==null)==(afterDoc==null);
+            if(doc!=null){var actual=Transforms(doc);unchanged&=poses.Count==actual.Count&&poses.All(p=>actual.ContainsKey(p.Key)&&PoseValidation.Matches(p.Value,actual[p.Key]));VerifyStudyStates(doc,states);
+                unchanged&=mechanics==Json.Serialize(new{input_documents=ProbeWorkingState.InputDocumentIdentity(doc),components=ProbeWorkingState.ComponentIdentity(doc),mates=ProbeWorkingState.MateIdentity(doc),health=ProbeWorkingState.MateHealthIdentity(doc),configuration=doc.ConfigurationManager.ActiveConfiguration.Name,stamp=doc.GetUpdateStamp()});}
+            string now=(Sw.ActiveDoc as IModelDoc2)==null?null:((IModelDoc2)Sw.ActiveDoc).GetPathName();unchanged&=string.Equals(activePath,now,StringComparison.OrdinalIgnoreCase);
+        }catch{unchanged=false;}
         if(!unchanged){LastOperationRestoration="unknown";throw new CadFault("COMPATIBILITY_PROBE_ORIGINAL_CHANGED","原副本未通过前后核验；停止CAD写入。",new{model_id=id,evidence_directory=folder});}
-        bool workerExited=false;string workerResult=Path.Combine(folder,"worker-result.json");if(File.Exists(workerResult))workerExited=Convert.ToBoolean(Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(workerResult))["owned_process_exited"]);
+        Dictionary<string,object> workerRecord=null;bool workerExited=false;string workerResult=Path.Combine(folder,"worker-result.json");if(File.Exists(workerResult)){workerRecord=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(workerResult));workerExited=Convert.ToBoolean(workerRecord["owned_process_exited"]);}
         if(!workerExited){LastOperationRestoration="unknown";throw new CadFault("COMPATIBILITY_PROBE_RECOVERY_REQUIRED","临时实例退出未确认；保留进程和完成证据，不自动重试。",new{model_id=id,evidence_directory=folder,original_copy_unchanged=true,original_failure=failure==null?null:FailureEvidence(failure)});}
+        string savedRun=Path.Combine(folder,"runs",runId),savedManifest=Path.Combine(savedRun,"solve.json");
+        if(File.Exists(savedManifest)) {
+            var saved=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(savedManifest));
+            foreach(string name in new[]{"component-poses.csv","time-axis.json","component-motion-overview.json"}) {
+                string input=Path.Combine(savedRun,name),output=Path.Combine(folder,name);if(File.Exists(input)){byte[] bytes=File.ReadAllBytes(input);File.WriteAllBytes(output,bytes);if(FileHash(output)!=FileHash(input))throw new Exception("PROBE_ARTIFACT_COPY_MISMATCH");}
+            }
+            string csv=Path.Combine(folder,"component-poses.csv");if(File.Exists(csv)&&(!saved.ContainsKey("poses_sha256")||FileHash(csv)!=(string)saved["poses_sha256"]))throw new Exception("PROBE_ARTIFACT_HASH_MISMATCH");
+            saved["history_usage"]=new{scope="isolated_probe_snapshot_only",summary_tool="get_run_artifacts",summary_arguments=new{run_id=runId},curve_export_option="allow_unverified_history=true",current_model_validity="not_checked_offline"};
+            saved["parent_model_id"]=id;saved["probe_input_scope"]=string.IsNullOrEmpty(checkpointId)?"saved_disk_input_only":"explicit_checkpoint_snapshot_not_current_unsaved_memory";saved["probe_checkpoint_id"]=checkpointId;saved["poses_csv"]=csv;
+            AtomicJson(Path.Combine(folder,"solve.json"),saved);
+        }
         LastOperationRestoration="restored";LastContextRestoration="restored";
-        var result=new{model_id=id,probe_model_id=probe.Id,checkpoint_id=checkpointId,checkpoint_descriptor_sha256=descriptorHash,run_id=runId,solver_compatibility_status=failure==null?"pass":"inconclusive",compatibility_probe=new{attempted=true,independent_copy=true,independent_solidworks_process=true,duration_s=duration,output_fps=fps,scope=string.IsNullOrEmpty(checkpointId)?"saved_disk_input_only":"explicit_checkpoint_snapshot_not_current_unsaved_memory",checkpoint_revision=source.Revision,current_revision=original.Revision,current_memory_compatibility_proven=false,full_run_guaranteed=false,root_cause="not_proven",failure=failure==null?null:FailureEvidence(failure)},worker=worker,worker_evidence_path=workerResult,original_copy_unchanged=true,restoration_status="restored",source_files_unchanged=UserSourcesUnchanged(original)};
+        object workerSummary=worker==null?null:new{completed=true,success=true,owned_solidworks_pid=workerRecord["owned_solidworks_pid"],owned_process_exited=workerRecord["owned_process_exited"],native_exit_code=workerRecord["native_exit_code"],full_record_path=workerResult,full_record_sha256=FileHash(workerResult).Replace("-","").ToLowerInvariant()};
+        var result=new{model_id=id,probe_model_id=probe.Id,probe_model_registration_scope="isolated_worker_only_not_main_model_registry",checkpoint_id=checkpointId,checkpoint_descriptor_sha256=descriptorHash,run_id=runId,solver_compatibility_status=failure==null?"pass":"inconclusive",compatibility_probe=new{attempted=true,independent_copy=true,independent_solidworks_process=true,duration_s=duration,output_fps=fps,scope=string.IsNullOrEmpty(checkpointId)?"saved_disk_input_only":"explicit_checkpoint_snapshot_not_current_unsaved_memory",checkpoint_revision=source.Revision,current_revision=original.Revision,current_memory_compatibility_proven=false,full_run_guaranteed=false,root_cause="not_proven",failure=failure==null?null:workerRecord!=null&&workerRecord["failure"]!=null?workerRecord["failure"]:FailureEvidence(failure)},worker=workerSummary,saved_result_query=new{tool="get_run_artifacts",run_id=runId},worker_evidence_path=workerResult,worker_evidence_sha256=FileHash(workerResult).Replace("-","").ToLowerInvariant(),original_copy_unchanged=true,restoration_status="restored",source_files_unchanged=UserSourcesUnchanged(original)};
         AtomicJson(Path.Combine(folder,"compatibility-probe.json"),result);return result;
     }
 }

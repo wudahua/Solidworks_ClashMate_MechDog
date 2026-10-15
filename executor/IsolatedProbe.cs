@@ -7,6 +7,11 @@ using System.Collections.Generic;
 using SolidWorks.Interop.sldworks;
 
 public partial class Cad {
+    static string ProbeOwnedPath(string path,string boundary) {
+        string root=Path.GetFullPath(boundary),full=Path.GetFullPath(path);
+        if(!full.StartsWith(root+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))throw new Exception("PROBE_PATH_OUTSIDE_BOUNDARY");
+        string cursor=full;while(cursor!=null&&cursor.Length>=root.Length){if((File.Exists(cursor)||Directory.Exists(cursor))&&(File.GetAttributes(cursor)&FileAttributes.ReparsePoint)!=0)throw new Exception("PROBE_REPARSE_POINT_REJECTED");cursor=Path.GetDirectoryName(cursor);}return full;
+    }
     // Probe documents are opened only in an application process created by this worker.
     // The worker never takes the interactive executor lease or connects by auto PID.
     public static int IsolatedProbeWorker(string requestPath) {
@@ -25,7 +30,7 @@ public partial class Cad {
             if(cad==null)throw new CadFault("PROBE_INSTANCE_UNAVAILABLE","临时SolidWorks实例未连接；未使用原实例。",new{owned_pid=owned.Id,cause=connection==null?null:connection.Message});
             if(cad.Sw.GetProcessID()!=owned.Id)throw new Exception("PROBE_INSTANCE_NOT_ISOLATED");
             ownedConnected=true;var model=Json.Deserialize<UserModel>(Json.Serialize(request["model"]));probeModel=model;
-            foreach(string file in model.Files){if(!Path.GetFullPath(file).StartsWith(root+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))throw new Exception("PROBE_INPUT_OUTSIDE_WORKER");}
+            foreach(string file in model.Files)ProbeOwnedPath(file,root);
             cad.SaveUserModel(model);cad.LoadUserMotion();
             if((string)request["kind"]=="checkpoint") {
                 using(var scope=new Scope(cad,model.Path,null)) {
@@ -55,6 +60,7 @@ public partial class Cad {
         return failure==null&&cleanup==null?0:1;
     }
     Dictionary<string,object> RunIsolatedProbe(string folder,Dictionary<string,object> request) {
+        ProbeOwnedPath(folder,Path.Combine(Root,"runs"));
         string sw=Sw.GetExecutablePath();if(Directory.Exists(sw))sw=Path.Combine(sw,"SLDWORKS.exe");
         request["solidworks_executable"]=sw;request["parent_solidworks_pid"]=Sw.GetProcessID();
         string input=Path.Combine(folder,"worker-request.json");AtomicJson(input,request);
@@ -71,6 +77,7 @@ public partial class Cad {
         }
     }
     UserModel CopyProbeInputs(UserModel source,Dictionary<string,string> snapshots,string folder,out Dictionary<string,string> renames) {
+        ProbeOwnedPath(folder,Path.Combine(Root,"runs"));
         string uid=Guid.NewGuid().ToString("N"),directory=Path.Combine(folder,"experiments","user_assemblies",uid),files=Path.Combine(directory,"files");Directory.CreateDirectory(files);
         var mapping=source.Files.Select((p,i)=>new{path=p,copy=Path.Combine(files,"probe_"+uid.Substring(0,8)+"_"+i.ToString("D4")+Path.GetExtension(p))}).ToDictionary(p=>p.path,p=>p.copy,StringComparer.OrdinalIgnoreCase);
         foreach(var entry in mapping){File.Copy(snapshots[entry.Key],entry.Value);File.SetAttributes(entry.Value,FileAttributes.Normal);}
