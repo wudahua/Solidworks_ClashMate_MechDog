@@ -51,6 +51,7 @@ class Program {
     [STAThread] static int Main(string[] args) {
         Console.OutputEncoding=new UTF8Encoding(false);
         Console.InputEncoding=new UTF8Encoding(false);
+        if(args.Length==2 && args[0]=="--isolated-probe")return Cad.IsolatedProbeWorker(args[1]);
         Mutex gate=null; bool ownsGate=false;
         try {
             gate=new Mutex(false,"Local\\SolidWorksClashMate_MechDog_Executor");
