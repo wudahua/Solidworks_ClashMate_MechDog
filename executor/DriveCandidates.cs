@@ -32,7 +32,7 @@ public partial class Cad {
                 }
                 if(faces.Count>64)truncated.Add(c.Name2);entities.AddRange(faces.OrderByDescending(v=>Convert.ToDouble(v["area_m2"])).ThenBy(v=>(string)v["entity_id"],StringComparer.Ordinal).Take(64));
             }
-            int rawTotal=entities.Count;
+            AnnotateCandidateMates(s.Doc,entities);int rawTotal=entities.Count;
             if(groupFaces)entities=entities.GroupBy(v=>(string)v["geometry_key"]).Select(g=>{var first=g.First();first["equivalent_face_count"]=g.Count();return first;}).ToList();
             else foreach(var entity in entities)entity["equivalent_face_count"]=1;
             if(compact)foreach(var entity in entities){entity.Remove("geometry_key");entity.Remove("suggested_motor");entity.Remove("requires_user_selection");}

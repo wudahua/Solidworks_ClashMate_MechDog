@@ -2,9 +2,9 @@
 
 SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.1-alpha.7`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.1-alpha.8`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.7.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.8.md)。
 
 本版本保留另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
 
@@ -36,7 +36,17 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 这是供试用的运动仿真版本。已有有效配合的刚体机构可直接进入运动流程；缺少基础配合时可由设计者选定参考和类型，再让助手执行。尚未完成“大部分机械装配均可用”的样本覆盖验收。
 
 
-## alpha.7 使用变化
+## alpha.8 使用变化
+
+- 配合方案绑定 `maximum_translation_mm`（默认1mm）与 `maximum_rotation_deg`（默认1度）。`apply_mate` 在重建后、保存后提交前核验全部组件；超预算返回 `MATE_APPLY_ROLLED_BACK`，原因为 `MATE_POSE_CHANGE_EXCEEDS_CONFIRMED_BUDGET`，带移动数量和最大平移/转角。预算是产品保护策略，不是机构精度标准；较大装配调整须由用户明确选择预算、重新预览确认。健康检查通过仍不代表构型正确，`possible_redundancy` 继续提示复核，不能据此推断必然失败。
+- 两种参考列表增加 `mechanical_context`：原生配合名称、ID、类型、锁旋转观测，以及精确持久面或同轴/同平面关联。compact保留标记；扫描受256配合/10秒协作预算约束，截断或参考不支持时明确 `complete=false`。这些关联不证明自由度、可驱动轴或设计意图；不自动逐轴建马达试算。
+- 求解采样时间选择最多尝试两次，核验原生返回、实际时钟和停止状态；失败带 `native_steps`、帧号和请求时间，不自动重新Calculate。成功的逐帧记录保存为 `solver-time-selection.json`。偶发失败并非已证明只发生在verify，两条入口共用求解采集实现。
+- 历史增加 `saved_input_match_status` 与 `live_memory_input_status`，保留四项保存输入匹配证据。`GetSaveFlag`不能单独证明机械修改，也不能排除未保存零件或配合编辑；仅有Motion Analysis算例与复脏的相关性不能证明原因。因此不清除标志、不追加隐式保存，当前内存未知时仍保留unknown。可显式检查点试算或离线读取历史。
+- 创建算例返回的检查点标为 `before_study_creation`；探测旧快照缺少新算例时给出快照修订号和新建检查点指引。探测进度保留checkpoint_id，恢复日志绑定父模型；离线消费探针结果时错误码为 `PROBE_RUN_REQUIRES_HISTORY_MODE`，附 `allow_unverified_history=true` 指引。
+- 临时实例的启动、连接、Motion插件加载、打开副本和清理阶段写入 `worker-phase.json`。RPC断连保持inconclusive，只有退出和原副本核验后才可显式新建探测，不自动重试未知原生操作。临时实例可能需要数十秒以上，插件加载或许可交互可能更久，无法给出固定耗时保证。
+- `maximum_rotation_coefficient_delta` 是相对首帧的矩阵元素最大绝对差，无量纲；`rotary_origin_translation_mm` 是组件坐标原点相对首帧的全程最大直线距离，不是首末帧距离。旋转采用SOLIDWORKS ArrayData行基轴约定，参见[官方API说明](https://help.solidworks.com/2026/english/api/sldworksapi/SolidWorks.Interop.sldworks~SolidWorks.Interop.sldworks.IMathUtility~ICreateTransform.html)。新增原生MathUtility生成旋转与向量变换验收，不改变正确的符号公式。
+
+## 已有 alpha.7 使用变化
 
 - 激活动画检查点的恢复预演在**独立创建的临时 SolidWorks 进程**完成；原实例不打开探测装配，保留原生更新标记、组件/配合、配置、时钟和全部姿态的前后核验。临时进程使用明确PID，不选择用户的其他实例，不占用交互执行器互斥锁；只操作隔离副本。首次启动及插件加载有开销，不保证每次配合操作都更快。
 - 兼容性探测推荐显式快照：先 `create_model_checkpoint(model_id=...)`，取得成功响应内的 `checkpoint_id`，再调用 `preflight_motion(model_id=..., study=..., compatibility_probe=True, checkpoint_id=..., probe_duration_s=1, probe_output_fps=30)`。由独立进程复制、重定向和试算该快照，不要求原工作副本打开后瞬时 `save_flag=false`；不自动保存原副本或清除修改标志。
@@ -79,7 +89,7 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 先停用旧安装目录的MCP服务，保留SolidWorks打开；从新包目录调用：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.1-alpha.7_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.1-alpha.8_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
 # PythonPath填写基础Python；非默认SolidWorks安装请同时指定-SolidWorksInstallDir。
 # 预检通过后移除-DryRun；未来网络及编译仍可能失败，保留自动回滚。
 ```

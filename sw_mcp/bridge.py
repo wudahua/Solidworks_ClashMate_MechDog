@@ -496,11 +496,12 @@ class Bridge:
                     probe_run = params.get("run_id")
                     if not isinstance(probe_run, str) or not re.fullmatch(r"[a-f0-9]{32}", probe_run):
                         raise CadError("INVALID_RUN_ID", "探测缺少可核验的运行标识。", "not_required")
-                    model_id = "user_" + probe_run
+                    # The worker has its own model; recovery remains bound to params.model_id.
                 run_id = params.get("run_id", "")
                 if not model_id and isinstance(run_id, str) and re.fullmatch(r"[a-f0-9]{32}", run_id):
                     try:
-                        model_id = json.loads((self.root / "runs" / run_id / "solve.json").read_text(encoding="utf-8")).get("model_id")
+                        saved_run = json.loads((self.root / "runs" / run_id / "solve.json").read_text(encoding="utf-8"))
+                        model_id = saved_run.get("parent_model_id") or saved_run.get("model_id")
                     except (OSError, ValueError, AttributeError):
                         pass
                 wire = json.dumps({"id": request_id, "op": operation, "params": params}) + "\n"
