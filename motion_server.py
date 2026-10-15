@@ -20,7 +20,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.1-alpha.7", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.1-alpha.8", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 
 def packed(data, error=False):
@@ -123,11 +123,13 @@ async def list_mate_references(model_id: str, component_id: str = "", kind: Lite
 
 
 @mcp.tool()
-async def preview_mate(model_id: str, entity_a: str, entity_b: str, mate_type: Literal["concentric", "coincident", "distance", "parallel", "perpendicular"], alignment: Literal["aligned", "anti_aligned"] = "aligned", distance_mm: float = 0, lock_rotation: bool = False, baseline_run_id: str = "") -> CallToolResult:
-    """生成描述性配合方案，不移动零件、不保存或试算。同心选圆柱面，其余选平面。可绑定本会话当前模型的已验证运动基线。方案在状态变化或重连后失效。"""
+async def preview_mate(model_id: str, entity_a: str, entity_b: str, mate_type: Literal["concentric", "coincident", "distance", "parallel", "perpendicular"], alignment: Literal["aligned", "anti_aligned"] = "aligned", distance_mm: float = 0, lock_rotation: bool = False, baseline_run_id: str = "", maximum_translation_mm: float = 1, maximum_rotation_deg: float = 1) -> CallToolResult:
+    """生成描述性配合方案，不移动零件、不保存或试算。同心选圆柱面，其余选平面。可绑定本会话当前模型的已验证运动基线。默认位姿预算1mm/1度，超出回滚；较大移动须用户明确选择预算并重新预览。方案在状态变化或重连后失效。"""
     if not math.isfinite(distance_mm) or not 0 <= distance_mm <= 10000 or (mate_type != "distance" and distance_mm != 0) or (lock_rotation and mate_type != "concentric"):
         raise ToolError("距离须在0–10000mm且仅用于距离配合；锁旋转仅适用于同心配合。")
-    return await call("preview_mate", model_id=model_id, entity_a=entity_a, entity_b=entity_b, mate_type=mate_type, alignment=alignment, distance_mm=distance_mm, lock_rotation=lock_rotation, baseline_run_id=baseline_run_id)
+    if not math.isfinite(maximum_translation_mm) or not 0 <= maximum_translation_mm <= 10000 or not math.isfinite(maximum_rotation_deg) or not 0 <= maximum_rotation_deg <= 180:
+        raise ToolError("位姿预算须为有限数：平移0–10000mm，旋转0–180度。")
+    return await call("preview_mate", model_id=model_id, entity_a=entity_a, entity_b=entity_b, mate_type=mate_type, alignment=alignment, distance_mm=distance_mm, lock_rotation=lock_rotation, baseline_run_id=baseline_run_id, maximum_translation_mm=maximum_translation_mm, maximum_rotation_deg=maximum_rotation_deg)
 
 
 @mcp.tool()
