@@ -49,6 +49,59 @@ class Bridge:
         self._lease = None
         self._reader_thread = None
         self._ever_dispatched = False
+        self._selected_startup_pid = None
+
+    def select_startup_session(self, selected):
+        """Explicit pre-dispatch correction only. Never release recovery isolation."""
+        if not isinstance(selected, str) or (selected.lower() != "auto" and (
+                not re.fullmatch(r"[1-9][0-9]{0,9}", selected) or int(selected) > 2147483647)):
+            raise CadError("INVALID_SOLIDWORKS_PID", "填写正整数PID字符串或auto。", "not_required")
+        selected = selected.lower()
+        with self._lock:
+            if self._ever_dispatched or self._pending or self._quarantined_request or self.recovery_state()["recovery_required"]:
+                raise CadError("STARTUP_SELECTION_NOT_ALLOWED", "本服务已有CAD请求或未知恢复记录，不能重新选择实例；保留原记录并走检查点恢复流程。", "not_required")
+            previous = None
+            if self._process is not None:
+                if self._process.poll() is None or not self._startup.done():
+                    raise CadError("COM_CONNECTION_PENDING", "旧启动进程尚未结束；未停止进程，请稍后核对。", "not_required")
+                try:
+                    previous = self._startup.result()
+                except Exception as exc:
+                    raise CadError("STARTUP_SELECTION_NOT_ALLOWED", "旧握手未提供明确连接失败，不能直接重建。", "not_required") from exc
+                allowed = {"COM_SESSION_NOT_FOUND", "COM_SESSION_UNAVAILABLE", "COM_SESSION_ID_MISMATCH", "INVALID_SOLIDWORKS_PID", "AMBIGUOUS_COM_SESSION", "AUTO_SESSION_INVENTORY_UNAVAILABLE", "AUTO_SESSION_IDENTITY_CHANGED"}
+                if not isinstance(previous, dict) or previous.get("protocol_version") != 1 or previous.get("ready") is not False or previous.get("error", {}).get("code") not in allowed:
+                    raise CadError("STARTUP_SELECTION_NOT_ALLOWED", "只有明确的首次连接失败可显式纠正；不重置成功握手或协议异常。", "not_required")
+                if self._reader_thread is not None:
+                    self._reader_thread.join(timeout=1)
+                    if self._reader_thread.is_alive():
+                        raise CadError("COM_CONNECTION_PENDING", "旧握手读取尚未结束，请稍后重试。", "not_required")
+            self._acquire_lease()
+            folder = self.root / "runs" / "startup-selections"
+            try:
+                current = folder
+                while current != self.root:
+                    if current.is_symlink() or getattr(current, "is_junction", lambda: False)():
+                        raise OSError("Linked startup audit directory refused")
+                    if current.parent == current:
+                        raise OSError("Startup audit directory outside installation")
+                    current = current.parent
+                folder.mkdir(exist_ok=True)
+                record = {"schema_version": 1, "owner_id": self._owner_id, "selected": selected, "previous_selected": self._selected_startup_pid or os.environ.get("SW_MCP_PROCESS_ID"), "previous_handshake": previous, "cad_requests_dispatched": False, "client_config_changed": False, "time": time.time()}
+                (folder / (uuid.uuid4().hex + ".json")).write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+            except OSError as exc:
+                raise CadError("STARTUP_SELECTION_AUDIT_FAILED", "无法记录连接选择审计，未改变选择。", "not_required") from exc
+            if self._process is not None:
+                for stream in (self._process.stdin, self._process.stdout):
+                    if stream is not None:
+                        stream.close()
+                if self._log is not None:
+                    self._log.close()
+                self._process = None
+                self._log = None
+                self._startup = concurrent.futures.Future()
+                self._reader_thread = None
+            self._selected_startup_pid = selected
+            return {"selection": selected, "client_config_changed": False}
 
     def _acquire_lease(self):
         """OS releases the journal lease if its Python owner crashes."""
@@ -260,10 +313,11 @@ class Bridge:
         except OSError as exc:
             raise CadError("EXECUTOR_LOG_UNAVAILABLE", "无法创建执行器日志；请检查安装目录的写权限。", "not_required", executor_diagnostics(exe, stage="open_log", error=exc)) from exc
         try:
+            selection_env = {**os.environ, "SW_MCP_PROCESS_ID": self._selected_startup_pid} if self._selected_startup_pid is not None else None
             self._process = subprocess.Popen(
                 [str(exe)], cwd=self.root, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=self._log, text=True, encoding="utf-8", bufsize=1,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), env=selection_env,
             )
         except OSError as exc:
             code = "EXECUTOR_NOT_BUILT" if isinstance(exc, FileNotFoundError) else "EXECUTOR_ACCESS_DENIED" if isinstance(exc, PermissionError) else "EXECUTOR_START_FAILED"
@@ -327,7 +381,7 @@ class Bridge:
             self._start()  # Native global mutex also rejects another installation's executor.
             hello = self._validate_hello(self._startup.result())
             if type(solidworks_pid) is not int or hello["process_id"] != solidworks_pid:
-                raise CadError("RECOVERY_SESSION_MISMATCH", "已连接 SolidWorks PID 与操作者核对的实例不同。")
+                raise CadError("RECOVERY_SESSION_MISMATCH", "已连接 SolidWorks PID 与操作者核对的实例不同；请先读取 get_recovery_state 并核对实际实例，再传入对应的 solidworks_pid。此分支不能靠 allow_replacement_session 或首次连接选择入口放行；若连错实例，保留 unknown 日志并停用服务，重新配置 SW_MCP_PROCESS_ID 后再按恢复流程核对。", diagnostics={"required_param": "solidworks_pid", "provided_solidworks_pid": solidworks_pid, "connected_solidworks_pid": hello["process_id"], "next_tool": "get_recovery_state", "automatic_replacement": False})
             archive = self.root / "runs" / "recovery-audit" / (journal_sha256 + ".json")
             archive.parent.mkdir(parents=True, exist_ok=True)
             if not archive.exists():
@@ -429,6 +483,10 @@ class Bridge:
             try:
                 assert self._process and self._process.stdin
                 model_id = params.get("model_id")
+                if operation == "import_assembly" and params.get("import_id"):
+                    if not isinstance(params["import_id"], str) or not re.fullmatch(r"[a-f0-9]{32}", params["import_id"]):
+                        raise CadError("INVALID_IMPORT_ID", "导入标识无效。", "not_required")
+                    model_id = "user_" + params["import_id"]
                 if operation == "probe_motion_compatibility":
                     probe_run = params.get("run_id")
                     if not isinstance(probe_run, str) or not re.fullmatch(r"[a-f0-9]{32}", probe_run):
