@@ -206,7 +206,7 @@ public partial class Cad {
             trajectory_csv=Path.Combine(run.Directory,"trajectory.csv"),fingerprint=run.Fingerprint };
         File.WriteAllText(Path.Combine(run.Directory,"solve.json"),Json.Serialize(summary)); return summary;
     }
-    Run GetRun(string id) { Run r; if(!runs.TryGetValue(id,out r)) throw new Exception("RUN_NOT_FOUND_OR_EXECUTOR_RESTARTED");if(r.Generic)GetUserModel(r.Assembly);ConfigureModel(r.Assembly);if(r.Assembly=="gear_phase"&&r.ModelRoot!=null)pumpRootOverride=r.ModelRoot;return r; }
+    Run GetRun(string id) { Run r; if(!runs.TryGetValue(id,out r)) {if(System.Text.RegularExpressions.Regex.IsMatch(id??"","^[a-f0-9]{32}$")){string path=Path.Combine(Root,"runs",id,"solve.json");if(File.Exists(path)){var saved=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(path));if(saved.ContainsKey("probe_input_scope"))throw new CadFault("PROBE_RUN_REQUIRES_HISTORY_MODE","隔离探测结果已保存，请以离线历史模式读取摘要或曲线。",new{run_id=id,probe_input_scope=saved["probe_input_scope"],required_parameter="allow_unverified_history",required_value=true,offline_tools=new[]{"get_run_artifacts","read_run_poses","get_motion_summary","export_motion_curve"},current_model_validity="not_checked_offline",cad_replay_allowed=false});}}throw new Exception("RUN_NOT_FOUND_OR_EXECUTOR_RESTARTED");}if(r.Generic)GetUserModel(r.Assembly);ConfigureModel(r.Assembly);if(r.Assembly=="gear_phase"&&r.ModelRoot!=null)pumpRootOverride=r.ModelRoot;return r; }
     void ValidateRun(Run r,Scope scope) {
         if(r.Generic&&r.EditVersion!=GetUserModel(r.Assembly).Revision||r.Assembly=="parameter_trial"&&r.EditVersion!=parameterVersion||Fingerprint(scope.Doc,scope.DocumentPath)!=r.Fingerprint) throw new Exception("MODEL_REVISION_CHANGED");
         var result=(IMotionStudyResults)scope.Study.GetResults(4);
@@ -307,7 +307,7 @@ public partial class Cad {
         switch(op) {
             case "get_environment": return UserEnvironment();
             case "list_mate_references": return ListMateReferences((string)p["model_id"],(string)p["component_id"],(string)p["kind"],Convert.ToInt32(p["limit"]),(string)p["cursor"],p.ContainsKey("detail_level")&&(string)p["detail_level"]=="compact");
-            case "preview_mate": return PreviewBasicMate((string)p["model_id"],(string)p["entity_a"],(string)p["entity_b"],(string)p["mate_type"],(string)p["alignment"],Convert.ToDouble(p["distance_mm"]),Convert.ToBoolean(p["lock_rotation"]),(string)p["baseline_run_id"]);
+            case "preview_mate": return PreviewBasicMate((string)p["model_id"],(string)p["entity_a"],(string)p["entity_b"],(string)p["mate_type"],(string)p["alignment"],Convert.ToDouble(p["distance_mm"]),Convert.ToBoolean(p["lock_rotation"]),(string)p["baseline_run_id"],p.ContainsKey("maximum_translation_mm")?Convert.ToDouble(p["maximum_translation_mm"]):1,p.ContainsKey("maximum_rotation_deg")?Convert.ToDouble(p["maximum_rotation_deg"]):1);
             case "apply_mate": return ApplyBasicMate((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));
             case "verify_motion_preservation": return VerifyRequestedMotion((string)p["model_id"],(string)p["study"],(string)p["component_id"],(string)p["entity_id"],(string)p["expected_motion"],Convert.ToDouble(p["minimum_travel"]),Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"],(string)p["plan_id"],p.ContainsKey("reference_component_id")?(string)p["reference_component_id"]:"");
             case "_test_mate_rollback": return ApplyBasicMate((string)p["plan_id"],true,true);

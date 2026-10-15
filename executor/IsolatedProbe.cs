@@ -16,24 +16,25 @@ public partial class Cad {
     // The worker never takes the interactive executor lease or connects by auto PID.
     public static int IsolatedProbeWorker(string requestPath) {
         Process owned=null;Cad cad=null;string resultPath=Path.Combine(Path.GetDirectoryName(requestPath),"worker-result.json");
+        Action<string> phase=stage=>{try{AtomicJson(Path.Combine(Path.GetDirectoryName(resultPath),"worker-phase.json"),new{stage=stage,observed_at_utc=DateTime.UtcNow.ToString("o"),native_call_may_still_be_running=stage!="completed"});}catch{}};
         object result=null;Exception failure=null,cleanup=null;int? nativeExit=null;bool ownedConnected=false;UserModel probeModel=null;
         try {
             var request=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(requestPath));
             string root=Path.GetDirectoryName(Path.GetFullPath(requestPath));
             string executable=(string)request["solidworks_executable"];
-            owned=Process.Start(new ProcessStartInfo(executable){UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden});
+            phase("starting_owned_solidworks");owned=Process.Start(new ProcessStartInfo(executable){UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden});
             AtomicJson(Path.Combine(root,"worker-owner.json"),new{worker_pid=Process.GetCurrentProcess().Id,owned_solidworks_pid=owned.Id,parent_solidworks_pid=request["parent_solidworks_pid"]});
             if(owned.Id==Convert.ToInt32(request["parent_solidworks_pid"]))throw new Exception("PROBE_INSTANCE_NOT_ISOLATED");
             System.Environment.SetEnvironmentVariable("SW_MCP_PROCESS_ID",owned.Id.ToString());
-            var timer=Stopwatch.StartNew();Exception connection=null;
+            phase("connecting_owned_solidworks");var timer=Stopwatch.StartNew();Exception connection=null;
             while(timer.Elapsed.TotalSeconds<180&&!owned.HasExited){try{cad=new Cad(root);break;}catch(Exception error){connection=error;Thread.Sleep(500);}}
             if(cad==null)throw new CadFault("PROBE_INSTANCE_UNAVAILABLE","临时SolidWorks实例未连接；未使用原实例。",new{owned_pid=owned.Id,cause=connection==null?null:connection.Message});
             if(cad.Sw.GetProcessID()!=owned.Id)throw new Exception("PROBE_INSTANCE_NOT_ISOLATED");
             ownedConnected=true;var model=Json.Deserialize<UserModel>(Json.Serialize(request["model"]));probeModel=model;
             foreach(string file in model.Files)ProbeOwnedPath(file,root);
-            cad.SaveUserModel(model);cad.LoadUserMotion();
+            cad.SaveUserModel(model);phase("loading_motion_addin");cad.LoadUserMotion();phase("motion_addin_loaded");
             if((string)request["kind"]=="checkpoint") {
-                using(var scope=new Scope(cad,model.Path,null)) {
+                phase("opening_checkpoint_copy");using(var scope=new Scope(cad,model.Path,null)) {
                     if(scope.Doc.ConfigurationManager.ActiveConfiguration.Name!=model.Configuration&&!scope.Doc.ShowConfiguration2(model.Configuration))throw new Exception("CHECKPOINT_CONFIGURATION_MISMATCH");
                     var states=Json.Deserialize<StudyState[]>(Json.Serialize(request["studies"]));
                     var original=Json.Deserialize<Dictionary<string,double[]>>(Json.Serialize(request["poses"]));
@@ -46,16 +47,16 @@ public partial class Cad {
                 }
             } else if((string)request["kind"]=="compatibility") {
                 using(var scope=new Scope(cad,model.Path,null)){cad.InspectUserCore(model,scope.Doc);cad.SaveUserModel(model);}
-                result=cad.RunUserStudy(model.Id,(string)request["study"],Convert.ToDouble(request["duration_s"]),Convert.ToInt32(request["output_fps"]),(string)request["run_id"]);
+                phase("running_snapshot_study");result=cad.RunUserStudy(model.Id,(string)request["study"],Convert.ToDouble(request["duration_s"]),Convert.ToInt32(request["output_fps"]),(string)request["run_id"]);
             } else throw new Exception("INVALID_PROBE_WORKER_KIND");
         }catch(Exception error){failure=error;}
         finally {
-            if(cad!=null&&ownedConnected)try{var docs=(cad.Sw.GetDocuments() as object[]??new object[0]).Cast<IModelDoc2>().ToArray();
+            phase("cleanup_owned_instance");if(cad!=null&&ownedConnected)try{var docs=(cad.Sw.GetDocuments() as object[]??new object[0]).Cast<IModelDoc2>().ToArray();
                 var titles=docs.Where(d=>probeModel!=null&&probeModel.Files.Contains(d.GetPathName(),StringComparer.OrdinalIgnoreCase)).Select(d=>d.GetTitle()).ToArray();foreach(string title in titles)try{cad.Sw.CloseDoc(title);}catch(System.Runtime.InteropServices.COMException){}
                 if((cad.Sw.GetDocuments() as object[]??new object[0]).Length!=0)throw new Exception("PROBE_UNEXPECTED_DOCUMENTS_EXIT_REFUSED");cad.Sw.ExitApp();
             }catch(Exception error){cleanup=error;}
             if(owned!=null){if(owned.WaitForExit(30000))nativeExit=owned.ExitCode;else cleanup=new Exception("PROBE_INSTANCE_EXIT_NOT_CONFIRMED");}
-            AtomicJson(resultPath,new{completed=true,success=failure==null&&cleanup==null,result=result,failure=failure==null?null:FailureEvidence(failure),cleanup_failure=cleanup==null?null:FailureEvidence(cleanup),owned_solidworks_pid=owned==null?(int?)null:owned.Id,owned_process_exited=nativeExit.HasValue,native_exit_code=nativeExit});
+            phase("completed");AtomicJson(resultPath,new{completed=true,success=failure==null&&cleanup==null,result=result,failure=failure==null?null:FailureEvidence(failure),cleanup_failure=cleanup==null?null:FailureEvidence(cleanup),owned_solidworks_pid=owned==null?(int?)null:owned.Id,owned_process_exited=nativeExit.HasValue,native_exit_code=nativeExit});
         }
         return failure==null&&cleanup==null?0:1;
     }

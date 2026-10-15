@@ -87,8 +87,11 @@ public static class StudyHistory {
             var motionValidation=Value(saved,"motion_validation") as Dictionary<string,object>;
             last["motion_validation_assertion"]=motionValidation==null?null:Value(motionValidation,"assertion");
             last["motion_validation_claim"]=motionValidation==null?null:Value(motionValidation,"claim");
+            last["saved_input_match_status"]=revisionMatch==false||configurationMatch==false||hashesMatch==false||settingsMatch==false?"stale":revisionMatch==true&&configurationMatch==true&&hashesMatch==true&&settingsMatch==true?"matches_recorded_saved_inputs":"unknown";
+            last["live_memory_input_status"]=applicability=="matches_recorded_input"?"matched_with_clean_observation":"not_proven";
+            last["dirty_cause_status"]="not_proven_from_save_flag_or_motion_study_type";
             last["input_match_status"]=applicability;last["compatibility_claim"]="historical_solve_observation_only";
-            last["input_match_diagnostics"]=new{revision_match=revisionMatch,configuration_match=configurationMatch,file_hashes_match=hashesMatch,study_settings_match=settingsMatch,observation_complete=observation!=null&&observation.Complete,dirty_documents_observed=observation!=null&&observation.AnyDirty,reasons=reasons};
+            last["input_match_diagnostics"]=new{revision_match=revisionMatch,configuration_match=configurationMatch,file_hashes_match=hashesMatch,study_settings_match=settingsMatch,observation_complete=observation!=null&&observation.Complete,dirty_documents_observed=observation!=null&&observation.AnyDirty,dirty_flag_is_not_mechanical_change_proof=true,matching_saved_fields_do_not_exclude_unsaved_geometry_or_mate_edits=true,implicit_save_or_flag_clear_performed=false,reasons=reasons};
             response["last_run"]=last;response["run_history_status"]="available";
             string error=Value(saved,"error_code") as string;
             if((string)Value(saved,"restoration_status")=="restored"&&new[]{"MOTION_RESULTS_INCOMPLETE","SOLVER_FAILED","DRIVE_VALIDATION_FAILED"}.Contains(error)) {

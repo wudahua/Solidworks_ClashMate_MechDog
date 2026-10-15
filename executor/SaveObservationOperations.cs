@@ -58,11 +58,11 @@ public partial class Cad {
         var observed=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(observation));bool complete=Convert.ToBoolean(observed["complete"]),dirty=Convert.ToBoolean(observed["dirty_documents_observed"]);
         int? changes=trace.PreviousHashes==null?(int?)null:hashes.Keys.Union(trace.PreviousHashes.Keys).Count(p=>!hashes.ContainsKey(p)||!trace.PreviousHashes.ContainsKey(p)||hashes[p]!=trace.PreviousHashes[p]);
         string relative=Path.Combine("save-observations",saveOperation.Id,sequence.ToString("D10")+".json"),path=SaveAuditPath(model,relative);Directory.CreateDirectory(Path.GetDirectoryName(path));
-        var record=new{schema_version=1,model_id=model.Id,operation_id=saveOperation.Id,operation_name=saveOperation.Name,request_id=saveOperation.RequestId,job_id=saveOperation.JobId,sequence_number=sequence,stage=stage,observed_at_utc=timestamp,model_revision=model.Revision,observation=observation,file_hashes=hashes};
+        var record=new{schema_version=1,model_id=model.Id,operation_id=saveOperation.Id,operation_name=saveOperation.Name,request_id=saveOperation.RequestId,job_id=saveOperation.JobId,sequence_number=sequence,stage=stage,observed_at_utc=timestamp,model_revision=model.Revision,revision_scope="at_observation_time_before_any_later_commit",observation=observation,file_hashes=hashes};
         if(Encoding.UTF8.GetByteCount(Json.Serialize(record))>1048576)throw new IOException("SAVE_OBSERVATION_RECORD_BUDGET_EXCEEDED");
         if(File.Exists(path))throw new IOException("SAVE_OBSERVATION_SEQUENCE_COLLISION");AtomicJson(path,record);AtomicMetadata.Write(path+".sha256",FileHash(path).Replace("-","").ToLowerInvariant());
         trace.Count=sequence;trace.Complete&=complete;trace.Dirty|=dirty;trace.PreviousHashes=hashes;
-        trace.Rows.Add(new{sequence_number=sequence,stage=stage,observed_at_utc=timestamp,model_revision=model.Revision,complete=complete,dirty_documents_observed=dirty,files_observed=hashes.Count,changed_file_count_since_previous_stage=changes});if(trace.Rows.Count>8)trace.Rows.RemoveAt(0);
+        trace.Rows.Add(new{sequence_number=sequence,stage=stage,observed_at_utc=timestamp,model_revision=model.Revision,revision_scope="at_observation_time_before_any_later_commit",complete=complete,dirty_documents_observed=dirty,files_observed=hashes.Count,changed_file_count_since_previous_stage=changes});if(trace.Rows.Count>8)trace.Rows.RemoveAt(0);
         object summary=SaveObservation(model);AtomicJson(SaveAuditPath(model,Path.Combine("save-observations",saveOperation.Id,"operation.json")),summary);AtomicJson(SaveAuditPath(model,"last-save-observation.json"),summary);
     }
 }
