@@ -3,6 +3,7 @@ import csv
 import hashlib
 import json
 import struct
+import tempfile
 import sys
 import unittest
 import uuid
@@ -19,7 +20,8 @@ from transport_cleanup import remove_test_root
 
 class QzcHistoryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.base=ROOT/'runs/qzc-tests';self.root=self.base/uuid.uuid4().hex[:8];self.root.mkdir(parents=True)
+        # Keep SHA-named legacy fixtures below Windows MAX_PATH in long release checkouts.
+        self.base=Path(tempfile.gettempdir())/'cm-qzc';self.root=self.base/uuid.uuid4().hex[:8];self.root.mkdir(parents=True)
         self.addCleanup(remove_test_root,self.root,self.base)
         self.model='user_'+'c'*32;self.operation='d'*32
         self.model_root=self.root/'experiments/user_assemblies'/self.model[5:]

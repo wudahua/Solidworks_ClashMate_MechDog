@@ -10,7 +10,8 @@ class QzcChecks {
  static void C(bool ok){if(!ok)throw new Exception("check "+count);count++;}
  static Dictionary<string,object> D(object x){return Cad.Json.Deserialize<Dictionary<string,object>>(Cad.Json.Serialize(x));}
  static object Call(Cad cad,string name,params object[] args){return typeof(Cad).GetMethod(name,BindingFlags.NonPublic|BindingFlags.Instance).Invoke(cad,args);}
- static void Main(string[] args){
+ static int Main(string[] args){try{Run(args);return 0;}catch(Exception error){Console.Error.WriteLine(error);return 1;}}
+ static void Run(string[] args){
   C(MateExecutionEvidence.ErrorName(5)=="swAddMateError_OverDefinedAssembly");C(MateExecutionEvidence.ErrorMessage(5).Contains("过定义"));C(MateExecutionEvidence.ErrorName(1)=="swAddMateError_NoError");C(MateExecutionEvidence.ErrorName(0)=="swAddMateError_ErrorUknown");C(MateExecutionEvidence.ErrorName(99)=="unknown_swAddMateError_value");
   var execution=new MateExecutionEvidence{Stage="native_add_mate",NativeError=5,NativeObjectReturned=true};var failure=D(execution.Export());C((bool)failure["native_object_returned"]);C(!(bool)failure["write_committed"]);C(failure["native_feature_observed"]==null);C(failure["native_rebuild_accepted"]==null);C((string)failure["failure_stage"]=="native_add_mate");
   execution.WriteCommitted=true;execution.Stage="completed";C(D(execution.Export())["failure_stage"]==null);
@@ -39,6 +40,8 @@ exe=folder/'Checks.exe';compiler=Path(os.environ['WINDIR'])/'Microsoft.NET/Frame
 args=[str(compiler),'/nologo','/platform:x64','/main:QzcChecks','/reference:System.Web.Extensions.dll','/reference:System.Windows.Forms.dll','/reference:Microsoft.CSharp.dll','/out:'+str(exe)]
 args+=['/reference:'+str(redist/p) for p in ('SolidWorks.Interop.sldworks.dll','SolidWorks.Interop.swconst.dll','SolidWorks.Interop.swmotionstudy.dll')]
 subprocess.run(args+[str(p) for p in (ROOT/'executor').glob('*.cs')]+[str(source)],check=True)
-result=subprocess.run([str(exe),str(folder)],capture_output=True,check=True)
+result=subprocess.run([str(exe),str(folder)],capture_output=True,timeout=60)
+(folder/"stdout.log").write_bytes(result.stdout);(folder/"stderr.log").write_bytes(result.stderr)
+if result.returncode:raise RuntimeError(result.stderr.decode("utf-8",errors="replace"))
 count=int(result.stdout.decode().strip());report={'all_passed':True,'checks':count,'cad_connection_used':False,'attempt':folder.name}
 (folder/'result.json').write_text(json.dumps(report,indent=2),encoding='utf-8');print(json.dumps(report))
