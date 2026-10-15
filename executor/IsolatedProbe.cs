@@ -16,7 +16,7 @@ public partial class Cad {
     // The worker never takes the interactive executor lease or connects by auto PID.
     public static int IsolatedProbeWorker(string requestPath) {
         Process owned=null;Cad cad=null;string resultPath=Path.Combine(Path.GetDirectoryName(requestPath),"worker-result.json");
-        Action<string> phase=stage=>{try{AtomicJson(Path.Combine(Path.GetDirectoryName(resultPath),"worker-phase.json"),new{stage=stage,observed_at_utc=DateTime.UtcNow.ToString("o"),native_call_may_still_be_running=stage!="completed"});}catch{}};
+        Action<string> phase=stage=>{try{AtomicJson(Path.Combine(Path.GetDirectoryName(resultPath),"worker-phase.json"),new{stage=stage,observed_at_utc=DateTime.UtcNow.ToString("o"),phase_only_not_cad_completion_proof=true,completion_evidence="worker-result.json"});}catch{}};
         object result=null;Exception failure=null,cleanup=null;int? nativeExit=null;bool ownedConnected=false;UserModel probeModel=null;
         try {
             var request=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(requestPath));
