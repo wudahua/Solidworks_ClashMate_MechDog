@@ -17,3 +17,5 @@ jobs:
       - run: python tests/session_connection_checks.py
       - run: python tests/axis_convention_checks.py
       - run: python tests/installation_powershell_checks.py
+      - run: python tests/alpha8_policy_checks.py
+      - run: python tests/study_history_v04.py
