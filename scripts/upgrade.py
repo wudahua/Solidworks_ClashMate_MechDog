@@ -13,8 +13,10 @@ from contextlib import contextmanager
 from pathlib import Path
 try:
     from .verify_release import safe_relative, reject_links, validate_manifest, verify
+    from .install_preflight import preflight
 except ImportError:
     from verify_release import safe_relative, reject_links, validate_manifest, verify
+    from install_preflight import preflight
 
 def package_files(package):
     package=Path(package);sidecar=package.with_suffix(package.suffix+'.sha256')
@@ -85,8 +87,17 @@ def upgrade(package,target,python,solidworks_dir='',dry_run=False,install=True):
     for name in contents:reject_links(target/safe_relative(name),target)
     for protected in ('.venv','runs','experiments','upgrade-backups','executor/bin'):reject_links(target/protected,target)
     plan={'version':manifest['version'],'zip_sha256':digest,'source_files':len(manifest['files']),'preserved_directories':['.venv','runs','experiments'],'dry_run':dry_run}
-    if dry_run:return plan
+    if install:
+        plan['installation_preflight']=preflight(target,python,solidworks_dir)
+        solidworks_dir=plan['installation_preflight']['solidworks_install_dir']
+    else:
+        plan['installation_preflight']={'prerequisites_checked':False,'scope':'source_only_install_false'}
+    if dry_run:
+        with idle_installation(target):
+            plan['executor_lease_available']=True
+        return plan
     with idle_installation(target):
+        if install:preflight(target,python,solidworks_dir)
         journal=target/'runs/executor-state.json';before=journal.read_bytes() if journal.exists() else None
         backup=target/'upgrade-backups'/uuid.uuid4().hex;backup.mkdir(parents=True)
         managed={n:target/safe_relative(n) for n in contents};existing=set()
