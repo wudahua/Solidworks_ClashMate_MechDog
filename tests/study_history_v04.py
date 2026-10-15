@@ -45,6 +45,9 @@ class Probe {
   Check((string)((Dictionary<string,object>)changed["last_run"])["input_match_status"]=="stale"&&changed["history_warning"]==null,"unsaved study setting change can be proven independently");
   settings["fps"]=30;changed=StudyHistory.Latest(root,model,study,2,"默认",hashes,clean,settings);
   Check((string)changed["history_warning"]=="PREVIOUS_SOLVE_FAILED_SAME_INPUT","clean matching native settings");
+  var dirtyObservation=new StudyHistory.Observation();dirtyObservation.Record("after_native_open",true,1,1,new object[0]);var diskOnly=(Dictionary<string,object>)StudyHistory.Latest(root,model,study,2,"默认",hashes,dirtyObservation,settings)["last_run"];
+  Check((string)diskOnly["saved_input_match_status"]=="matches_recorded_saved_inputs","matching disk evidence preserved independently");
+  Check((string)diskOnly["live_memory_input_status"]=="not_proven"&&(string)diskOnly["input_match_status"]=="unknown","disk equality cannot exclude unsaved part feature changes");
   saved.Remove("history_input_study_settings");save();
   saved["restoration_status"]="unknown";save();Check(latest(2,false)["history_warning"]==null,"unknown restoration not a compatibility verdict");
   saved.Remove("history_input_file_hashes");save();last=(Dictionary<string,object>)latest(2,false)["last_run"];Check((string)last["input_match_status"]=="unknown","legacy input unknown");
