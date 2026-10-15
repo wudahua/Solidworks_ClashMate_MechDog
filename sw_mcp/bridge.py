@@ -32,9 +32,14 @@ class Bridge:
         "restore_model_checkpoint", "apply_mate", "create_motion_study", "convert_motion_study",
         "reset_study_time", "create_model_checkpoint", "probe_motion_compatibility"})
 
-    def __init__(self, root: Path, timeout: float = 180, motion_scan_timeout: float = 600):
+    def __init__(self, root: Path, timeout: float = 180, motion_scan_timeout: float | None = None):
         self.root = root
         self.timeout = timeout
+        if motion_scan_timeout is None:
+            value = float(os.environ.get("SW_MCP_LONG_OPERATION_WAIT_S", "600"))
+            if not 60 <= value <= 3600 or not value < float("inf"):
+                raise ValueError("SW_MCP_LONG_OPERATION_WAIT_S must be finite and between 60 and 3600 seconds")
+            motion_scan_timeout = value
         self.motion_scan_timeout = motion_scan_timeout
         self._lock = threading.Lock()
         self._state_lock = threading.Lock()
@@ -522,7 +527,7 @@ class Bridge:
                             progress = {k: observed.get(k) for k in ("stage", "checkpoint_id")}
                     except (OSError, ValueError, AttributeError):
                         pass
-                raise CadError("CAD_TIMEOUT", "调用超时；CAD 操作可能继续，不能重复写入。查询 get_job 或 get_recovery_state 的最终响应。", diagnostics={"request_id": request_id, "operation": operation, "model_id": model_id, "plan_id": params.get("plan_id"), "job_id": job_id, "wait_budget_s": deadline, "last_native_progress": progress, "next_tools": ["get_job", "get_recovery_state"], "retry_write_allowed": False}) from exc
+                raise CadError("CAD_TIMEOUT", "调用超时；CAD 操作可能继续，不能重复写入。查询 get_job 或 get_recovery_state 的最终响应。", diagnostics={"request_id": request_id, "operation": operation, "model_id": model_id, "plan_id": params.get("plan_id"), "job_id": job_id, "wait_budget_s": deadline, "client_wait_expired": True, "cad_operation_finished": False, "native_call_forcibly_cancelled": False, "late_response_expected_or_possible": True, "last_native_progress": progress, "next_tools": ["get_job", "get_recovery_state"], "retry_write_allowed": False}) from exc
             except (BrokenPipeError, OSError) as exc:
                 state_after = self.recovery_state()
                 if state_after.get("request_id") == request_id and state_after.get("status") == "active":
