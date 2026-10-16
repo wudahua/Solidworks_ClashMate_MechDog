@@ -2,13 +2,13 @@
 
 SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.2-alpha.1`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.2-alpha.2`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.2-alpha.1.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.2-alpha.2.md)。
 
 本版本保留另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
 
-本版核对三份 v0.4.2 反馈，补齐宿主分段计时、预算内检查点缓存恢复、失败响应探测摘要和扫描覆盖语义；高帧率归零、原生马达回读与历史结果保护继续保留。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
+本版核对五份 v0.4.2-alpha.1 反馈，新增轻量组件清单、几何查询异步入口、冻结输入快照回放和新副本降帧归零；补齐引用能力、固定状态来源、预检错误和计时范围诊断。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
 
 - `apply_mate`、`create_motion_study`、`convert_motion_study`、`create_model_checkpoint` 和 `reset_study_time` 默认返回 `job_id`；用 `get_job` 轮询，确认 `succeeded` 后使用 `result`。`wait_for_completion=True` 保留同步方式，显式重算归零仍返回任务。默认归零任务不会自动获得计算许可，须明确 `allow_recalculate=True`。
 - 上述写操作执行器等待预算为 600 秒；这不是完成时间保证，也不能替代 MCP 客户端自身的等待限制。超时后保留原任务状态，用 `get_job` 查看 `late_response`，或用 `get_recovery_state(request_id=...)` 读取最终原始响应；无响应仍保持未知，不重复写入。`idle` 只说明请求已结束，配合是否应用看原响应与原生参数。
@@ -35,6 +35,18 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 
 这是供试用的运动仿真版本。已有有效配合的刚体机构可直接进入运动流程；缺少基础配合时可由设计者选定参考和类型，再让助手执行。尚未完成“大部分机械装配均可用”的样本覆盖验收。
 
+
+## v0.4.2-alpha.2 使用变化
+
+- 大装配先 `inspect_model(model_id, detail_level="components", wait_for_completion=False)`，用 `get_job` 取得组件 ID，再按 `component_id` 筛选 `list_mate_references` / `list_drive_candidates`；两种几何查询也支持 `wait_for_completion=False`。默认同步兼容保留。排队查询使用可配置长任务等待预算（默认600秒），同步查询保留原预算；异步返回并不取消原生调用或保证预算内完成。
+- 查询超时的 `next_call` 给出可直接使用的 `get_recovery_state(request_id=...)`；无 `job_id` 时不再建议查询空任务。迟到结果原本就会保存，未知状态不得重复写入。
+- `replay_motion_frame(run_id, frame, use_input_snapshot=True, wait_for_completion=False)` 在独立实例重算冻结输入、核验原生时间轴及该帧全部组件姿态后导出截图，核验当前上下文未变和临时实例退出；支持服务重启。本版本新求解任务绑定冻结描述及输入文件哈希；没有绑定描述的旧 run 明确拒绝猜测。此模式不证明当前模型有效，默认模式仍严格核对当前输入；已有截图离线读取方式不变。
+- 对超预算的高帧率算例，可先 `create_model_checkpoint` 取得检查点，再显式调用 `reset_study_time(model_id, study, allow_recalculate=True, reset_output_fps=30, create_new_model=True, checkpoint_id=checkpoint_id)`。在独立实例中从指定冻结检查点创建新模型，保存后重开核验，不保存当前脏内存；不复制旧驱动/实体登记表。保持时长，按 30 秒/1801 帧/1000 fps 上限校验，在新登记模型归零；原模型保留。成功后使用返回的新 `model_id`，重新查询实体和方案；失败的新副本隔离。不会忽略原模型的非零算例，也不会自动修改原检查点。
+- 固定状态明确来自 `IComponent2.IsFixed`，含虚拟零件的外部化核验新增逐组件固定状态前后比对；不会自行浮动零件。不能由候选缺失推断版本把零件错误固定。
+- 配合创建参考仍限顶层零件平面/圆柱面。边缘、顶点、草图段会明确报告能力边界；不自动替换为邻接面。原生已有的其他类型配合可以读取其健康与参考诊断，不等于支持新建这些配合。
+- 基础预检只需原生配合特征健康，不再为健康判定重复展开全部配合几何。重建失败与非零特征错误继续阻断，返回特征名、类型、原生错误值及来源未证明；不虚构 HRESULT 或自动忽略螺钉/阵列错误。
+- `checkpoint_probe.wrapper_timings` 包括写阶段、打开 scope、探测核心与释放 scope；原 `elapsed_ms` / `host_timings` 只计核心。查询 `host_timings` 同样明确排除登记、释放和传输；嵌套时间不能相加。每次配合仍做完整独立恢复证明，不按零时刻、配合计数或近似姿态跳过。
+- 建检查点、归零、保存等可能让旧配合方案失效；推荐先准备检查点再预览，失效必须重新预览。`get_job.verification_passed` 为 true/false/null，null 表示未得出通过或失败结论；服务观测时间不冒充原生进度。
 
 ## v0.4.2-alpha.1 使用变化
 
@@ -234,7 +246,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1 -SolidWorksProce
 4. 调用 `inspect_model`、`preflight_motion`、`list_motion_studies`。
 5. 已有 Motion Analysis：直接选算例，并查看 `last_run` 及其输入匹配状态。已有动画/Basic Motion：明确请求 `convert_motion_study`。没有驱动：调用 `list_drive_candidates`，由用户选择组件、参考实体、速度与方向，再 `create_motion_study`。转换和创建默认返回 job_id；等待 get_job 状态为 succeeded 后读取 result，其中包含实际时长、帧率和算例状态。**预检通过或驱动创建成功不保证驱动与配合相容，也不保证求解成功。** 旋转驱动与现有约束不相容时可能只有初始结果，需核对约束和设计意图；直线驱动只可在适用机构中作为对照，不能通用替代旋转驱动。
 6. 调用 `run_motion_study`，用 `get_job` 查询。成功结果包含 run_id、时间轴验证和驱动验证范围。复用已有算例时不声称已独立证明物理结果。
-7. 调用 `export_motion_curve` 或 `replay_motion_frame`。CAD 回放和默认曲线导出要求当前会话模型输入匹配。重启后可通过 get_run_artifacts、read_run_poses 或显式历史导出读取保存数据；历史记录不证明当前 CAD 状态。
+7. 调用 `export_motion_curve` 或 `replay_motion_frame`。默认 CAD 回放和默认曲线导出要求当前会话模型输入匹配；冻结输入模式见上方新入口。重启后可通过 get_run_artifacts、read_run_poses 或显式历史导出读取保存数据；历史记录不证明当前 CAD 状态。
 
 结果描述的是导入时的副本。之后修改源文件会显示源哈希不一致，副本仍可独立求解和恢复；要模拟新设计，请重新导入。导入过程本身出现源哈希变化则拒绝完成导入。
 
@@ -296,7 +308,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1 -SolidWorksProce
 
 任务进度在结束后具有 `terminal=True` 和最终stage，并保留 `last_native_stage`。`timed_out`、`executor_lost` 的 `cad_operation_finished=False` 表示没有确认CAD操作结束。错误中的 `document_context_restoration_status` 单独说明活动窗口恢复；`restoration_status` 描述模型/算例恢复，读取候选的窗口恢复不再暗示模型执行过检查点恢复。
 
-在 revision 34.0.0 的额外边界实测中，激活算例停在非输出帧时刻曾导致原生采样阻塞。因此本版在求解或回放前拒绝该状态，返回 `ACTIVE_TIME_NOT_FRAME_ALIGNED`，需先显式调用 `reset_study_time`。这与未激活算例中保存的非零时间不同，后者仍按快照完整保留；不会把全部算例无条件归零。
+在 revision 34.0.0 的额外边界实测中，激活算例停在非输出帧时刻曾导致原生采样阻塞。因此本版在求解或回放前拒绝该状态，返回 `ACTIVE_TIME_NOT_FRAME_ALIGNED`，需先先 `create_model_checkpoint` 取得检查点，再显式调用 `reset_study_time`。这与未激活算例中保存的非零时间不同，后者仍按快照完整保留；不会把全部算例无条件归零。
 
 失败任务也保留 `solve.json`；完整采集时保留姿态 CSV 和哈希。离线接口中的 `current_model_validity=not_checked_offline` 表示没有核查当前模型，不得把历史数据当作当前设计的有效结果。`inconclusive` 仍表示未完成验证。源文件与组件配置名称原样保留，`默认` 和 `Default` 是不同的配置标识。
 
@@ -343,7 +355,7 @@ QZC 更新验收反馈修订：
 
 - `apply_mate` 的 `execution` 分别记录原生对象返回、特征确认、重建、参数核验、保存和提交；`null` 表示该项未检查。`swAddMateError_e` 中 **1 为成功，5 为装配过定义**。过定义原因为 `MATE_OVERDEFINED`，外层保留 `MATE_APPLY_ROLLED_BACK` 及 `rollback_verified`，与创建后重建失败区分。旧 `mate_created` 只表示对象非空，不能当作提交成功；更改参数仍须新预览和确认。
 - 写响应的 `save_observation.scope=current_operation`，摘要最多 4 KB，只含本次操作；嵌套检查点保留同一 `operation_id`。完整阶段和哈希分别存入模型目录 `save-observations/`。用 `get_run_artifacts(model_id=..., operation_id=..., limit=5)` 离线分页读取，完整哈希需 `include_file_hashes=True`，响应最多 16 KB；过大的单条记录给出摘要和原文件路径。升级时原累计观测按原字节归档，摘要中的 `archived_legacy_query` 提供 `legacy_` 加 SHA256 的查询标识，不伪造旧操作身份。
-- 默认 `replay_motion_frame` 仍要求本会话 run 与当前输入匹配，重算、核验全部组件并恢复。通过后登记独立文件名的 BMP、帧时间、姿态 CSV 哈希、图像哈希和核验范围；`get_run_artifacts(run_id=...)` 列出最近 5 个已登记图像。`replay_motion_frame(run_id, frame, saved_image_only=True)` 可在重启或恢复隔离时读取该帧既有截图，不调用 COM。它不能生成未拍摄的帧；旧无清单 BMP 不自动升级为已核验图像。任意旧输入重新回放仍需未来的不可变输入快照功能。历史图像不证明当前 CAD 或独立物理精度，也不保证所有组件在画面中可见。
+- 默认 `replay_motion_frame` 仍要求本会话 run 与当前输入匹配，重算、核验全部组件并恢复。通过后登记独立文件名的 BMP、帧时间、姿态 CSV 哈希、图像哈希和核验范围；`get_run_artifacts(run_id=...)` 列出最近 5 个已登记图像。`replay_motion_frame(run_id, frame, saved_image_only=True)` 可在重启或恢复隔离时读取该帧既有截图，不调用 COM。它不能生成未拍摄的帧；旧无清单 BMP 不自动升级为已核验图像。本版新任务绑定的冻结输入可显式 use_input_snapshot=True 独立重放；旧无绑定任务仍不能重算历史帧。历史图像不证明当前 CAD 或独立物理精度，也不保证所有组件在画面中可见。
 - `inspect_model.reference_guidance` 给出本模型的查询路线，配合实体外层也列出 `entity_id` 和几何类型。以实体的登记状态为准：支持的返回面经核验自动登记，其他参考仍需查询且不得自动改绑。驱动查询需找指定面时可用 `group_faces=False`，避免只返回等价几何组的代表面。
 
 恢复字段判读：`status=idle/active/unknown` 分别表示日志中的请求已结束、执行中、未确认；不是机械姿态认证。`current_request_state=completed/dispatching/unconfirmed` 是相应的当前请求状态。`observed_dispatch_state` 保留旧日志原值；`dispatch_field_consistent` 和 `recovery_field_consistent` 分别核对两个派生字段，`journal_derived_fields_consistent` 是两者均一致。旧日志不一致不会自动重写或解除隔离。
@@ -355,7 +367,7 @@ QZC 更新验收反馈修订：
 单位保持原协议：几何坐标 `m`、面积 `m²`、配合距离和直线运动门槛 `mm`、直线驱动 `mm/s`、旋转驱动 `rpm`；导出曲线按 quantity 标明 `m`、`m/s` 或 `rad/s`。内部 API 换算保持不变。几何候选只说明可用的参考类型，相容性仍为 `not_checked`；平动组件上的圆柱孔不代表推荐给该组件加旋转驱动。
 
 - 添加配合前，对全部算例类型（含归零态）的检查点在另一份独立副本中预演恢复；时间、全体姿态、原副本文件及配合未通过核验时拒绝写入。历史异常检查点不承诺全部可恢复；具体以逐次完整恢复证明为准，失败仍在写入前拦截。首次覆盖为顶层刚体零件；多层装配会明确拒绝预检，不能假定安全回滚。
-- `get_motion_summary(run_id, allow_unverified_history=True)` 可在服务重启或 CAD 隔离时离线查看历史摘要；曲线使用同名选项。历史哈希通过不代表当前模型匹配或物理验证通过。当前 CAD 回放仍要求版本及文件哈希匹配。
+- `get_motion_summary(run_id, allow_unverified_history=True)` 可在服务重启或 CAD 隔离时离线查看历史摘要；曲线使用同名选项。历史哈希通过不代表当前模型匹配或物理验证通过。默认当前 CAD 回放仍要求版本及文件哈希匹配；冻结输入模式只核验绑定历史快照。
 - 配合预览检查相同持久化面参考、类型、方向及支持的参数是否确定重复。相同组件对上的其他配合会提示复核；边与面不能自动判等，距离配合参数尚不用于确定判重。`inspect_model` 已登记的受支持顶层面可直接使用；其他参考通过 `list_mate_references` 查询对应页面。
 - 显式归零会改变登记副本。查看 `previous_time_s`、`target_time_s`、`pose_change`、`operation_state` 和 `pre_operation_pose_restored`；兼容字段 `restoration_status=restored` 不能单独解释为归零前姿态已恢复。
 - 恢复状态返回原始 `observed_dispatch_state` 和当前 `current_request_state`，旧日志矛盾会标出而不会改写。替代会话仍须明确传入 `allow_replacement_session=true`，并核验旧实例已退出。
