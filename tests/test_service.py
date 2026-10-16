@@ -156,6 +156,8 @@ class ServiceTests(unittest.TestCase):
                     with self.assertRaises(CadError) as first:
                         bridge.request("slow")
                     self.assertEqual(first.exception.code, "CAD_TIMEOUT")
+                    self.assertEqual(first.exception.diagnostics["next_tools"], ["get_recovery_state"])
+                    self.assertEqual(first.exception.diagnostics["next_call"]["arguments"]["request_id"], first.exception.diagnostics["request_id"])
                     self.assertEqual(bridge.cad_operation_state, "unknown_after_timeout")
                     with self.assertRaises(CadError) as second:
                         bridge.request("next")
