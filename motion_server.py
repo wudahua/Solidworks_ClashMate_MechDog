@@ -20,7 +20,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.1-alpha.8", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.1-alpha.9", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 
 def packed(data, error=False):
@@ -124,7 +124,7 @@ async def list_mate_references(model_id: str, component_id: str = "", kind: Lite
 
 @mcp.tool()
 async def preview_mate(model_id: str, entity_a: str, entity_b: str, mate_type: Literal["concentric", "coincident", "distance", "parallel", "perpendicular"], alignment: Literal["aligned", "anti_aligned"] = "aligned", distance_mm: float = 0, lock_rotation: bool = False, baseline_run_id: str = "", maximum_translation_mm: float = 1, maximum_rotation_deg: float = 1) -> CallToolResult:
-    """生成描述性配合方案，不移动零件、不保存或试算。同心选圆柱面，其余选平面。可绑定本会话当前模型的已验证运动基线。默认位姿预算1mm/1度，超出回滚；较大移动须用户明确选择预算并重新预览。方案在状态变化或重连后失效。"""
+    """生成描述性配合方案，不移动零件、不保存或试算。同心选圆柱面，其余选平面。可绑定本会话当前模型的已验证运动基线。默认位姿预算1mm/1度，保护已有构型；装配对齐可能需要更大移动，请用户预先明确maximum_translation_mm/maximum_rotation_deg。仅描述预览不预测移动；超预算回滚后需新方案，原生配合成功不等于构型符合意图。方案在状态变化或重连后失效。"""
     if not math.isfinite(distance_mm) or not 0 <= distance_mm <= 10000 or (mate_type != "distance" and distance_mm != 0) or (lock_rotation and mate_type != "concentric"):
         raise ToolError("距离须在0–10000mm且仅用于距离配合；锁旋转仅适用于同心配合。")
     if not math.isfinite(maximum_translation_mm) or not 0 <= maximum_translation_mm <= 10000 or not math.isfinite(maximum_rotation_deg) or not 0 <= maximum_rotation_deg <= 180:
@@ -134,7 +134,7 @@ async def preview_mate(model_id: str, entity_a: str, entity_b: str, mate_type: L
 
 @mcp.tool()
 async def apply_mate(plan_id: str, confirmed: bool = False, wait_for_completion: bool = False) -> CallToolResult:
-    """用户确认具体方案后异步执行，返回job_id并轮询get_job；wait_for_completion=True兼容同步。建检查点、建配合并重建，失败回滚。超时不重试写入，查询迟到最终响应；成功后另验运动。"""
+    """用户确认具体方案后异步执行，返回job_id并轮询get_job；wait_for_completion=True兼容同步。默认方案预算1mm/1度，装配对齐等较大移动需在preview_mate显式选择maximum_translation_mm/maximum_rotation_deg后确认。建检查点、独立恢复预演、建配合并重建，超预算回滚后给retry_guidance；启动/插件开销不保证固定耗时。超时不重试写入，查询迟到最终响应；成功后另验运动。"""
     if not confirmed:
         raise ToolError("须由用户明确确认配合方案后传入confirmed=True。")
     return await call("apply_mate", plan_id=plan_id, confirmed=confirmed) if wait_for_completion else enqueue("apply_mate", {"plan_id": plan_id, "confirmed": confirmed})
@@ -216,7 +216,7 @@ async def create_model_checkpoint(model_id: str, wait_for_completion: bool = Fal
 
 @mcp.tool()
 async def reset_study_time(model_id: str, study: str, allow_recalculate: bool = False, wait_for_completion: bool = False) -> CallToolResult:
-    """归零并保存副本，先建立检查点。默认不求解；原始算例拒绝SetTime时，可显式allow_recalculate=True，异步按原设置重新计算后归零（最多30秒/1801帧）。旧结果失效；隔离期间禁止。"""
+    """归零并保存副本，先建立检查点。默认不求解；可显式allow_recalculate=True按原设置重建缓存后归零，预算同时限制30秒、1000fps、1801帧（5秒300fps允许；新建/运行仍最多120fps）。超预算在检查点前拒绝，查看逐算例指引；不忽略非零算例、不自动降fps。旧结果失效；隔离期间禁止。"""
     if allow_recalculate or not wait_for_completion:
         return enqueue("reset_study_time", {"model_id": model_id, "study": study, "allow_recalculate": allow_recalculate})
     return await call("reset_study_time", model_id=model_id, study=study, allow_recalculate=False)

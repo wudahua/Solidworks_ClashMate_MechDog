@@ -27,4 +27,5 @@ def main():
  try:owned.wait(timeout=45);report['owned_exit_code']=owned.returncode
  except subprocess.TimeoutExpired:report['owned_exit_pending']=True
  report['completed']=helper.returncode==0 and report['source_files_unchanged'] and report['primary_journal_unchanged'];save();(ROOT/'runs/checkpoint-probe-acceptance-latest.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8');print(json.dumps({k:v for k,v in report.items() if k not in ('source_hashes','connection')},ensure_ascii=True),flush=True)
+ if not report['completed']:raise SystemExit(1)
 if __name__=='__main__':main()

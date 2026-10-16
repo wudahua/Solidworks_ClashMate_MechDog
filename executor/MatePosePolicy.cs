@@ -17,6 +17,12 @@ public static class MatePosePolicy {
             if(t>PoseValidation.TranslationToleranceM*1000||r>PoseValidation.RotationToleranceRad*180/Math.PI)changed++;
             if(t>mm+1e-7||r>deg+1e-7){exceeded++;if(rows.Count<20)rows.Add(new{instance=name,translation_mm=t,rotation_deg=r});}
         }
-        return new Dictionary<string,object>{{"accepted",scope&&exceeded==0},{"component_scope_verified",scope},{"checked_component_count",before.Count},{"changed_component_count",changed},{"exceeded_component_count",exceeded},{"maximum_translation_mm",translation},{"maximum_rotation_deg",rotation},{"allowed_translation_mm",mm},{"allowed_rotation_deg",deg},{"exceeded_components",rows.ToArray()},{"components_truncated",exceeded>rows.Count},{"scope","all_component_origins_and_orientations_before_native_add_to_before_commit"},{"claim","movement_budget_only_not_motion_or_design_intent_proof"}};
+        return new Dictionary<string,object>{{"accepted",scope&&exceeded==0},{"component_scope_verified",scope},{"checked_component_count",before.Count},{"changed_component_count",changed},{"changed_component_count_total",changed},{"changed_count_semantics","all_components_above_pose_comparison_tolerance_independent_of_confirmed_budget"},{"exceeded_component_count",exceeded},{"maximum_translation_mm",translation},{"maximum_rotation_deg",rotation},{"allowed_translation_mm",mm},{"allowed_rotation_deg",deg},{"exceeded_components",rows.ToArray()},{"components_truncated",exceeded>rows.Count},{"scope","all_component_origins_and_orientations_before_native_add_to_before_commit"},{"claim","movement_budget_only_not_motion_or_design_intent_proof"}};
+    }
+    public static object RepreviewGuidance(string error,object diagnostics) {
+        var audit=diagnostics as Dictionary<string,object>;
+        bool budget=error=="MATE_POSE_CHANGE_EXCEEDS_CONFIRMED_BUDGET";
+        bool measured=budget&&audit!=null&&audit.ContainsKey("component_scope_verified")&&(bool)audit["component_scope_verified"];
+        return new{failure_category=budget?"confirmed_movement_budget_exceeded":"native_or_transaction_failure",re_preview_with_explicit_budget_allowed=measured,required_tool=measured?"preview_mate":null,change_budget_requires_new_preview=true,automatic_budget_expansion=false,observed_not_recommended_translation_mm=measured?audit["maximum_translation_mm"]:null,observed_not_recommended_rotation_deg=measured?audit["maximum_rotation_deg"]:null,budget_parameters=new[]{"maximum_translation_mm","maximum_rotation_deg"},next_action=measured?"designer_review_observed_movement_then_choose_explicit_limits_and_confirm_new_plan":"inspect_original_failure_before_new_plan",claim="observed_motion_is_not_proof_of_design_intent_or_recommended_budget"};
     }
 }
