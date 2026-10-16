@@ -16,8 +16,8 @@ public partial class Cad {
     // The worker never takes the interactive executor lease or connects by auto PID.
     public static int IsolatedProbeWorker(string requestPath) {
         Process owned=null;Cad cad=null;string resultPath=Path.Combine(Path.GetDirectoryName(requestPath),"worker-result.json");
-        var elapsed=Stopwatch.StartNew();var phases=new List<object>();long previous=0;
-        Action<string> phase=stage=>{try{long now=elapsed.ElapsedMilliseconds;phases.Add(new{stage=stage,elapsed_ms=now,previous_phase_elapsed_ms=now-previous,observed_at_utc=DateTime.UtcNow.ToString("o")});previous=now;AtomicJson(Path.Combine(Path.GetDirectoryName(resultPath),"worker-phase.json"),new{stage=stage,elapsed_ms=now,phases=phases.Take(32).ToArray(),phase_only_not_cad_completion_proof=true,completion_evidence="worker-result.json"});}catch{}};
+        var elapsed=Stopwatch.StartNew();var phases=new List<object>();long previous=0;string previousStage="worker_initialization";
+        Action<string> phase=stage=>{try{long now=elapsed.ElapsedMilliseconds;phases.Add(new{stage=stage,elapsed_ms=now,previous_stage=previousStage,previous_phase_elapsed_ms=now-previous,observed_at_utc=DateTime.UtcNow.ToString("o")});previous=now;previousStage=stage;AtomicJson(Path.Combine(Path.GetDirectoryName(resultPath),"worker-phase.json"),new{stage=stage,elapsed_ms=now,phases=phases.Take(32).ToArray(),phase_only_not_cad_completion_proof=true,completion_evidence="worker-result.json"});}catch{}};
         object result=null;Exception failure=null,cleanup=null;int? nativeExit=null;bool ownedConnected=false;UserModel probeModel=null;
         try {
             var request=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(requestPath));
@@ -63,17 +63,17 @@ public partial class Cad {
         return failure==null&&cleanup==null?0:1;
     }
     Dictionary<string,object> RunIsolatedProbe(string folder,Dictionary<string,object> request) {
-        ProbeOwnedPath(folder,Path.Combine(Root,"runs"));
+        var hostTiming=new OperationTiming();hostTiming.Start("prepare_worker_request");ProbeOwnedPath(folder,Path.Combine(Root,"runs"));
         string sw=Sw.GetExecutablePath();if(Directory.Exists(sw))sw=Path.Combine(sw,"SLDWORKS.exe");
         request["solidworks_executable"]=sw;request["parent_solidworks_pid"]=Sw.GetProcessID();
         string input=Path.Combine(folder,"worker-request.json");AtomicJson(input,request);
         var start=new ProcessStartInfo(System.Reflection.Assembly.GetExecutingAssembly().Location,"--isolated-probe \""+input+"\""){UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden,RedirectStandardError=true,RedirectStandardOutput=true};
-        using(var worker=Process.Start(start)) {
+        hostTiming.Start("start_and_wait_worker");using(var worker=Process.Start(start)) {
             var stdout=worker.StandardOutput.ReadToEndAsync();var stderr=worker.StandardError.ReadToEndAsync();
             // Like a native COM call, this is not forcibly cancelled at the client's wait deadline.
             worker.WaitForExit();File.WriteAllText(Path.Combine(folder,"worker-stdout.log"),stdout.Result);File.WriteAllText(Path.Combine(folder,"worker-stderr.log"),stderr.Result);
-            string result=Path.Combine(folder,"worker-result.json");if(!File.Exists(result))throw new CadFault("PROBE_WORKER_RESULT_MISSING","独立探测未留下完成证据；未添加配合。",new{worker_pid=worker.Id,worker_exit=worker.ExitCode,evidence_directory=folder});
-            var evidence=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(result));
+            hostTiming.Start("read_worker_completion");string result=Path.Combine(folder,"worker-result.json");if(!File.Exists(result))throw new CadFault("PROBE_WORKER_RESULT_MISSING","独立探测未留下完成证据；未添加配合。",new{worker_pid=worker.Id,worker_exit=worker.ExitCode,evidence_directory=folder});
+            var evidence=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(result));hostTiming.Finish();evidence["host_round_trip_timings"]=hostTiming.Export();evidence["evidence_path"]=result;evidence["evidence_sha256"]=FileHash(result).Replace("-","").ToLowerInvariant();
             if(!Convert.ToBoolean(evidence["owned_process_exited"])||evidence["cleanup_failure"]!=null)throw new CadFault("ISOLATED_PROBE_RECOVERY_REQUIRED","临时实例退出或清理未确认；保留所有进程与证据。",new{worker=evidence,evidence_path=result});
             if(worker.ExitCode!=0||!Convert.ToBoolean(evidence["success"])) {
                 var failed=evidence["failure"] as Dictionary<string,object>;object code;

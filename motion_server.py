@@ -20,7 +20,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.2", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.2-alpha.1", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 
 def packed(data, error=False):

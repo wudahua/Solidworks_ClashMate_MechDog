@@ -2,13 +2,13 @@
 
 SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.2`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.2-alpha.1`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.2.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.2-alpha.1.md)。
 
 本版本保留另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
 
-本版核对四份 alpha.9 反馈，扩展归零态检查点的写入前恢复预演，提供原生马达参考和失败诊断、显式 5 秒兼容性探测，以及预演阶段耗时。高帧率归零和历史结果保护继续保留。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
+本版核对三份 v0.4.2 反馈，补齐宿主分段计时、预算内检查点缓存恢复、失败响应探测摘要和扫描覆盖语义；高帧率归零、原生马达回读与历史结果保护继续保留。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
 
 - `apply_mate`、`create_motion_study`、`convert_motion_study`、`create_model_checkpoint` 和 `reset_study_time` 默认返回 `job_id`；用 `get_job` 轮询，确认 `succeeded` 后使用 `result`。`wait_for_completion=True` 保留同步方式，显式重算归零仍返回任务。默认归零任务不会自动获得计算许可，须明确 `allow_recalculate=True`。
 - 上述写操作执行器等待预算为 600 秒；这不是完成时间保证，也不能替代 MCP 客户端自身的等待限制。超时后保留原任务状态，用 `get_job` 查看 `late_response`，或用 `get_recovery_state(request_id=...)` 读取最终原始响应；无响应仍保持未知，不重复写入。`idle` 只说明请求已结束，配合是否应用看原响应与原生参数。
@@ -35,6 +35,17 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 
 这是供试用的运动仿真版本。已有有效配合的刚体机构可直接进入运动流程；缺少基础配合时可由设计者选定参考和类型，再让助手执行。尚未完成“大部分机械装配均可用”的样本覆盖验收。
 
+
+## v0.4.2-alpha.1 使用变化
+
+- 配合检查点预演增加 `host_timings`：捕获原状态、复制/引用重定向、预演前核验、独立进程往返、检查点完整性复核、清理后核验。worker 阶段同时给出 `previous_stage`，耗时属于前一阶段；worker 耗时嵌套在宿主往返时间内，不能相加。
+- 合并同一观测中的组件/配合遍历，正常路径保留预演前与清理后两次完整观测；文件、配合、已加载零件更新标记、全部姿态、算例状态及进程退出证明均保留。不承诺跨机器固定耗时或恢复到历史最快速度。
+- 若恢复时钟已为零但显示姿态不符，先重选记录帧；必要时可按记录的原设置重建活动 Animation/Motion Analysis 缓存，单次恢复最多一次。必须再核验原记录的全部姿态和算例状态；不改写期望姿态、不降低容差、不强制放置零件，失败仍拒绝配合写入。
+- 成功、写入前失败、回滚成功及回滚失败都使用顶层 `checkpoint_probe`（未完成探测时可为空）。不可恢复检查点返回具体检查点 ID 和处理工具；单纯重新预览不被描述为修复。
+- 候选关联扫描把特征发现也纳入 10 秒协作预算，并复用本次查询已读面/组件几何。部分扫描的 `total_mate_count` 为 `null`，明确表示总数尚未观察完整；`started_mate_count` 与 `scanned_mate_count` 区分开始读取和完成读取。单个原生 COM 调用不能中断，另报预算超出量。这是关联扫描预算，不是整个查询的执行时限。
+- `redundancy_or_overconstraint_predicted` 从 `false` 改为 `null`，并增加 `constraint_prediction.status="not_computed"`。描述性预演仅可证明受支持参考的精确重复，不能排除冗余或过约束。
+- `cache_reused=false` 表示每次执行新证明，当前未实现恢复证明复用；不是缓存键失效。不使用配合计数或姿态近似来复用证明。
+- 原生驱动的持久引用错误标明 `swPersistReferencedObjectStates_e` 和回退路径；其 `1` 是 Invalid，与 AddMate 的 `swAddMateError_NoError=1` 属于不同枚举。
 
 ## v0.4.2 使用变化
 
@@ -106,7 +117,7 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 先停用旧安装目录的MCP服务，保留SolidWorks打开；从新包目录调用：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2-alpha.1_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
 # PythonPath填写基础Python；非默认SolidWorks安装请同时指定-SolidWorksInstallDir。
 # 预检通过后移除-DryRun；未来网络及编译仍可能失败，保留自动回滚。
 ```
@@ -343,7 +354,7 @@ QZC 更新验收反馈修订：
 
 单位保持原协议：几何坐标 `m`、面积 `m²`、配合距离和直线运动门槛 `mm`、直线驱动 `mm/s`、旋转驱动 `rpm`；导出曲线按 quantity 标明 `m`、`m/s` 或 `rad/s`。内部 API 换算保持不变。几何候选只说明可用的参考类型，相容性仍为 `not_checked`；平动组件上的圆柱孔不代表推荐给该组件加旋转驱动。
 
-- 添加配合前，对全部算例类型（含归零态）的检查点在另一份独立副本中预演恢复；时间、全体姿态、原副本文件及配合未通过核验时拒绝写入。旧液压反馈检查点仍无法完整恢复记录姿态，此限制没有消除。首次覆盖为顶层刚体零件；多层装配会明确拒绝预检，不能假定安全回滚。
+- 添加配合前，对全部算例类型（含归零态）的检查点在另一份独立副本中预演恢复；时间、全体姿态、原副本文件及配合未通过核验时拒绝写入。历史异常检查点不承诺全部可恢复；具体以逐次完整恢复证明为准，失败仍在写入前拦截。首次覆盖为顶层刚体零件；多层装配会明确拒绝预检，不能假定安全回滚。
 - `get_motion_summary(run_id, allow_unverified_history=True)` 可在服务重启或 CAD 隔离时离线查看历史摘要；曲线使用同名选项。历史哈希通过不代表当前模型匹配或物理验证通过。当前 CAD 回放仍要求版本及文件哈希匹配。
 - 配合预览检查相同持久化面参考、类型、方向及支持的参数是否确定重复。相同组件对上的其他配合会提示复核；边与面不能自动判等，距离配合参数尚不用于确定判重。`inspect_model` 已登记的受支持顶层面可直接使用；其他参考通过 `list_mate_references` 查询对应页面。
 - 显式归零会改变登记副本。查看 `previous_time_s`、`target_time_s`、`pose_change`、`operation_state` 和 `pre_operation_pose_restored`；兼容字段 `restoration_status=restored` 不能单独解释为归零前姿态已恢复。
