@@ -8,13 +8,13 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 58442,
-      "sha256": "400ade9d5dbe4e40fc73fdf1c52182768b8315cd334d238122f004ee16a58e0f"
+      "bytes": 58639,
+      "sha256": "e3fbf042823f3ef9e2a1de499f6a93c9bdabc37aac6cf92153bcb6202ccb9453"
     },
     {
       "path": "发布说明_v0.4.2.md",
-      "bytes": 6629,
-      "sha256": "0780335446e21249acbeae33260ca602f55bbf8cd7917446f4c3c9577566dce6"
+      "bytes": 7274,
+      "sha256": "d9d3c7d90b831224cf66fb777093d340e0acc174226493da117aa115b9af627f"
     },
     {
       "path": "LICENSE",
@@ -348,8 +348,8 @@
     },
     {
       "path": "executor/UserMotion.cs",
-      "bytes": 60273,
-      "sha256": "35d617ce8ce882f567d3e168ee4262527513b6ce8dd3d1f89e1832f90669325d"
+      "bytes": 60167,
+      "sha256": "e206126adfe4f04f985eda22d9cd35430a5fab495df25839505f5351bf2206fa"
     },
     {
       "path": "executor/VirtualImport.cs",

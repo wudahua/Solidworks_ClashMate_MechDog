@@ -43,6 +43,7 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 - 自建马达创建时回读参考和恒速参数，求解失败也保留参数快照。多连杆算例中驱动 2-1 提前停止，而对准原生驱动 Pieza1 的相同轴线/转向后完成 126 帧、10rpm；不能把几何候选当成设计意图。
 - `preflight_motion` 默认 1 秒，显式可选 5 秒/601 帧。原生时长无法缩短时返回原设置及预算内重试指引，不自动扩算。
 - `checkpoint_probe.elapsed_ms` 和独立 worker 的 `phase_timings` 记录实际耗时。阶段记录不是完成证明，完成看 worker-result.json。没有固定 40 秒保证，也未按配合成功/失败跳过恢复验证。
+- 基础预检的 `mate_preparation_guidance` 提供查询算例与显式归零的步骤，不为提示额外枚举全部算例状态；配合写入仍检查初始时间和检查点可恢复性。
 - 几何候选的公共参考读取诊断只在顶层 `mate_context_scan` 返回，候选中的 `unresolved_references_location` 指向它。
 
 ## 保留的 alpha.9 改进
