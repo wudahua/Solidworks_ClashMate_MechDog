@@ -2,13 +2,13 @@
 
 SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.1-alpha.8`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.1-alpha.9`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.8.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.9.md)。
 
 本版本保留另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
 
-本版本汇总五份 2026-10-14 反馈修订，改善检查点写入保护、配合诊断、恢复及历史结果读取。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
+本版核对五份 2026-10-15/16 的 alpha.8 反馈，修正既有高帧率算例归零，完善配合预算、参考定位和连接诊断，并保留此前的检查点与历史结果保护。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
 
 - `apply_mate`、`create_motion_study`、`convert_motion_study`、`create_model_checkpoint` 和 `reset_study_time` 默认返回 `job_id`；用 `get_job` 轮询，确认 `succeeded` 后使用 `result`。`wait_for_completion=True` 保留同步方式，显式重算归零仍返回任务。默认归零任务不会自动获得计算许可，须明确 `allow_recalculate=True`。
 - 上述写操作执行器等待预算为 600 秒；这不是完成时间保证，也不能替代 MCP 客户端自身的等待限制。超时后保留原任务状态，用 `get_job` 查看 `late_response`，或用 `get_recovery_state(request_id=...)` 读取最终原始响应；无响应仍保持未知，不重复写入。`idle` 只说明请求已结束，配合是否应用看原响应与原生参数。
@@ -36,7 +36,14 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 这是供试用的运动仿真版本。已有有效配合的刚体机构可直接进入运动流程；缺少基础配合时可由设计者选定参考和类型，再让助手执行。尚未完成“大部分机械装配均可用”的样本覆盖验收。
 
 
-## alpha.8 使用变化
+## alpha.9 使用变化
+
+- 既有算例显式归零与检查点缓存恢复共用预算：最多30秒、1000fps、1801帧，保留原设置；5秒300fps可在allow_recalculate=True时重建缓存并归零。新建/运行仍最多120fps。配合初始时间阻断给出逐算例预算与参数，超预算不反复指引同一个不可行的重算操作。
+- 默认配合移动预算仍为1mm/1度。装配对齐应在preview_mate显式选择两个预算参数；超预算且回滚核验后返回retry_guidance，不自动扩大预算。详见上方发布说明。
+- 未解析配合摘要增加名称、ID、组件和原因；候选列表区分计数作用域、参考不支持与扫描预算耗尽。
+- COM连接诊断增加进程快照。SolidWorks启动后自行消失时先从交互桌面启动并确认驻留；空快照不证明崩溃，原生退出根因仍未确定。
+
+## 已有 alpha.8 使用变化
 
 - 配合方案绑定 `maximum_translation_mm`（默认1mm）与 `maximum_rotation_deg`（默认1度）。`apply_mate` 在重建后、保存后提交前核验全部组件；超预算返回 `MATE_APPLY_ROLLED_BACK`，原因为 `MATE_POSE_CHANGE_EXCEEDS_CONFIRMED_BUDGET`，带移动数量和最大平移/转角。预算是产品保护策略，不是机构精度标准；较大装配调整须由用户明确选择预算、重新预览确认。健康检查通过仍不代表构型正确，`possible_redundancy` 继续提示复核，不能据此推断必然失败。
 - 两种参考列表增加 `mechanical_context`：原生配合名称、ID、类型、锁旋转观测，以及精确持久面或同轴/同平面关联。compact保留标记；扫描受256配合/10秒协作预算约束，截断或参考不支持时明确 `complete=false`。这些关联不证明自由度、可驱动轴或设计意图；不自动逐轴建马达试算。
@@ -89,7 +96,7 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 先停用旧安装目录的MCP服务，保留SolidWorks打开；从新包目录调用：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.1-alpha.8_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.1-alpha.9_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
 # PythonPath填写基础Python；非默认SolidWorks安装请同时指定-SolidWorksInstallDir。
 # 预检通过后移除-DryRun；未来网络及编译仍可能失败，保留自动回滚。
 ```
@@ -250,7 +257,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1 -SolidWorksProce
 
 运动要求的结论单独保存在motion-validation.json和solve.json的motion_validation字段，重启后可通过get_run_artifacts离线读取。外层result_validity=verified描述原生数据完整性及状态恢复，不能替代motion_validation.assertion；约束冲突时可能同时出现原生数据verified和运动要求inconclusive。
 
-默认最多 30 秒、1801 帧、500 个组件和 10 万条组件姿态；帧率 5–120。新建旋转驱动要求每帧小于等于 45°，避免角速度微分歧义。已有快速驱动可能发生采样混叠，应提高帧率并另行校验。
+公开求解与新建驱动最多 30 秒、1801 帧、500 个组件和 10 万条组件姿态；帧率 5–120。既有算例归零/缓存恢复采用上方单列预算。新建旋转驱动要求每帧小于等于 45°，避免角速度微分歧义。已有快速驱动可能发生采样混叠，应提高帧率并另行校验。
 
 默认导入拒绝虚拟零件。显式外部化的限制见下文；丢失引用、SpeedPak、未解析组件及未验收的柔性子装配会被拒绝。刚性嵌套装配、重复实例、复杂配置和外部参照的代码路径仍需扩大样本验收；首版不据此承诺通用支持。接触、弹簧、凸轮或多个驱动可通过已有算例尝试运行，但其物理精度与求解稳定性不在首版认证范围内。
 
