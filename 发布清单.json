@@ -13,8 +13,8 @@
     },
     {
       "path": "发布说明_v0.4.2.md",
-      "bytes": 5468,
-      "sha256": "45edab77eab785e402d0463573280b1d89e938de2cff72b65f13768dda9bd013"
+      "bytes": 6629,
+      "sha256": "0780335446e21249acbeae33260ca602f55bbf8cd7917446f4c3c9577566dce6"
     },
     {
       "path": "LICENSE",
@@ -48,8 +48,8 @@
     },
     {
       "path": "motion_server.py",
-      "bytes": 24679,
-      "sha256": "5f3f59212592b03818b293f6a4918df3ab335044f92a51b58be5808b5b27f41b"
+      "bytes": 24902,
+      "sha256": "4d7adbae4becdb60f43265d5052ca29e6c1dd57015d72f5999849d01862da432"
     },
     {
       "path": "mcp-config.example.json",
@@ -737,5 +737,5 @@
       "sha256": "0eb05ce5aa2a792aa78a6f564586dd159f2312f3e8173c4fa5e49a21e39d0409"
     }
   ],
-  "distribution_status": "local_candidate"
+  "distribution_status": "release_package"
 }
