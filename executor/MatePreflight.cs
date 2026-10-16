@@ -22,6 +22,6 @@ public partial class Cad {
             if(duplicate)throw new CadFault("MATE_EXACT_DUPLICATE","相同参考、类型、方向及已核验参数的配合已存在；未创建新配合。",evidence);
             related.Add(evidence);
         }
-        return new{existing_mates_on_component_pair=related.ToArray(),possible_redundancy=related.Count>0,constraint_interaction_status=related.Count>0?"review_required_kind_unknown":"not_proven",redundancy_or_overconstraint_predicted=false,warnings=oppositeAlignment?new[]{"EXISTING_COMPONENT_PAIR_MATES_REVIEW_REQUIRED","EXACT_FACES_SAME_TYPE_DIFFERENT_ALIGNMENT"}:related.Count>0?new[]{"EXISTING_COMPONENT_PAIR_MATES_REVIEW_REQUIRED"}:new string[0],claim="exact_supported_reference_comparison_no_edge_face_equivalence_inference"};
+        return new{existing_mates_on_component_pair=related.ToArray(),possible_redundancy=related.Count>0,constraint_interaction_status=related.Count>0?"review_required_kind_unknown":"not_proven",redundancy_or_overconstraint_predicted=(bool?)null,constraint_prediction=new{status="not_computed",redundant=(bool?)null,overconstrained=(bool?)null,reason="native_constraint_solve_not_performed_in_descriptive_preview"},warnings=oppositeAlignment?new[]{"EXISTING_COMPONENT_PAIR_MATES_REVIEW_REQUIRED","EXACT_FACES_SAME_TYPE_DIFFERENT_ALIGNMENT"}:related.Count>0?new[]{"EXISTING_COMPONENT_PAIR_MATES_REVIEW_REQUIRED"}:new string[0],claim="exact_supported_reference_comparison_no_edge_face_equivalence_inference"};
     }
 }
