@@ -118,5 +118,5 @@ class ReplayImages:
         boundary, rows = self._metadata(run_id)
         selected = next((row for row in rows if row['frame']==frame), None)
         if selected is None:
-            raise ArtifactError('SAVED_FRAME_IMAGE_NOT_FOUND', '该帧没有已登记的核验截图；历史 CSV 不等于图像。新截图需输入匹配的 CAD 回放，任意旧输入回放还需独立输入快照。')
+            raise ArtifactError('SAVED_FRAME_IMAGE_NOT_FOUND', '该帧没有已登记的核验截图；历史 CSV 不等于图像。新截图可用输入匹配的CAD回放；本版本新run若有绑定快照，可显式use_input_snapshot=True独立重算；无绑定快照的旧run不能猜测重建。')
         return self._verified(selected,boundary)
