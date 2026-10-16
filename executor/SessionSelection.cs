@@ -16,6 +16,7 @@ public class ConnectionDiagnostics {
     public string selection_mode,process_identity_before,process_identity_after;
     public int[] auto_candidate_pids=new int[0];
     public bool? auto_inventory_complete;
+    public object process_snapshot;
     public string next_action="update_SW_MCP_PROCESS_ID_or_use_explicit_auto_and_reload_client";
 }
 

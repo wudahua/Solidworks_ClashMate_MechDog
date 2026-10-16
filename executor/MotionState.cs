@@ -41,7 +41,7 @@ public partial class Cad {
             if((Math.Abs(s.GetTime()-state.time_s)>1e-8||(state.type==1&&!poseAlreadyMatches))&&!s.SetTime(state.time_s)) {
                 // Saved animation clocks can reopen without their calculated cache. Reconstruct
                 // only the recorded active study, with its exact original settings and a budget.
-                if(state.duration_s<=0||state.duration_s>30||state.fps<1||state.fps>120||state.duration_s*state.fps>1800)throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","恢复时间需要重建结果缓存，但原设置超过预算。",new{stage="rehydrate_budget",study=state});
+                if(!StudyCacheBudget.Allows(state.duration_s,state.fps))throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","恢复时间需要重建结果缓存，但原设置超过预算。",new{stage="rehydrate_budget",study=state});
                 Log("RESTORE_REHYDRATE_ACTIVE_STUDY "+Json.Serialize(state));bool calculated=s.Calculate();s.Stop();Application.DoEvents();s.Stop();
                 bool selected=s.SetTime(state.time_s);Application.DoEvents();s.Stop();if(!calculated||Math.Abs(s.GetTime()-state.time_s)>1e-8||s.IsPlaying)throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","重建缓存后仍无法恢复算例时间。",new{stage="set_time_after_rehydrate",study=state.name,calculate_return=calculated,expected_time_s=state.time_s,actual_time_s=s.GetTime()});
             }
@@ -51,7 +51,7 @@ public partial class Cad {
             var difference=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(PoseDifference(expectedPoses,Transforms(doc))));
             if(Convert.ToDouble(difference["maximum_transform_delta"])>1e-7) {
                 var active=states.SingleOrDefault(v=>v.active);
-                if(active==null||active.type!=1||active.duration_s<=0||active.duration_s>30||active.fps<1||active.fps>120||active.duration_s*active.fps>1800)throw new CadFault("CHECKPOINT_POSE_RESTORE_FAILED","时间回读相符但姿态不符；不能用新求解覆盖记录的装配初始姿态。",difference);
+                if(active==null||active.type!=1||!StudyCacheBudget.Allows(active.duration_s,active.fps))throw new CadFault("CHECKPOINT_POSE_RESTORE_FAILED","时间回读相符但姿态不符；不能用新求解覆盖记录的装配初始姿态。",difference);
                 var s=(IMotionStudy)mgr.GetMotionStudy(active.name);Log("RESTORE_REHYDRATE_POSE_MISMATCH "+Json.Serialize(difference));bool calculated=s.Calculate();s.Stop();Application.DoEvents();s.Stop();bool selected=s.SetTime(active.time_s);Application.DoEvents();s.Stop();
                 var after=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(PoseDifference(expectedPoses,Transforms(doc))));
                 if(!calculated||Math.Abs(s.GetTime()-active.time_s)>1e-8||s.IsPlaying||Convert.ToDouble(after["maximum_transform_delta"])>1e-7)throw new CadFault("CHECKPOINT_POSE_RESTORE_FAILED","重建缓存后姿态仍与检查点不符。",new{study=active.name,calculate_return=calculated,set_time_return=selected,expected_time_s=active.time_s,actual_time_s=s.GetTime(),playing=s.IsPlaying,before=difference,after=after,pose_change=PoseChange(expectedPoses,Transforms(doc))});

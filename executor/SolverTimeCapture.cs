@@ -11,6 +11,6 @@ public static class SolverTimeCapture {
             steps.Add(new{attempt=attempt,frame=frame,requested_time_s=requested,native_argument_s=argument,time_before_s=before,native_set_time_return=native,actual_time_s=actual,playing=active,accepted=accepted});
             if(accepted)return new{frame=frame,attempts=attempt,native_steps=steps.ToArray(),clock_tolerance_s=1e-7,recalculated=false};
         }
-        throw new CadFault("SOLVER_TIME_SELECTION_FAILED","原生采样时间选择两次未通过返回值、时钟及停止状态核验；未自动重新求解，恢复核验成功后可显式重试。",new{stage="capture_solver_poses",frame=frame,requested_time_s=requested,native_argument_s=argument,native_steps=steps.ToArray(),maximum_attempts=2,clock_tolerance_s=1e-7,automatic_recalculate=false,retry_requires_confirmed_restoration=true,root_cause="not_proven"});
+        throw new CadFault("SOLVER_TIME_SELECTION_FAILED","原生采样时间选择两次未通过返回值、时钟及停止状态核验；未自动重新求解，恢复核验成功后可显式重试。",new{stage="capture_solver_poses",frame=frame,requested_time_s=requested,native_argument_s=argument,native_steps=steps.ToArray(),maximum_attempts=2,clock_tolerance_s=1e-7,clock_offset_is_observation_not_root_cause=true,first_frame_zero_selection_attempted=frame==0&&Math.Abs(requested)<=1e-8,automatic_recalculate=false,retry_requires_confirmed_restoration=true,root_cause="not_proven"});
     }
 }

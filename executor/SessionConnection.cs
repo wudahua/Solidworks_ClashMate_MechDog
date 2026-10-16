@@ -21,7 +21,7 @@ public static class SolidWorksConnection {
     static void Release(object value) {if(value!=null && Marshal.IsComObject(value)) Marshal.ReleaseComObject(value);}
 
     public static ISldWorks Connect(out ConnectionDiagnostics info) {
-        info=new ConnectionDiagnostics();
+        info=new ConnectionDiagnostics{process_snapshot=SessionInventory.ReadProcessSnapshot()};
         IRunningObjectTable rot=null; IBindCtx context=null; IEnumMoniker list=null;
         var monikers=new Dictionary<int,IMoniker>();
         try {
