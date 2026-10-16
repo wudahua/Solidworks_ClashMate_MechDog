@@ -93,7 +93,7 @@ class ProbePublicTests(unittest.IsolatedAsyncioTestCase):
     async def test_unsupported_probe_budget_never_queues(self):
         import motion_server
         with patch.object(motion_server,'enqueue') as job:
-            with self.assertRaises(Exception):await motion_server.preflight_motion('user_'+'a'*32,'Study',True,2,30)
+            with self.assertRaises(Exception):await motion_server.preflight_motion('user_'+'a'*32,'Study',True,6,30)
             job.assert_not_called()
 
 class ProbeRecoveryTests(unittest.TestCase):
