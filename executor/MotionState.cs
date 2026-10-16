@@ -71,6 +71,7 @@ public partial class Cad {
     class OwnedMotionSnapshot {
         Cad cad;UserModel model;string directory;StudyState[] states;Dictionary<string,double[]> poses;Dictionary<string,string> hashes;
         public object Diagnostics;
+        public string InputSnapshotPath {get{return Path.Combine(directory,"state.json");}}
         public StudyState[] InputStudies {get{return states;}}
         public Dictionary<string,double[]> InputPoses {get{return poses;}}
         public Dictionary<string,string> InputHashes {get{return hashes;}}
@@ -83,7 +84,7 @@ public partial class Cad {
             states=StudyStates(doc);if(states.Any(v=>v.active&&((IMotionStudy)((IMotionStudyManager)doc.Extension.GetMotionStudyManager()).GetMotionStudy(v.name)).IsPlaying))throw new Exception("STUDY_PLAYING_STOP_REQUIRED");poses=Transforms(doc);hashes=m.Files.ToDictionary(p=>p,p=>FileHash(p));
             directory=Path.Combine(owner.Root,"runs","state-snapshots",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
             foreach(string p in m.Files)File.Copy(p,Path.Combine(directory,Path.GetFileName(p)));
-            AtomicJson(Path.Combine(directory,"state.json"),new{model_id=m.Id,configuration=m.Configuration,studies=states,poses=poses,files=hashes});
+            AtomicJson(Path.Combine(directory,"state.json"),new{model_id=m.Id,configuration=m.Configuration,studies=states,poses=poses,files=hashes,model=m});
         }
         public IModelDoc2 Restore(StudyHistory.Observation observation=null) {
             // Closing and restoring the exact file snapshot discards transient results.
