@@ -244,7 +244,7 @@ class Bridge:
                 raise ValueError("Model mismatch")
             return model
         except (OSError, ValueError, KeyError, TypeError) as exc:
-            raise CadError("MATE_PLAN_NOT_BOUND", "未找到本会话方案所属模型；请重新 preview_mate，不能重复未知写操作。", "not_required", {"plan_id": plan, "required_tool": "preview_mate"}) from exc
+            raise CadError("MATE_PLAN_NOT_BOUND", "配合方案绑定生成它的 MCP 服务会话。服务重启或切换客户端后，请重新 preview_mate 并确认新方案；不能重复未知写操作。", "not_required", {"plan_id": plan, "required_tool": "preview_mate"}) from exc
 
     @staticmethod
     def _pid_alive(pid):
