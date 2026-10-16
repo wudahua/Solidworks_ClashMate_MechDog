@@ -2,13 +2,13 @@
 
 SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.1-alpha.9`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.2`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.1-alpha.9.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.2.md)。
 
 本版本保留另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
 
-本版核对五份 2026-10-15/16 的 alpha.8 反馈，修正既有高帧率算例归零，完善配合预算、参考定位和连接诊断，并保留此前的检查点与历史结果保护。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
+本版核对四份 alpha.9 反馈，扩展归零态检查点的写入前恢复预演，提供原生马达参考和失败诊断、显式 5 秒兼容性探测，以及预演阶段耗时。高帧率归零和历史结果保护继续保留。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
 
 - `apply_mate`、`create_motion_study`、`convert_motion_study`、`create_model_checkpoint` 和 `reset_study_time` 默认返回 `job_id`；用 `get_job` 轮询，确认 `succeeded` 后使用 `result`。`wait_for_completion=True` 保留同步方式，显式重算归零仍返回任务。默认归零任务不会自动获得计算许可，须明确 `allow_recalculate=True`。
 - 上述写操作执行器等待预算为 600 秒；这不是完成时间保证，也不能替代 MCP 客户端自身的等待限制。超时后保留原任务状态，用 `get_job` 查看 `late_response`，或用 `get_recovery_state(request_id=...)` 读取最终原始响应；无响应仍保持未知，不重复写入。`idle` 只说明请求已结束，配合是否应用看原响应与原生参数。
@@ -36,7 +36,16 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 这是供试用的运动仿真版本。已有有效配合的刚体机构可直接进入运动流程；缺少基础配合时可由设计者选定参考和类型，再让助手执行。尚未完成“大部分机械装配均可用”的样本覆盖验收。
 
 
-## alpha.9 使用变化
+## v0.4.2 使用变化
+
+- 所有配合事务的检查点均须经过独立恢复预演，包括归零后的 Motion Analysis。无法恢复的检查点在 AddMate 前拒绝，原副本仍核验；这不等于已经修复任意旧检查点。
+- `list_motion_studies(inspect_native_drives=True)` 展示原生马达的组件、方向/位置参考、原始参数及相对组件；装配特征树观测不能证明算例成员关系。创建仍限圆柱面旋转、平面直线。
+- 自建马达创建时回读参考和恒速参数，求解失败也保留参数快照。多连杆算例中驱动 2-1 提前停止，而对准原生驱动 Pieza1 的相同轴线/转向后完成 126 帧、10rpm；不能把几何候选当成设计意图。
+- `preflight_motion` 默认 1 秒，显式可选 5 秒/601 帧。原生时长无法缩短时返回原设置及预算内重试指引，不自动扩算。
+- `checkpoint_probe.elapsed_ms` 和独立 worker 的 `phase_timings` 记录实际耗时。阶段记录不是完成证明，完成看 worker-result.json。没有固定 40 秒保证，也未按配合成功/失败跳过恢复验证。
+- 几何候选的公共参考读取诊断只在顶层 `mate_context_scan` 返回，候选中的 `unresolved_references_location` 指向它。
+
+## 保留的 alpha.9 改进
 
 - 既有算例显式归零与检查点缓存恢复共用预算：最多30秒、1000fps、1801帧，保留原设置；5秒300fps可在allow_recalculate=True时重建缓存并归零。新建/运行仍最多120fps。配合初始时间阻断给出逐算例预算与参数，超预算不反复指引同一个不可行的重算操作。
 - 默认配合移动预算仍为1mm/1度。装配对齐应在preview_mate显式选择两个预算参数；超预算且回滚核验后返回retry_guidance，不自动扩大预算。详见上方发布说明。
@@ -55,9 +64,9 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 
 ## 已有 alpha.7 使用变化
 
-- 激活动画检查点的恢复预演在**独立创建的临时 SolidWorks 进程**完成；原实例不打开探测装配，保留原生更新标记、组件/配合、配置、时钟和全部姿态的前后核验。临时进程使用明确PID，不选择用户的其他实例，不占用交互执行器互斥锁；只操作隔离副本。首次启动及插件加载有开销，不保证每次配合操作都更快。
+- 所有配合事务检查点的恢复预演在**独立创建的临时 SolidWorks 进程**完成；原实例不打开探测装配，保留原生更新标记、组件/配合、配置、时钟和全部姿态的前后核验。临时进程使用明确PID，不选择用户的其他实例，不占用交互执行器互斥锁；只操作隔离副本。首次启动及插件加载有开销，不保证每次配合操作都更快。
 - 兼容性探测推荐显式快照：先 `create_model_checkpoint(model_id=...)`，取得成功响应内的 `checkpoint_id`，再调用 `preflight_motion(model_id=..., study=..., compatibility_probe=True, checkpoint_id=..., probe_duration_s=1, probe_output_fps=30)`。由独立进程复制、重定向和试算该快照，不要求原工作副本打开后瞬时 `save_flag=false`；不自动保存原副本或清除修改标志。
-- 快照结论明确为 `explicit_checkpoint_snapshot_not_current_unsaved_memory`，不能证明原模型后来未保存的内存编辑相容。旧检查点可能没有新建算例/驱动，须选择包含目标设置的检查点。没有显式检查点而输入脏时返回 `PROBE_REQUIRES_EXPLICIT_CHECKPOINT`，不再指引无限重复保存。结果的`saved_result_query`指向可离线读取的摘要/姿态；`probe_model_id`只属于已退出的隔离worker，不是主安装可继续控制的模型登记ID。最多1秒、121帧的短算预算不变；设置无法回读、结果过期或时间轴不完整仍是 inconclusive，不暗中扩成整段求解。
+- 快照结论明确为 `explicit_checkpoint_snapshot_not_current_unsaved_memory`，不能证明原模型后来未保存的内存编辑相容。旧检查点可能没有新建算例/驱动，须选择包含目标设置的检查点。没有显式检查点而输入脏时返回 `PROBE_REQUIRES_EXPLICIT_CHECKPOINT`，不再指引无限重复保存。结果的`saved_result_query`指向可离线读取的摘要/姿态；`probe_model_id`只属于已退出的隔离worker，不是主安装可继续控制的模型登记ID。短算默认1秒；显式最多5秒、601帧；设置无法回读、结果过期或时间轴不完整仍是 inconclusive，不暗中扩成整段求解。
 - 临时实例的PID、退出确认、原生退出码、失败和清理证据均落盘。退出未确认或原副本变化时不继续配合写入；未强杀CAD，也不自动重放AddMate。检查点预演完整证据仍在 `restorability.json`，含独立worker证据及哈希。
 - `execution.stage_timings`、`total_elapsed_ms` 使用单调时钟记录配合准备、探测、原生添加、重建及回滚。诊断优先展示新增配合的错误落点，并分别报告 `add_mate_status`、`rebuild_status` 与 `transaction_outcome`。`swAddMateError_e` 的值1表示原生添加调用成功；后续特征健康失败属于不同阶段/错误码域，可以同时成立，不代表事务已提交。
 - 默认长操作等待600秒，可在客户端服务环境中设置 `SW_MCP_LONG_OPERATION_WAIT_S`（60–3600，重启MCP生效）。等待超时不是原生COM取消：响应标注 `client_wait_expired=true`、`cad_operation_finished=false`，继续通过原任务读取迟到结果。不要重试写入或删除隔离日志。
@@ -86,7 +95,7 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 - 最低行程的浮点尾差有受限数值预算，回显实测、门槛与残差；这不是机械精度容差。
 - `inspect_model` 返回 `registered_supported_inspected_face` 的面可直接用于配合或适用驱动，不用重复登记查询；失效引用与不支持的组件仍拒绝。检查不自动改配合或猜运动意图。
 - `preflight_motion` 的 `basic_input_ready` 和兼容 `ready` 仅表示基础检查；`solver_compatibility_status=not_checked` 不能显示为求解保证。默认预检会重建副本，dirty 观测保留。
-- 显式 `compatibility_probe=True` 指定算例、`probe_duration_s`（最多1秒）和 `probe_output_fps`，在另一个副本异步短算；可按上面的alpha.7流程显式指定检查点，返回 `job_id` 后用 `get_job` 查询。结果只覆盖该输入/短区间，网格异常为 inconclusive，原副本须核验不变。原副本核验失败时按响应中的原模型和检查点恢复；临时实例退出未确认时先核对worker进程及完成证据，不将隔离worker的probe_model_id当作主安装的模型登记。
+- 显式 `compatibility_probe=True` 指定算例、`probe_duration_s`（默认1秒、显式最多5秒）和 `probe_output_fps`，在另一个副本异步短算；可按上面的alpha.7流程显式指定检查点，返回 `job_id` 后用 `get_job` 查询。结果只覆盖该输入/短区间，网格异常为 inconclusive，原副本须核验不变。原副本核验失败时按响应中的原模型和检查点恢复；临时实例退出未确认时先核对worker进程及完成证据，不将隔离worker的probe_model_id当作主安装的模型登记。
 - `SW_MCP_PROCESS_ID=auto` 或 `start.ps1 -AutoDetect` 可在每次服务启动时选择唯一、身份可核验的同用户会话实例。多个进程（含辅助实例）不按窗口标题猜选；仍可指定整数PID。已有会话丢失或 unknown 不能自动切换后继续写入。
 - 旧 journal 的原值在 `observed_dispatch_state`，兼容 `dispatch_state` 给当前派生值；`journal_schema_version` 与响应schema区分。只读显示不会把磁盘日志重写为idle。
 - 对原生未登记驱动，`drive_validation=null` 表示没有本项目的独立速度核对；不等于模型没有马达。矩阵系数差为全部组件/帧/矩阵元素的 `max|R_ij(t)-R_ij(0)|`，无量纲，不是角度。
@@ -96,7 +105,7 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 先停用旧安装目录的MCP服务，保留SolidWorks打开；从新包目录调用：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.1-alpha.9_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
 # PythonPath填写基础Python；非默认SolidWorks安装请同时指定-SolidWorksInstallDir。
 # 预检通过后移除-DryRun；未来网络及编译仍可能失败，保留自动回滚。
 ```
@@ -304,6 +313,7 @@ alpha.1等历史任务只有CSV时，可以受限读取并标记 `manifest_statu
 示例通过本项目的程序生成，发布包不含用户齿轮泵、零件或第三方 CAD 文件。生成器需要可用的 SolidWorks 零件和装配模板，可显式指定：
 
 ```powershell
+ # 生成示例前请停用本项目所有 MCP 客户端服务；独立 SolidWorks 进程仍共享执行器互斥锁。
 .\生成运动示例.ps1 -SolidWorksProcessId 12345 -PartTemplate 'D:\Templates\part.prtdot' -AssemblyTemplate 'D:\Templates\assembly.asmdot'
 # 输出目录包含 examples.json，填入下面的路径。
 .\.venv\Scripts\python.exe .\tests\motion_acceptance_v04.py '生成目录\examples.json'
@@ -332,7 +342,7 @@ QZC 更新验收反馈修订：
 
 单位保持原协议：几何坐标 `m`、面积 `m²`、配合距离和直线运动门槛 `mm`、直线驱动 `mm/s`、旋转驱动 `rpm`；导出曲线按 quantity 标明 `m`、`m/s` 或 `rad/s`。内部 API 换算保持不变。几何候选只说明可用的参考类型，相容性仍为 `not_checked`；平动组件上的圆柱孔不代表推荐给该组件加旋转驱动。
 
-- 添加配合前，对激活动画的检查点在另一份独立副本中预演恢复；时间、全体姿态、原副本文件及配合未通过核验时拒绝写入。旧液压反馈检查点仍无法完整恢复记录姿态，此限制没有消除。首次覆盖为顶层刚体零件；激活动画的多层装配会明确拒绝预检，不能假定安全回滚。
+- 添加配合前，对全部算例类型（含归零态）的检查点在另一份独立副本中预演恢复；时间、全体姿态、原副本文件及配合未通过核验时拒绝写入。旧液压反馈检查点仍无法完整恢复记录姿态，此限制没有消除。首次覆盖为顶层刚体零件；多层装配会明确拒绝预检，不能假定安全回滚。
 - `get_motion_summary(run_id, allow_unverified_history=True)` 可在服务重启或 CAD 隔离时离线查看历史摘要；曲线使用同名选项。历史哈希通过不代表当前模型匹配或物理验证通过。当前 CAD 回放仍要求版本及文件哈希匹配。
 - 配合预览检查相同持久化面参考、类型、方向及支持的参数是否确定重复。相同组件对上的其他配合会提示复核；边与面不能自动判等，距离配合参数尚不用于确定判重。`inspect_model` 已登记的受支持顶层面可直接使用；其他参考通过 `list_mate_references` 查询对应页面。
 - 显式归零会改变登记副本。查看 `previous_time_s`、`target_time_s`、`pose_change`、`operation_state` 和 `pre_operation_pose_restored`；兼容字段 `restoration_status=restored` 不能单独解释为归零前姿态已恢复。
