@@ -8,11 +8,11 @@ from pathlib import Path
 from verify_release import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.1-alpha.9"
+VERSION = "0.4.2"
 
 
 def build(candidate=False):
-    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.1-alpha.9.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
+    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.2.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
     sources += sorted((ROOT/"executor").glob("*.cs"))
     sources += [ROOT/"executor/build.ps1"]
     sources += sorted((ROOT/"sw_mcp").glob("*.py"))
@@ -28,6 +28,7 @@ def build(candidate=False):
     sources += [ROOT/".github/workflows/release-validation.yml"]
     sources += [ROOT/"tests/test_alpha8.py", ROOT/"tests/alpha8_policy_checks.py", ROOT/"tests/alpha8_native_checks.py"]
     sources += [ROOT/"tests/alpha9_policy_checks.py", ROOT/"tests/alpha9_native_checks.py"]
+    sources += [ROOT/"tests"/name for name in ("test_v042.py", "v042_policy_checks.py", "v042_motor_native_checks.py", "v042_checkpoint_native_checks.py")]
     sources += [ROOT/"tests/test_alpha7.py", ROOT/"tests/alpha7_native_checks.py", ROOT/"tests/axis_convention_checks.py"]
     releases = ROOT/"releases"
     releases.mkdir(exist_ok=True)
