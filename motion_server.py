@@ -20,7 +20,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.1-alpha.9", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.2", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 
 def packed(data, error=False):
@@ -78,16 +78,16 @@ async def inspect_model(model_id: str) -> CallToolResult:
 
 @mcp.tool()
 async def list_motion_studies(model_id: str, inspect_native_drives: bool = False) -> CallToolResult:
-    """列出算例、时间、登记驱动及历史。inspect_native_drives=True显式回读有预算的原生马达观测，不激活或求解；全装配观测不证明算例归属。发现一个马达不证明清单完整或登记身份已匹配，空特征不代表无驱动；历史独立核对见get_run_artifacts.drive_validation。输入匹配带脏标志诊断，unknown不等于已变化。"""
+    """列出算例、时间、登记驱动及历史。inspect_native_drives=True显式回读有预算的原生马达组件、方向/位置参考及原始参数观测，不激活或求解；全装配观测不证明算例归属。发现一个马达不证明清单完整或登记身份已匹配，空特征不代表无驱动；历史独立核对见get_run_artifacts.drive_validation。输入匹配带脏标志诊断，unknown不等于已变化。"""
     return await call("list_motion_studies", model_id=model_id, inspect_native_drives=inspect_native_drives)
 
 
 @mcp.tool()
 async def preflight_motion(model_id: str, study: str = "", compatibility_probe: bool = False, probe_duration_s: float = 1.0, probe_output_fps: int = 30, checkpoint_id: str = "") -> CallToolResult:
-    """基础预检不保证求解相容。显式compatibility_probe异步短算，最多1秒121帧；推荐传create_model_checkpoint返回的checkpoint_id，在独立SolidWorks实例验证该快照，不能证明当前未保存内存。原副本不隐式保存；用get_job读取结果。"""
+    """基础预检不保证求解相容。显式compatibility_probe异步短算，默认1秒；显式最多5秒601帧；推荐传create_model_checkpoint返回的checkpoint_id，在独立SolidWorks实例验证该快照，不能证明当前未保存内存。原副本不隐式保存；用get_job读取结果。"""
     if compatibility_probe:
-        if not study or not 0 < probe_duration_s <= 1 or not 5 <= probe_output_fps <= 120 or abs(probe_duration_s * probe_output_fps - round(probe_duration_s * probe_output_fps)) > 1e-8:
-            raise ToolError("指定算例和探测预算（最多1秒、121帧，时长乘fps须为整数）。")
+        if not study or not 0 < probe_duration_s <= 5 or not 5 <= probe_output_fps <= 120 or abs(probe_duration_s * probe_output_fps - round(probe_duration_s * probe_output_fps)) > 1e-8:
+            raise ToolError("指定算例和探测预算（默认1秒，显式最多5秒、601帧，时长乘fps须为整数）。")
         return enqueue("probe_motion_compatibility", {"model_id": model_id, "study": study, "duration_s": probe_duration_s, "output_fps": probe_output_fps, "checkpoint_id": checkpoint_id})
     if checkpoint_id:
         raise ToolError("checkpoint_id 仅用于 compatibility_probe=True 的快照探测。")

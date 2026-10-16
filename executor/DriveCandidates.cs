@@ -32,13 +32,14 @@ public partial class Cad {
                 }
                 if(faces.Count>64)truncated.Add(c.Name2);entities.AddRange(faces.OrderByDescending(v=>Convert.ToDouble(v["area_m2"])).ThenBy(v=>(string)v["entity_id"],StringComparer.Ordinal).Take(64));
             }
-            AnnotateCandidateMates(s.Doc,entities);int rawTotal=entities.Count;
+            var mateContextScan=AnnotateCandidateMates(s.Doc,entities);int rawTotal=entities.Count;
             if(groupFaces)entities=entities.GroupBy(v=>(string)v["geometry_key"]).Select(g=>{var first=g.First();first["equivalent_face_count"]=g.Count();return first;}).ToList();
             else foreach(var entity in entities)entity["equivalent_face_count"]=1;
             if(compact)foreach(var entity in entities){entity.Remove("geometry_key");entity.Remove("suggested_motor");entity.Remove("requires_user_selection");}
             if(offset>entities.Count)throw new CadFault("CANDIDATE_CURSOR_STALE","分页位置超出候选范围，请重新查询。");
             var page=entities.Skip(offset).Take(limit).ToList();var response=new Dictionary<string,object>{{"model_id",id},{"model_revision",m.Revision},{"group_faces",groupFaces},{"raw_candidate_count",rawTotal},{"total",entities.Count},{"offset",offset},{"entities",page},{"claim","geometric_candidates_only_no_automatic_design_intent_inference"}};
             response["units"]=new{reference_point_global_m="m",area_m2="m2",axis_global="unit_vector",rotary_drive_input="rpm",linear_drive_input="mm/s",mate_distance_input="mm"};response["detail_level"]=compact?"compact":"full";response["motion_compatibility"]="not_checked";response["requires_user_selection"]=true;response["excluded_components"]=excluded.Take(20).ToArray();response["excluded_component_count"]=excluded.Count;response["skipped_components"]=skipped.Take(20).ToArray();response["skipped_component_count"]=skipped.Count;response["truncated_components"]=truncated.Take(20).ToArray();response["truncated_component_count"]=truncated.Count;response["diagnostic_component_limit"]=20;response["geometry_complete"]=skipped.Count==0&&truncated.Count==0;response["suggested_motor_semantics"]="deprecated_geometry_type_alias_not_drive_recommendation";
+            response["mate_context_scan"]=mateContextScan;
             BoundGeometryPage(response,page,offset,entities.Count,limit,next=>Convert.ToBase64String(Encoding.UTF8.GetBytes(Json.Serialize(new{model_id=id,fingerprint=fingerprint,component_filter=componentFilter,kind=kind,offset=next}))));
             foreach(var entity in page){string key=(string)entity["entity_id"];RegisterEntity(m,key,references[key],(string)entity["component_id"],(string)entity["kind"]);}SaveUserModel(m);return response;
         }

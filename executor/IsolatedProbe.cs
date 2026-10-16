@@ -16,7 +16,8 @@ public partial class Cad {
     // The worker never takes the interactive executor lease or connects by auto PID.
     public static int IsolatedProbeWorker(string requestPath) {
         Process owned=null;Cad cad=null;string resultPath=Path.Combine(Path.GetDirectoryName(requestPath),"worker-result.json");
-        Action<string> phase=stage=>{try{AtomicJson(Path.Combine(Path.GetDirectoryName(resultPath),"worker-phase.json"),new{stage=stage,observed_at_utc=DateTime.UtcNow.ToString("o"),phase_only_not_cad_completion_proof=true,completion_evidence="worker-result.json"});}catch{}};
+        var elapsed=Stopwatch.StartNew();var phases=new List<object>();long previous=0;
+        Action<string> phase=stage=>{try{long now=elapsed.ElapsedMilliseconds;phases.Add(new{stage=stage,elapsed_ms=now,previous_phase_elapsed_ms=now-previous,observed_at_utc=DateTime.UtcNow.ToString("o")});previous=now;AtomicJson(Path.Combine(Path.GetDirectoryName(resultPath),"worker-phase.json"),new{stage=stage,elapsed_ms=now,phases=phases.Take(32).ToArray(),phase_only_not_cad_completion_proof=true,completion_evidence="worker-result.json"});}catch{}};
         object result=null;Exception failure=null,cleanup=null;int? nativeExit=null;bool ownedConnected=false;UserModel probeModel=null;
         try {
             var request=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(requestPath));
@@ -35,6 +36,7 @@ public partial class Cad {
             cad.SaveUserModel(model);phase("loading_motion_addin");cad.LoadUserMotion();phase("motion_addin_loaded");
             if((string)request["kind"]=="checkpoint") {
                 phase("opening_checkpoint_copy");using(var scope=new Scope(cad,model.Path,null)) {
+                    phase("checkpoint_copy_opened");
                     if(scope.Doc.ConfigurationManager.ActiveConfiguration.Name!=model.Configuration&&!scope.Doc.ShowConfiguration2(model.Configuration))throw new Exception("CHECKPOINT_CONFIGURATION_MISMATCH");
                     var states=Json.Deserialize<StudyState[]>(Json.Serialize(request["studies"]));
                     var original=Json.Deserialize<Dictionary<string,double[]>>(Json.Serialize(request["poses"]));
@@ -42,7 +44,7 @@ public partial class Cad {
                     var expected=new Dictionary<string,double[]>();
                     foreach(string name in Transforms(scope.Doc).Keys){string old=name;foreach(var rename in renames)old=old.Replace(rename.Key,rename.Value);if(!original.ContainsKey(old))throw new Exception("CHECKPOINT_PROBE_COMPONENT_SET_MISMATCH");expected[name]=original[old];}
                     if(expected.Count!=original.Count)throw new Exception("CHECKPOINT_PROBE_COMPONENT_SET_MISMATCH");
-                    ApplyStudyStates(scope.Doc,states,expected);VerifyStudyStates(scope.Doc,states);
+                    phase("restoring_checkpoint_state");ApplyStudyStates(scope.Doc,states,expected);VerifyStudyStates(scope.Doc,states);phase("checkpoint_state_verified");
                     result=new{status="verified",pose_change=PoseChange(expected,Transforms(scope.Doc)),restoration_status="restored"};
                 }
             } else if((string)request["kind"]=="compatibility") {
@@ -53,10 +55,10 @@ public partial class Cad {
         finally {
             phase("cleanup_owned_instance");if(cad!=null&&ownedConnected)try{var docs=(cad.Sw.GetDocuments() as object[]??new object[0]).Cast<IModelDoc2>().ToArray();
                 var titles=docs.Where(d=>probeModel!=null&&probeModel.Files.Contains(d.GetPathName(),StringComparer.OrdinalIgnoreCase)).Select(d=>d.GetTitle()).ToArray();foreach(string title in titles)try{cad.Sw.CloseDoc(title);}catch(System.Runtime.InteropServices.COMException){}
-                if((cad.Sw.GetDocuments() as object[]??new object[0]).Length!=0)throw new Exception("PROBE_UNEXPECTED_DOCUMENTS_EXIT_REFUSED");cad.Sw.ExitApp();
+                if((cad.Sw.GetDocuments() as object[]??new object[0]).Length!=0)throw new Exception("PROBE_UNEXPECTED_DOCUMENTS_EXIT_REFUSED");phase("exiting_owned_solidworks");cad.Sw.ExitApp();
             }catch(Exception error){cleanup=error;}
-            if(owned!=null){if(owned.WaitForExit(30000))nativeExit=owned.ExitCode;else cleanup=new Exception("PROBE_INSTANCE_EXIT_NOT_CONFIRMED");}
-            phase("completed");AtomicJson(resultPath,new{completed=true,success=failure==null&&cleanup==null,result=result,failure=failure==null?null:FailureEvidence(failure),cleanup_failure=cleanup==null?null:FailureEvidence(cleanup),owned_solidworks_pid=owned==null?(int?)null:owned.Id,owned_process_exited=nativeExit.HasValue,native_exit_code=nativeExit});
+            if(owned!=null){phase("waiting_owned_process_exit");if(owned.WaitForExit(30000))nativeExit=owned.ExitCode;else cleanup=new Exception("PROBE_INSTANCE_EXIT_NOT_CONFIRMED");}
+            phase("completed");AtomicJson(resultPath,new{completed=true,phase_timings=phases.Take(32).ToArray(),elapsed_ms=elapsed.ElapsedMilliseconds,success=failure==null&&cleanup==null,result=result,failure=failure==null?null:FailureEvidence(failure),cleanup_failure=cleanup==null?null:FailureEvidence(cleanup),owned_solidworks_pid=owned==null?(int?)null:owned.Id,owned_process_exited=nativeExit.HasValue,native_exit_code=nativeExit});
         }
         return failure==null&&cleanup==null?0:1;
     }
@@ -73,7 +75,11 @@ public partial class Cad {
             string result=Path.Combine(folder,"worker-result.json");if(!File.Exists(result))throw new CadFault("PROBE_WORKER_RESULT_MISSING","独立探测未留下完成证据；未添加配合。",new{worker_pid=worker.Id,worker_exit=worker.ExitCode,evidence_directory=folder});
             var evidence=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(result));
             if(!Convert.ToBoolean(evidence["owned_process_exited"])||evidence["cleanup_failure"]!=null)throw new CadFault("ISOLATED_PROBE_RECOVERY_REQUIRED","临时实例退出或清理未确认；保留所有进程与证据。",new{worker=evidence,evidence_path=result});
-            if(worker.ExitCode!=0||!Convert.ToBoolean(evidence["success"]))throw new CadFault("ISOLATED_PROBE_FAILED","独立探测未通过；原实例未打开探测副本。",new{worker=evidence,evidence_path=result});
+            if(worker.ExitCode!=0||!Convert.ToBoolean(evidence["success"])) {
+                var failed=evidence["failure"] as Dictionary<string,object>;object code;
+                if((string)request["kind"]=="checkpoint"&&failed!=null&&failed.TryGetValue("code",out code)&&new[]{"CHECKPOINT_POSE_RESTORE_FAILED","CHECKPOINT_TIME_RESTORE_FAILED"}.Contains(Convert.ToString(code)))throw new CadFault(Convert.ToString(code),"独立副本未恢复检查点姿态或时钟；未添加配合。",new{worker=evidence,evidence_path=result});
+                throw new CadFault("ISOLATED_PROBE_FAILED","独立探测未通过；原实例未打开探测副本。",new{worker=evidence,evidence_path=result});
+            }
             evidence["evidence_path"]=result;evidence["evidence_sha256"]=FileHash(result).Replace("-","").ToLowerInvariant();return evidence;
         }
     }

@@ -20,3 +20,4 @@ jobs:
       - run: python tests/alpha8_policy_checks.py
       - run: python tests/alpha9_policy_checks.py
       - run: python tests/study_history_v04.py
+      - run: python tests/v042_policy_checks.py
