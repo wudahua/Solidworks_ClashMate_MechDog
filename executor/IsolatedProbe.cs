@@ -51,7 +51,7 @@ public partial class Cad {
                     var expected=new Dictionary<string,double[]>();
                     foreach(string name in Transforms(scope.Doc).Keys){string old=name;foreach(var rename in renames)old=old.Replace(rename.Key,rename.Value);if(!original.ContainsKey(old))throw new Exception("CHECKPOINT_PROBE_COMPONENT_SET_MISMATCH");expected[name]=original[old];}
                     if(expected.Count!=original.Count)throw new Exception("CHECKPOINT_PROBE_COMPONENT_SET_MISMATCH");
-                    phase("restoring_checkpoint_state");ApplyStudyStates(scope.Doc,states,expected);VerifyStudyStates(scope.Doc,states);phase("checkpoint_state_verified");
+                    phase("restoring_checkpoint_state");ApplyStudyStates(scope.Doc,states,expected,phase);phase("verifying_checkpoint_study_settings");VerifyStudyStates(scope.Doc,states);phase("checkpoint_state_verified");
                     result=new{status="verified",pose_change=PoseChange(expected,Transforms(scope.Doc)),restoration_status="restored"};
                 }
             } else if((string)request["kind"]=="reset_branch") {
@@ -69,7 +69,7 @@ public partial class Cad {
                 if((cad.Sw.GetDocuments() as object[]??new object[0]).Length!=0)throw new Exception("PROBE_UNEXPECTED_DOCUMENTS_EXIT_REFUSED");phase("exiting_owned_solidworks");cad.Sw.ExitApp();
             }catch(Exception error){cleanup=error;}
             if(owned!=null){phase("waiting_owned_process_exit");if(owned.WaitForExit(30000))nativeExit=owned.ExitCode;else cleanup=new Exception("PROBE_INSTANCE_EXIT_NOT_CONFIRMED");}
-            phase("completed");AtomicJson(resultPath,new{completed=true,phase_timings=phases.Take(32).ToArray(),elapsed_ms=elapsed.ElapsedMilliseconds,success=failure==null&&cleanup==null,result=result,failure=failure==null?null:FailureEvidence(failure),cleanup_failure=cleanup==null?null:FailureEvidence(cleanup),owned_solidworks_pid=owned==null?(int?)null:owned.Id,owned_process_exited=nativeExit.HasValue,native_exit_code=nativeExit,native_exit_code_interpretation=nativeExit==0?"zero_exit":"nonzero_observed_cause_not_proven",managed_completion_is_separate_from_native_exit=true});
+            phase("completed");AtomicJson(resultPath,new{completed=true,phase_timings=phases.Take(32).ToArray(),elapsed_ms=elapsed.ElapsedMilliseconds,success=failure==null&&cleanup==null,managed_operation_success=failure==null&&cleanup==null,native_shutdown_status=nativeExit.HasValue?(nativeExit==0?"exited_zero":"exited_nonzero_cause_unproven"):"exit_unconfirmed",success_scope="managed_operation_and_verified_cleanup_not_native_zero_exit",result=result,failure=failure==null?null:FailureEvidence(failure),cleanup_failure=cleanup==null?null:FailureEvidence(cleanup),owned_solidworks_pid=owned==null?(int?)null:owned.Id,owned_process_exited=nativeExit.HasValue,native_exit_code=nativeExit,native_exit_code_interpretation=nativeExit==0?"zero_exit":"nonzero_observed_cause_not_proven",managed_completion_is_separate_from_native_exit=true});
         }
         return failure==null&&cleanup==null?0:1;
     }

@@ -6,6 +6,7 @@ using SolidWorks.Interop.sldworks;
 
 public partial class Cad {
     internal long GeometryQueryTestBudgetMs=0;
+    internal Action<object> GeometryQueryTestObserver=null;
     GeometryScanBudget NewGeometryBudget(){if(GeometryQueryTestBudgetMs>0&&System.Environment.GetEnvironmentVariable("SW_MCP_FAULT_TESTS")!="1")throw new CadFault("FAULT_TESTS_DISABLED","几何预算注入仅允许显式测试环境。");return new GeometryScanBudget(GeometryQueryTestBudgetMs>0?GeometryQueryTestBudgetMs:10000);}
     object[] NativeMateHealth(IModelDoc2 doc) {
         return BasicMateFeatures(doc).GroupBy(f=>f.GetID()).Select(g=>g.First()).Select(f=>{
@@ -33,9 +34,11 @@ public partial class Cad {
             .Where(d=>m.Files.Contains(d.GetPathName(),StringComparer.OrdinalIgnoreCase))
             .OrderBy(d=>d.GetPathName(),StringComparer.OrdinalIgnoreCase)
             .Select(d=>new{path=d.GetPathName(),stamp=d.GetUpdateStamp(),dirty=d.GetSaveFlag(),configuration=d.ConfigurationManager.ActiveConfiguration.Name}).ToArray();
-        return StableId("query_",Json.Serialize(new{revision=m.Revision,configuration=doc.ConfigurationManager.ActiveConfiguration.Name,
+        var observed=new{revision=m.Revision,configuration=doc.ConfigurationManager.ActiveConfiguration.Name,
             files=m.Files.ToDictionary(p=>p,p=>FileHash(p)),documents=loaded,
-            components=ProbeWorkingState.ComponentIdentity(doc),poses=Transforms(doc),studies=StudyStates(doc)}));
+            components=ProbeWorkingState.ComponentIdentity(doc),poses=Transforms(doc),studies=StudyStates(doc)};
+        if(GeometryQueryTestObserver!=null){if(System.Environment.GetEnvironmentVariable("SW_MCP_FAULT_TESTS")!="1")throw new CadFault("FAULT_TESTS_DISABLED","查询观测仅用于显式测试。");GeometryQueryTestObserver(observed);}
+        return StableId("query_",Json.Serialize(observed));
     }
     object CheckpointProbeWithTiming(UserModel model,string planId,string checkpointId) {
         var timing=new OperationTiming();Dictionary<string,object> result=null;Exception failure=null;Scope scope=null;

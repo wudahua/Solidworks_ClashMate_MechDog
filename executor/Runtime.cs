@@ -103,7 +103,14 @@ public partial class Cad {
         }
     }
     static string[] Names(IMotionStudyManager mgr) { return ((object[])mgr.GetMotionStudyNames()).Cast<string>().ToArray(); }
-    static Dictionary<string,double[]> Transforms(IModelDoc2 d) { return ((object[])((IAssemblyDoc)d).GetComponents(false)).Cast<IComponent2>().Where(c=>!c.IsSuppressed()).ToDictionary(c=>c.Name2,c=>(double[])c.GetTotalTransform(false).ArrayData); }
+    static Dictionary<string,double[]> Transforms(IModelDoc2 d) { return ReadTransforms(d,null); }
+    static Dictionary<string,double[]> ReadTransforms(IModelDoc2 d,Dictionary<string,object> profile) {
+        var timer=System.Diagnostics.Stopwatch.StartNew();var components=((object[])((IAssemblyDoc)d).GetComponents(false)).Cast<IComponent2>().ToArray();long inventory=timer.ElapsedTicks,flags=0,names=0,transforms=0,arrays=0;int reads=0;
+        var result=new Dictionary<string,double[]>();foreach(var c in components){long start=timer.ElapsedTicks;bool suppressed=c.IsSuppressed();flags+=timer.ElapsedTicks-start;if(suppressed)continue;
+            start=timer.ElapsedTicks;string name=c.Name2;names+=timer.ElapsedTicks-start;start=timer.ElapsedTicks;var transform=c.GetTotalTransform(false);transforms+=timer.ElapsedTicks-start;start=timer.ElapsedTicks;var values=(double[])transform.ArrayData;arrays+=timer.ElapsedTicks-start;result.Add(name,values);reads++;}
+        if(profile!=null){double ms=1000.0/System.Diagnostics.Stopwatch.Frequency;profile["inventory_ms"]=inventory*ms;profile["suppression_ms"]=flags*ms;profile["names_ms"]=names*ms;profile["get_total_transform_ms"]=transforms*ms;profile["array_data_ms"]=arrays*ms;profile["total_ms"]=timer.Elapsed.TotalMilliseconds;profile["observed_component_count"]=components.Length;profile["pose_count"]=reads;profile["instrumented_COM_calls"]=1+components.Length+3*reads;profile["COM_count_scope"]="explicit_method_calls_in_reader_not_internal_RPC_or_solver";}
+        return result;
+    }
     string Fingerprint(IModelDoc2 doc,string knownPath=null) {
         string path=knownPath;
         for(int attempt=0;;attempt++) {
