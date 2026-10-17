@@ -106,9 +106,11 @@ class Jobs:
             job["progress"] = terminal
             self._persist(job)
 
-    def get(self, job_id: str, response_artifact_id="", offset=0, limit=2000) -> dict:
+    def get(self, job_id: str, response_artifact_id="", offset=0, limit=2000, response_json_pointer="") -> dict:
+        if response_json_pointer and not response_artifact_id:
+            raise ValueError("response_json_pointer 需要 response_artifact_id。")
         if response_artifact_id:
-            return job_payload.read(self.root, job_id, response_artifact_id, offset, limit)
+            return job_payload.read(self.root, job_id, response_artifact_id, offset, limit, response_json_pointer)
         with self._lock:
             job = copy.deepcopy(self._jobs.get(job_id))
         if job is None:
