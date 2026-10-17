@@ -5,6 +5,7 @@ import asyncio
 import atexit
 import json
 import math
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -20,7 +21,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.2-alpha.1", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.2-alpha.2", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 
 def packed(data, error=False):
@@ -71,9 +72,10 @@ async def list_models() -> CallToolResult:
 
 
 @mcp.tool()
-async def inspect_model(model_id: str) -> CallToolResult:
-    """读取组件、当前原生配合健康及几何；本次返回的受支持顶层面在核验持久引用/归属后登记，可直接用于配合或驱动。其他参考不自动改绑；不隐式重建，自由度仍unknown。"""
-    return await call("inspect_model", model_id=model_id)
+async def inspect_model(model_id: str, detail_level: Literal["full", "components"] = "full", wait_for_completion: bool = True) -> CallToolResult:
+    """读取组件、当前原生配合健康及几何；detail_level="components"只读组件清单、跳过配合几何，适合大装配；wait_for_completion=False异步取job_id；本次返回的受支持顶层面在核验持久引用/归属后登记，可直接用于配合或驱动。其他参考不自动改绑；不隐式重建，自由度仍unknown。"""
+    params = dict(model_id=model_id, detail_level=detail_level)
+    return await call("inspect_model", **params) if wait_for_completion else enqueue("inspect_model", params)
 
 
 @mcp.tool()
@@ -95,11 +97,12 @@ async def preflight_motion(model_id: str, study: str = "", compatibility_probe: 
 
 
 @mcp.tool()
-async def list_drive_candidates(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal"] = "", limit: int = 20, cursor: str = "", group_faces: bool = True, detail_level: Literal["full", "compact"] = "full") -> CallToolResult:
-    """几何驱动候选，不证明关节相容；排除固定件并报告原因，容忍合法空体。默认分组，group_faces=False查看逐面；limit是1–50条上限，16KB字节预算可能缩页。compact省略冗余字段；改变筛选/分组/详情后重新分页。"""
+async def list_drive_candidates(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal"] = "", limit: int = 20, cursor: str = "", group_faces: bool = True, detail_level: Literal["full", "compact"] = "full", wait_for_completion: bool = True) -> CallToolResult:
+    """几何驱动候选，不证明关节相容；wait_for_completion=False返回job_id，大装配先inspect_model(detail_level="components")再按component_id筛选；排除固定件并报告原因，容忍合法空体。默认分组，group_faces=False查看逐面；limit是1–50条上限，16KB字节预算可能缩页。compact省略冗余字段；改变筛选/分组/详情后重新分页。"""
     if not 1 <= limit <= 50:
         raise ToolError("limit 须在 1–50。")
-    return await call("list_drive_candidates", model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor, group_faces=group_faces, detail_level=detail_level)
+    params = dict(model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor, group_faces=group_faces, detail_level=detail_level)
+    return await call("list_drive_candidates", **params) if wait_for_completion else enqueue("list_drive_candidates", params)
 
 
 @mcp.tool()
@@ -115,11 +118,12 @@ async def create_motion_study(model_id: str, study: str, component_id: str, enti
 
 
 @mcp.tool()
-async def list_mate_references(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal"] = "", limit: int = 20, cursor: str = "", detail_level: Literal["full", "compact"] = "full") -> CallToolResult:
-    """顶层配合面，包含固定支座，空体/异常报告原因，不推断缺失配合。每零件最多128面并报告截断；limit条数上限与16KB预算同时限制。compact提供较短结果，改变详情后重查第一页。"""
+async def list_mate_references(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal"] = "", limit: int = 20, cursor: str = "", detail_level: Literal["full", "compact"] = "full", wait_for_completion: bool = True) -> CallToolResult:
+    """顶层配合面，包含固定支座，不支持边缘、顶点或草图段，不自动换成邻面；wait_for_completion=False异步取job_id；空体/异常报告原因，不推断缺失配合。每零件最多128面并报告截断；limit条数上限与16KB预算同时限制。compact提供较短结果，改变详情后重查第一页。"""
     if not 1 <= limit <= 50:
         raise ToolError("limit 须在1–50。")
-    return await call("list_mate_references", model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor, detail_level=detail_level)
+    params = dict(model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor, detail_level=detail_level)
+    return await call("list_mate_references", **params) if wait_for_completion else enqueue("list_mate_references", params)
 
 
 @mcp.tool()
@@ -196,8 +200,10 @@ async def export_motion_curve(run_id: str, component_id: str, quantity: Literal[
 
 
 @mcp.tool()
-async def replay_motion_frame(run_id: str, frame: int, saved_image_only: bool = False, diagnostic_limit: int = 20) -> CallToolResult:
-    """默认仅回放本会话输入匹配的run：重算、全组件姿态核验、截图并恢复。diagnostic_limit默认20、范围1–100，字节预算可能缩短展示；全部组件仍核验，完整诊断可用get_run_artifacts(replay_diagnostics=True)离线分页。saved_image_only=True离线读取该帧已记录且哈希通过的历史BMP，不调用COM、不检查当前模型；未曾生成该帧图像则明确报缺失，不强行摆位。"""
+async def replay_motion_frame(run_id: str, frame: int, saved_image_only: bool = False, diagnostic_limit: int = 20, use_input_snapshot: bool = False, wait_for_completion: bool = True) -> CallToolResult:
+    """use_input_snapshot=True显式以本版本新run绑定的冻结输入在独立实例重算，不证明当前模型有效；支持重启后读取，有预算并核对全组件帧姿态，无绑定快照的旧run拒绝猜测。wait_for_completion=False异步返回job_id。默认仅回放本会话输入匹配的run：重算、全组件姿态核验、截图并恢复。diagnostic_limit默认20、范围1–100，字节预算可能缩短展示；全部组件仍核验，完整诊断可用get_run_artifacts(replay_diagnostics=True)离线分页。saved_image_only=True离线读取该帧已记录且哈希通过的历史BMP，不调用COM、不检查当前模型；未曾生成该帧图像则明确报缺失，不强行摆位。"""
+    if saved_image_only and use_input_snapshot:
+        raise ToolError("saved_image_only与use_input_snapshot不能同时启用。")
     if saved_image_only:
         try:
             return packed({"ok": True, "result": await asyncio.to_thread(artifacts.saved_frame_image, run_id, frame)})
@@ -205,7 +211,8 @@ async def replay_motion_frame(run_id: str, frame: int, saved_image_only: bool = 
             return packed({"ok": False, "error": {"code": getattr(exc, "code", "SAVED_IMAGE_ACCESS_FAILED"), "message": str(exc), "assertion": "inconclusive", "restoration_status": "not_required"}}, True)
     if type(diagnostic_limit) is not int or not 1 <= diagnostic_limit <= 100:
         raise ToolError("diagnostic_limit须为1–100整数。")
-    return await call("replay_motion_frame", run_id=run_id, frame=frame, diagnostic_limit=diagnostic_limit)
+    params = dict(run_id=run_id, frame=frame, diagnostic_limit=diagnostic_limit, use_input_snapshot=use_input_snapshot)
+    return await call("replay_motion_frame", **params) if wait_for_completion else enqueue("replay_motion_frame", params)
 
 
 @mcp.tool()
@@ -215,8 +222,16 @@ async def create_model_checkpoint(model_id: str, wait_for_completion: bool = Fal
 
 
 @mcp.tool()
-async def reset_study_time(model_id: str, study: str, allow_recalculate: bool = False, wait_for_completion: bool = False) -> CallToolResult:
-    """归零并保存副本，先建立检查点。默认不求解；可显式allow_recalculate=True按原设置重建缓存后归零，预算同时限制30秒、1000fps、1801帧（5秒300fps允许；新建/运行仍最多120fps）。超预算在检查点前拒绝，查看逐算例指引；不忽略非零算例、不自动降fps。旧结果失效；隔离期间禁止。"""
+async def reset_study_time(model_id: str, study: str, allow_recalculate: bool = False, wait_for_completion: bool = False, reset_output_fps: int = 0, create_new_model: bool = False, checkpoint_id: str = "") -> CallToolResult:
+    """reset_output_fps与create_new_model=True、allow_recalculate=True组合，显式指定checkpoint_id，从冻结输入在新登记副本降帧归零，不保存当前脏内存，返回新model_id；保留原模型，新副本失败则隔离。归零并保存副本，先建立检查点。默认不求解；可显式allow_recalculate=True按原设置重建缓存后归零，预算同时限制30秒、1000fps、1801帧（5秒300fps允许；新建/运行仍最多120fps）。超预算在检查点前拒绝，查看逐算例指引；不忽略非零算例、不自动降fps。旧结果失效；隔离期间禁止。"""
+    if reset_output_fps:
+        if not create_new_model or not allow_recalculate or not 5 <= reset_output_fps <= 1000 or not re.fullmatch(r"[a-f0-9]{32}", checkpoint_id):
+            raise ToolError("reset_output_fps要求create_new_model=True、allow_recalculate=True、checkpoint_id和5–1000fps。原模型保留，成功后使用返回的新model_id。")
+        return enqueue("reset_study_time", dict(model_id=model_id, study=study, allow_recalculate=True, reset_output_fps=reset_output_fps, create_new_model=True, checkpoint_id=checkpoint_id))
+    if checkpoint_id and not reset_output_fps:
+        raise ToolError("checkpoint_id仅用于显式新副本降帧归零。")
+    if create_new_model:
+        raise ToolError("create_new_model须同时指定reset_output_fps。")
     if allow_recalculate or not wait_for_completion:
         return enqueue("reset_study_time", {"model_id": model_id, "study": study, "allow_recalculate": allow_recalculate})
     return await call("reset_study_time", model_id=model_id, study=study, allow_recalculate=False)

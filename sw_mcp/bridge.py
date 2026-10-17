@@ -31,6 +31,11 @@ class Bridge:
         "import_assembly", "run_user_study", "verify_motion_preservation", "replay_motion_frame",
         "restore_model_checkpoint", "apply_mate", "create_motion_study", "convert_motion_study",
         "reset_study_time", "create_model_checkpoint", "probe_motion_compatibility"})
+    ASYNC_QUERIES = frozenset({"inspect_model", "list_mate_references", "list_drive_candidates"})
+
+    def _wait_budget(self, operation, params):
+        queued_query = operation in self.ASYNC_QUERIES and isinstance(params.get("job_id"), str) and re.fullmatch(r"[a-f0-9]{32}", params["job_id"])
+        return self.motion_scan_timeout if operation in self.LONG_OPERATIONS or queued_query else self.timeout
 
     def __init__(self, root: Path, timeout: float = 180, motion_scan_timeout: float | None = None):
         self.root = root
@@ -512,7 +517,7 @@ class Bridge:
                                "recovering": recovering, "previous_state": state if recovering else None})
                 self._process.stdin.write(wire)
                 self._process.stdin.flush()
-                deadline = self.motion_scan_timeout if operation in self.LONG_OPERATIONS else self.timeout
+                deadline = self._wait_budget(operation, params)
                 response = future.result(timeout=deadline)
             except concurrent.futures.TimeoutError as exc:
                 with self._state_lock:
@@ -528,7 +533,7 @@ class Bridge:
                             progress = {k: observed.get(k) for k in ("stage", "checkpoint_id")}
                     except (OSError, ValueError, AttributeError):
                         pass
-                raise CadError("CAD_TIMEOUT", "调用超时；CAD 操作可能继续，不能重复写入。查询 get_job 或 get_recovery_state 的最终响应。", diagnostics={"request_id": request_id, "operation": operation, "model_id": model_id, "plan_id": params.get("plan_id"), "job_id": job_id, "wait_budget_s": deadline, "client_wait_expired": True, "cad_operation_finished": False, "native_call_forcibly_cancelled": False, "late_response_expected_or_possible": True, "last_native_progress": progress, "next_tools": ["get_job", "get_recovery_state"], "retry_write_allowed": False}) from exc
+                raise CadError("CAD_TIMEOUT", "调用超时；CAD 操作可能继续，不能重复写入。查询 get_job 或 get_recovery_state 的最终响应。", diagnostics={"request_id": request_id, "operation": operation, "model_id": model_id, "plan_id": params.get("plan_id"), "job_id": job_id, "wait_budget_s": deadline, "client_wait_expired": True, "cad_operation_finished": False, "native_call_forcibly_cancelled": False, "late_response_expected_or_possible": True, "last_native_progress": progress, "next_tools": ["get_job", "get_recovery_state"] if job_id else ["get_recovery_state"], "next_call": {"tool": "get_recovery_state", "arguments": {"request_id": request_id}}, "retry_write_allowed": False}) from exc
             except (BrokenPipeError, OSError) as exc:
                 state_after = self.recovery_state()
                 if state_after.get("request_id") == request_id and state_after.get("status") == "active":

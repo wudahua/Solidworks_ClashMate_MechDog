@@ -21,6 +21,7 @@ public partial class Cad {
         public string Configuration;
         public Dictionary<string,double[]> Poses;
         public Dictionary<string,string> ComponentConfigurations;
+        public Dictionary<string,bool> FixedComponents;
         public Dictionary<string,string[]> PartConfigurations;
         public Dictionary<string,double[]> PartBoxes;
         public Dictionary<string,int> BodyCounts;
@@ -35,6 +36,7 @@ public partial class Cad {
         if(components.Length>500)throw new Exception("VIRTUAL_IMPORT_COMPONENT_BUDGET_EXCEEDED");
         var refs=components.ToDictionary(c=>ComponentReference(doc,c),c=>c);
         var witness=new ImportWitness{Configuration=doc.ConfigurationManager.ActiveConfiguration.Name,Poses=refs.ToDictionary(p=>p.Key,p=>(double[])p.Value.GetTotalTransform(false).ArrayData),ComponentConfigurations=refs.ToDictionary(p=>p.Key,p=>p.Value.ReferencedConfiguration),PartConfigurations=refs.ToDictionary(p=>p.Key,p=>((Array)((IModelDoc2)p.Value.GetModelDoc2()).GetConfigurationNames()).Cast<object>().Select(Convert.ToString).OrderBy(v=>v,StringComparer.Ordinal).ToArray()),PartBoxes=refs.ToDictionary(p=>p.Key,p=>(double[])((IPartDoc)p.Value.GetModelDoc2()).GetPartBox(true))};
+        witness.FixedComponents=refs.ToDictionary(p=>p.Key,p=>p.Value.IsFixed());
         witness.BodyCounts=refs.ToDictionary(p=>p.Key,p=>PartBodyCount((IPartDoc)p.Value.GetModelDoc2()));
         witness.GeometryProperties=refs.ToDictionary(p=>p.Key,p=>ImportGeometryProperties((IPartDoc)p.Value.GetModelDoc2()));
         witness.Mates=Json.Serialize(BasicMateFeatures(doc).GroupBy(f=>f.GetID()).Select(g=>g.First()).OrderBy(f=>f.GetID()).Select(f=>{var m=(IMate2)f.GetSpecificFeature2();bool warning;return new ImportMateWitness{id=f.GetID(),name=f.Name,type=m.Type,alignment=m.Alignment,error=f.GetErrorCode2(out warning),references=Enumerable.Range(0,m.GetMateEntityCount()).Select(i=>Convert.ToBase64String((byte[])doc.Extension.GetPersistReference3(m.MateEntity(i).Reference))).ToArray()};}).ToArray());
@@ -51,9 +53,10 @@ public partial class Cad {
         bool pose=identity&&before.Poses.All(p=>PoseValidation.Matches(p.Value,after.Poses[p.Key]));
         bool configuration=identity&&before.Configuration==after.Configuration&&before.ComponentConfigurations.All(p=>after.ComponentConfigurations[p.Key]==p.Value)&&before.PartConfigurations.All(p=>after.PartConfigurations[p.Key].SequenceEqual(p.Value));
         bool geometry=identity&&before.GeometryProperties.All(p=>{var values=after.GeometryProperties[p.Key];return p.Value.Length==values.Length&&Enumerable.Range(0,p.Value.Length).All(i=>p.Value[i].Length==values[i].Length&&p.Value[i].Zip(values[i],(a,b)=>Math.Abs(a-b)<=Math.Max(1e-12,Math.Max(Math.Abs(a),Math.Abs(b))*1e-9)).All(v=>v));});
+        bool fixedStates=identity&&before.FixedComponents.All(p=>after.FixedComponents[p.Key]==p.Value);
         bool mates=before.Mates==after.Mates,studies=before.Studies==after.Studies;
-        var result=new{component_identity_preserved=identity,poses_preserved=pose,configurations_preserved=configuration,solid_geometry_properties_and_topology_preserved=geometry,approximate_part_boxes_not_used_as_acceptance=true,mate_identity_and_references_preserved=mates,study_settings_times_activation_preserved=studies,native_drive_inventory_claim="not_proven_by_this_import",pose_translation_tolerance_m=PoseValidation.TranslationToleranceM,pose_rotation_tolerance_rad=PoseValidation.RotationToleranceRad};
-        if(!identity||!pose||!configuration||!geometry||!mates||!studies)throw new CadFault("VIRTUAL_EXTERNALIZATION_VERIFICATION_FAILED","外部化后的身份、姿态、配置、几何或配合/算例状态未通过核验；未开放此副本的运动操作。",result);
+        var result=new{component_identity_preserved=identity,fixed_states_preserved=fixedStates,fixed_state_source="IComponent2.IsFixed",fixed_states_before=before.FixedComponents,fixed_states_after=after.FixedComponents,poses_preserved=pose,configurations_preserved=configuration,solid_geometry_properties_and_topology_preserved=geometry,approximate_part_boxes_not_used_as_acceptance=true,mate_identity_and_references_preserved=mates,study_settings_times_activation_preserved=studies,native_drive_inventory_claim="not_proven_by_this_import",pose_translation_tolerance_m=PoseValidation.TranslationToleranceM,pose_rotation_tolerance_rad=PoseValidation.RotationToleranceRad};
+        if(!identity||!fixedStates||!pose||!configuration||!geometry||!mates||!studies)throw new CadFault("VIRTUAL_EXTERNALIZATION_VERIFICATION_FAILED","外部化后的身份、姿态、配置、几何或配合/算例状态未通过核验；未开放此副本的运动操作。",result);
         return result;
     }
     void RequireCopyReferenceClosure(UserModel model,bool allowVirtualHints) {
@@ -78,7 +81,7 @@ public partial class Cad {
                 foreach(string p in inputs){int i=Array.IndexOf(inputs,p);foreach(string reference in DiskDependencies(p,false)){if(ImportReferences.VirtualHint(reference))continue;int j=Array.FindIndex(inputs,v=>v.Equals(reference,StringComparison.OrdinalIgnoreCase));if(j<0||!Sw.ReplaceReferencedDocument(m.Files[i],reference,m.Files[j]))throw new CadFault("COPY_REFERENCE_REDIRECT_FAILED","副本外部引用重定向失败。",new{reference_name=Path.GetFileName(reference),model_id=m.Id});}}
                 RequireCopyReferenceClosure(m,true);VerifyUserSources(m);evidence["stage"]="native_virtual_classification";saveEvidence();ImportWitness before;var conversions=new List<object>();int virtualComponentCount=0;
                 using(var scope=new Scope(this,m.Path,null)) {
-                    if(!string.IsNullOrEmpty(configuration)&&scope.Doc.ConfigurationManager.ActiveConfiguration.Name!=configuration&&!scope.Doc.ShowConfiguration2(configuration))throw new Exception("CONFIGURATION_NOT_FOUND");m.Configuration=scope.Doc.ConfigurationManager.ActiveConfiguration.Name;SaveUserModel(m);before=VirtualWitness(scope.Doc);
+                    if(!string.IsNullOrEmpty(configuration)&&scope.Doc.ConfigurationManager.ActiveConfiguration.Name!=configuration&&!scope.Doc.ShowConfiguration2(configuration))throw new Exception("CONFIGURATION_NOT_FOUND");m.Configuration=scope.Doc.ConfigurationManager.ActiveConfiguration.Name;SaveUserModel(m);before=VirtualWitness(scope.Doc);evidence["fixed_state_observation_before_externalization"]=new{source="IComponent2.IsFixed",configuration=before.Configuration,states=before.FixedComponents,instances=UserComponents(scope.Doc).ToDictionary(c=>ComponentReference(scope.Doc,c),c=>c.Name2)};saveEvidence();
                     var components=UserComponents(scope.Doc);var bindings=ImportMateBindings(scope.Doc);var virtuals=components.Where(c=>c.IsVirtual).ToArray();if(virtuals.Length>32)throw new Exception("VIRTUAL_IMPORT_COMPONENT_BUDGET_EXCEEDED");var virtualPaths=new HashSet<string>(virtuals.Select(c=>c.GetPathName()),StringComparer.OrdinalIgnoreCase);
                     foreach(var c in components)if(!c.IsVirtual&&!m.Files.Contains(c.GetPathName(),StringComparer.OrdinalIgnoreCase))throw new CadFault("COPY_REFERENCE_NOT_ISOLATED","原生组件路径未隔离，未外部化。",new{model_id=m.Id,instance=c.Name2});
                     // Native internal dependencies must be closed over already isolated copies or confirmed embedded documents.
@@ -89,7 +92,7 @@ public partial class Cad {
                         bool saved=members[0].SaveVirtualComponent(target);if(!saved||!File.Exists(target)||!members.Select(c=>c.GetID()).SequenceEqual(nativeIds)||members.Any(c=>c.IsVirtual||!c.GetPathName().Equals(target,StringComparison.OrdinalIgnoreCase)))throw new CadFault("VIRTUAL_EXTERNALIZATION_NOT_CONFIRMED","原生外部化返回、共享实例或目标文件路径未通过核对；未把重复实例拆成独立零件。",new{model_id=m.Id,native_save_virtual_return=saved,instances=names});
                         conversions.Add(new{instances_before=names,instances_after=members.Select(c=>c.Name2).ToArray(),native_component_ids=nativeIds,persistent_references_before=oldReferences,persistent_references_after=members.Select(c=>Convert.ToBase64String((byte[])scope.Doc.Extension.GetPersistReference3(c))).ToArray(),identity_binding="same_native_component_objects_and_unchanged_component_ids_then_reopen",shared_instance_count=members.Length,target=target,native_save_virtual_return=saved});evidence["conversions"]=conversions.ToArray();saveEvidence();
                     }
-                    Save(scope.Doc,m.Path);evidence["mate_reference_migration"]=MigrateImportMateReferences(scope.Doc,before,bindings);saveEvidence();VerifyUserSources(m);
+                    evidence["stage"]="save_externalized_assembly";saveEvidence();Save(scope.Doc,m.Path);evidence["stage"]="verify_mate_reference_migration";saveEvidence();evidence["mate_reference_migration"]=MigrateImportMateReferences(scope.Doc,before,bindings);saveEvidence();VerifyUserSources(m);
                 }
                 CloseUserDocuments(m.Files);evidence["stage"]="reopen_verify_externalized_copy";saveEvidence();object verification;
                 using(var scope=new Scope(this,m.Path,null)){RequireCopyReferenceClosure(m,false);if(UserComponents(scope.Doc).Any(c=>c.IsVirtual))throw new CadFault("VIRTUAL_COMPONENT_STILL_EMBEDDED","重新打开后仍有虚拟组件，未完成导入。",new{model_id=m.Id});verification=CompareVirtualWitness(before,VirtualWitness(scope.Doc));InspectUserCore(m,scope.Doc);Fingerprint(scope.Doc,scope.DocumentPath);}

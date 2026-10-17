@@ -60,6 +60,8 @@ class Jobs:
             update = {"status": "succeeded", "execution_status": "completed", "result": result}
             if job["operation"] == "verify_motion_preservation":
                 update["verification_status"] = result.get("verification_status", result.get("assertion", "inconclusive"))
+                update["verification_passed"] = {"pass": True, "fail": False}.get(update["verification_status"])
+                update["execution_succeeded"] = True
         with self._lock:
             job.update(update, finished_at=time.time())
             progress_file = self.root / "runs" / "progress" / f"{job_id}.json"
@@ -126,4 +128,6 @@ class Jobs:
                 job["progress"] = value
         except (OSError, ValueError):
             pass
+        job["service_observed_at"] = time.time()
+        job["service_observation_is_native_progress"] = False
         return job

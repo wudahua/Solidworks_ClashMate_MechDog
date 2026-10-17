@@ -27,6 +27,7 @@ public partial class Cad {
         Cad cad; IModelDoc2 previous;
         public IModelDoc2 Doc;
         public IMotionStudy Study;
+        public string InputSnapshotPath {get{return ownedSnapshot==null?null:ownedSnapshot.InputSnapshotPath;}}
         public double OriginalTime;
         string originalStudy;
         double originalActiveTime;
@@ -59,6 +60,8 @@ public partial class Cad {
                 foreach(string name in Names(manager)) { var s=(IMotionStudy)manager.GetMotionStudy(name); if(s.IsActive){originalStudy=name;originalActiveTime=s.GetTime();} }
                 if(studyName!=null) {
                     if(registered!=null)ownedSnapshot=new OwnedMotionSnapshot(owner,registered,Doc);
+                    // Saving the owned snapshot can invalidate Motion manager/study COM proxies.
+                    manager=(IMotionStudyManager)Doc.Extension.GetMotionStudyManager();
                     original=Transforms(Doc);
                     Study=(IMotionStudy)manager.GetMotionStudy(studyName);
                     if(Study==null) throw new Exception("STUDY_NOT_FOUND");
@@ -66,6 +69,12 @@ public partial class Cad {
                     OriginalTime=Study.GetTime(); Study.Activate();
                 }
             } catch(Exception failure) { try{Dispose();}catch(Exception rollback){owner.LastOperationRestoration="unknown";throw new CadFault("RESTORATION_FAILED","打开或激活失败，且无法核验原窗口恢复。",new{original_error=failure.ToString(),rollback_error=rollback.ToString()});}if(failure is COMException)owner.LastOperationRestoration="unknown";throw; }
+        }
+        public void RefreshStudy() {
+            EnsureActive();var current=cad.Sw.GetOpenDocumentByName(expectedPath) as IModelDoc2;
+            if(current==null||current.ConfigurationManager.ActiveConfiguration.Name!=expectedConfiguration)throw new Exception("SESSION_CONFLICT: study refresh input changed");
+            Doc=current;Study=(IMotionStudy)((IMotionStudyManager)Doc.Extension.GetMotionStudyManager()).GetMotionStudy(targetStudyName);
+            if(Study==null||!Study.IsActive)throw new Exception("SESSION_CONFLICT: expected study is not active");
         }
         public void EnsureActive() {
             var active=(IModelDoc2)cad.Sw.ActiveDoc;
@@ -121,7 +130,7 @@ public partial class Cad {
                 string allowed=pump?Path.Combine(PumpRoot,"parts"):Fixture;
                 bool ownedParameter=parameterPath!=null&&doc.GetPathName().Equals(parameterPath,StringComparison.OrdinalIgnoreCase)&&p.Equals(parameterPath,StringComparison.OrdinalIgnoreCase);
                 string userRoot;bool ownedUser=userRoots.TryGetValue(doc.GetPathName(),out userRoot)&&Path.GetFullPath(p).StartsWith(userRoot+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase);
-                if(!ownedUser&&!ownedParameter&&!(pump&&p.Equals(PumpPath,StringComparison.OrdinalIgnoreCase))&&!Path.GetFullPath(p).StartsWith(allowed+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase)) throw new Exception("EXTERNAL_REFERENCE_UNSUPPORTED");
+                if(!ownedUser&&!ownedParameter&&!(pump&&p.Equals(PumpPath,StringComparison.OrdinalIgnoreCase))&&!Path.GetFullPath(p).StartsWith(allowed+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase)) throw new CadFault("EXTERNAL_REFERENCE_UNSUPPORTED","打开后原生组件解析到隔离目录之外，未继续保存或求解。可能涉及本机标准件搜索/Toolbox替换；不能仅凭磁盘引用重定向判定隔离成功。",new{assembly_path=doc.GetPathName(),resolved_component_path=p,expected_owned_directory=userRoot,automatic_external_file_save=false});
                 using(var stream=new FileStream(p,FileMode.Open,FileAccess.Read,FileShare.ReadWrite)) lines.Add(p+":"+BitConverter.ToString(sha.ComputeHash(stream)));
             }
             lines.Add(doc.ConfigurationManager.ActiveConfiguration.Name);
@@ -313,7 +322,7 @@ public partial class Cad {
             case "_test_mate_rollback": return ApplyBasicMate((string)p["plan_id"],true,true);
             case "import_assembly": return ImportUserAssembly((string)p["path"],p.ContainsKey("configuration")?(string)p["configuration"]:null,null,null,p.ContainsKey("import_id")?(string)p["import_id"]:null,p.ContainsKey("materialize_virtual_components")&&Convert.ToBoolean(p["materialize_virtual_components"]));
             case "list_models": return UserListModels();
-            case "inspect_model": return InspectUserModel((string)p["model_id"]);
+            case "inspect_model": return InspectUserModel((string)p["model_id"],p.ContainsKey("detail_level")?(string)p["detail_level"]:"full");
             case "list_motion_studies": return UserStudies((string)p["model_id"],p.ContainsKey("inspect_native_drives")&&Convert.ToBoolean(p["inspect_native_drives"]));
             case "probe_motion_compatibility": return ProbeUserCompatibility((string)p["model_id"],(string)p["study"],Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"],p.ContainsKey("checkpoint_id")?(string)p["checkpoint_id"]:"");
             case "preflight_motion": return PreflightUserMotion((string)p["model_id"],p.ContainsKey("study")?(string)p["study"]:null);
@@ -323,9 +332,9 @@ public partial class Cad {
             case "run_user_study": return RunUserStudy((string)p["model_id"],(string)p["study"],Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"]);
             case "get_motion_summary": return UserRunSummary((string)p["run_id"]);
             case "export_motion_curve": return ExportUserCurve((string)p["run_id"],(string)p["component_id"],(string)p["quantity"],(string)p["axis"]);
-            case "replay_motion_frame": return ReplayUserFrame((string)p["run_id"],Convert.ToInt32(p["frame"]),p.ContainsKey("diagnostic_limit")?Convert.ToInt32(p["diagnostic_limit"]):20);
+            case "replay_motion_frame": if(p.ContainsKey("use_input_snapshot")&&Convert.ToBoolean(p["use_input_snapshot"]))return ReplayFrozenSnapshot((string)p["run_id"],Convert.ToInt32(p["frame"]));return ReplayUserFrame((string)p["run_id"],Convert.ToInt32(p["frame"]),p.ContainsKey("diagnostic_limit")?Convert.ToInt32(p["diagnostic_limit"]):20);
             case "create_model_checkpoint": return CreateUserCheckpoint((string)p["model_id"]);
-            case "reset_study_time": return ResetUserStudyTime((string)p["model_id"],(string)p["study"],p.ContainsKey("allow_recalculate")&&Convert.ToBoolean(p["allow_recalculate"]));
+            case "reset_study_time": if(p.ContainsKey("reset_output_fps")&&Convert.ToInt32(p["reset_output_fps"])>0){if(!p.ContainsKey("create_new_model")||!Convert.ToBoolean(p["create_new_model"]))throw new Exception("RESET_FPS_REQUIRES_NEW_MODEL");return ResetStudyInNewModel((string)p["model_id"],(string)p["study"],Convert.ToInt32(p["reset_output_fps"]),p.ContainsKey("allow_recalculate")&&Convert.ToBoolean(p["allow_recalculate"]),p.ContainsKey("checkpoint_id")?(string)p["checkpoint_id"]:"");}return ResetUserStudyTime((string)p["model_id"],(string)p["study"],p.ContainsKey("allow_recalculate")&&Convert.ToBoolean(p["allow_recalculate"]));
             case "restore_model_checkpoint": try{return RestoreUserCheckpoint((string)p["model_id"],(string)p["checkpoint_id"]);}catch{LastOperationRestoration="unknown";throw;}
             case "get_capabilities": return Capabilities();
             case "inspect_assembly": return Inspect((string)p["assembly"]);
