@@ -19,8 +19,9 @@ class ExplicitProbeBudgetTests(unittest.IsolatedAsyncioTestCase):
         import motion_server as server
         for seconds, fps in ((5.001, 25), (float('nan'), 30), (float('inf'), 30), (0, 25), (5, 121), (1.01, 25)):
             with self.subTest(seconds=seconds, fps=fps), patch.object(server, 'enqueue') as enqueue:
-                with self.assertRaises(Exception):
-                    await server.preflight_motion('m', 'native', True, seconds, fps)
+                response = await server.mcp.call_tool('preflight_motion', dict(model_id='m', study='native', compatibility_probe=True, probe_duration_s=seconds, probe_output_fps=fps))
+                self.assertTrue(response.is_error)
+                self.assertIn(response.structured_content['error']['code'], ('DURATION_OR_FPS_OUT_OF_RANGE', 'OUTPUT_GRID_NOT_FRAME_ALIGNED'))
                 enqueue.assert_not_called()
 
 if __name__ == '__main__':

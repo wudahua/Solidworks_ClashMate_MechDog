@@ -50,6 +50,22 @@ server.mcp.run()
                 async with ClientSession(*streams) as client:
                     hello = await client.initialize()
                     report['server'] = hello.server_info.model_dump()
+                    tools = await client.list_tools()
+                    assert len(tools.tools) == 24
+                    for tool in tools.tools:
+                        assert tool.input_schema['additionalProperties'] is False
+                        response = await client.call_tool(tool.name, {'__unexpected_argument': True})
+                        error = response.structured_content['error']
+                        assert response.is_error and error['code'] == 'UNKNOWN_ARGUMENT'
+                        assert error['diagnostics']['unknown_keys'] == ['__unexpected_argument']
+                        assert set(error['diagnostics']['accepted_keys']) == set(tool.input_schema.get('properties', {}))
+                        assert error['assertion'] == 'not_applicable' and error['restoration_status'] == 'not_required'
+                        assert not log.exists()
+                    for args in ({**base, 'compatibility_probe': True, 'duration_s': .05, 'output_fps': 100},
+                                 {**base, 'compatibility_probe': True, 'probe_duration': .1}):
+                        response = await client.call_tool('preflight_motion', args)
+                        assert response.is_error and response.structured_content['error']['code'] == 'UNKNOWN_ARGUMENT'
+                        assert not log.exists()
                     for name, args in cases:
                         duration_key = 'probe_duration_s' if name == 'preflight_motion' else 'duration_s'
                         for duration in (.1, .2, .3):
@@ -68,6 +84,7 @@ server.mcp.run()
                             assert diag['minimum_output_intervals'] == 10 and diag['minimum_output_frames'] == 11
                             assert diag['cad_dispatched'] is False and diag['automatic_duration_or_fps_change'] is False
                             assert diag['job_created'] is False and 'job_id' not in data
+                            assert diag['example'] == error['next_action']['options'][0]
                             assert error['next_action']['automatic_retry'] is False
                             for option in error['next_action']['options']:
                                 assert option['tool'] == name
@@ -85,7 +102,16 @@ server.mcp.run()
                             assert not log.exists()
                     control = await client.call_tool('create_motion_study', {**cases[0][1], 'duration_s': 40})
                     assert control.is_error and '1801' in control.content[0].text
+                    assert control.structured_content['error']['code'] == 'DURATION_OR_FPS_OUT_OF_RANGE'
                     assert not log.exists()
+                    for name, args in cases:
+                        dk, fk = ('probe_duration_s', 'probe_output_fps') if name == 'preflight_motion' else ('duration_s', 'output_fps')
+                        response = await client.call_tool(name, {**args, dk: .09, fk: 112})
+                        error = response.structured_content['error']
+                        assert response.is_error and error['code'] == 'OUTPUT_GRID_NOT_FRAME_ALIGNED'
+                        assert error['diagnostics']['minimum_fps_at_requested_duration'] is None
+                        assert not error['diagnostics']['minimum_fps_within_supported_range']
+                        assert not log.exists()
                     # Positive controls prove valid inputs still reach the exact
                     # operation/arguments, without implying a native solve pass.
                     for name, args in cases:
