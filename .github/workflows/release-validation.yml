@@ -13,14 +13,4 @@ jobs:
       - run: python -m unittest discover -s tests -p "test_*.py"
       # Compile pure production C# policies using the Windows .NET compiler.
       # These checks do not load interop DLLs, enumerate live CAD, or require SolidWorks.
-      - run: python tests/alpha5_evidence_checks.py
-      - run: python tests/session_connection_checks.py
-      - run: python tests/axis_convention_checks.py
-      - run: python tests/installation_powershell_checks.py
-      - run: python tests/alpha8_policy_checks.py
-      - run: python tests/alpha9_policy_checks.py
-      - run: python tests/study_history_v04.py
-      - run: python tests/v042_policy_checks.py
-      - run: python tests/v042a1_policy_checks.py
-      - run: python tests/v042a2_policy_checks.py
-      - run: python tests/v042a3_policy_checks.py
+      - run: python tests/run_offline_policies.py
