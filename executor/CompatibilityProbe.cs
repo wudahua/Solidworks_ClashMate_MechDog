@@ -8,6 +8,7 @@ public partial class Cad {
     public object ProbeUserCompatibility(string id,string study,double duration,int fps,string runId,string checkpointId="") {
         if(!System.Text.RegularExpressions.Regex.IsMatch(runId??"","^[a-f0-9]{32}$"))throw new CadFault("INVALID_RUN_ID","运行标识格式无效。");
         if(string.IsNullOrWhiteSpace(study)||!MotionBudgets.ProbeAllows(duration,fps))throw new CadFault("INVALID_COMPATIBILITY_PROBE_BUDGET","显式探测须指定算例，默认1秒，显式最多5秒、601帧。",new{duration_s=duration,output_fps=fps});
+        RequireNativeOutputGrid(duration,fps);
         var original=GetUserModel(id);if(original.Purpose=="compatibility_probe")throw new CadFault("NESTED_COMPATIBILITY_PROBE_REJECTED","不能对探测副本继续生成嵌套探测。");
         if(original.Files.Count(p=>p.EndsWith(".SLDASM",StringComparison.OrdinalIgnoreCase))!=1)throw new CadFault("COMPATIBILITY_PROBE_UNSUPPORTED","暂只验收顶层刚体零件装配。",new{model_id=id});
         var hashes=original.Files.ToDictionary(p=>p,p=>FileHash(p));var doc=Sw.GetOpenDocumentByName(original.Path) as IModelDoc2;
