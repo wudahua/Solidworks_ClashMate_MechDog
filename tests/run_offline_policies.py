@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# Alpha.4 Python diagnostic contracts are in test_v042a4.py and are run by
+# unittest discover. This list contains standalone policy compiler entry points.
 SUITES = (
     'alpha5_evidence_checks', 'session_connection_checks', 'axis_convention_checks',
     'installation_powershell_checks', 'alpha8_policy_checks', 'alpha9_policy_checks',

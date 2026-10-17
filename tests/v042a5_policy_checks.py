@@ -30,7 +30,7 @@ class Checks {
  var unresolved=new Dictionary<string,object>();GeometryQueryScope.Apply(unresolved,"",3,3,false,0);Check(!(bool)unresolved["geometry_complete"]);Check(!(bool)unresolved["absence_of_kind_proven"]);
  var budget=new GeometryScanBudget();var scoped=D(budget.Export(new object[0],0,true));Check(scoped["pending_query_count"]==null);Check((int)scoped["scope_pending_query_count"]==0);Check((bool)scoped["component_completion_does_not_clear_siblings"]);
  var unfiltered=D(budget.Export(new object[0],2));Check((int)unfiltered["pending_query_count"]==2);
- foreach(bool matches in new[]{false,true}){var e=ResetPoseEvidence.CachedDeviation(new Dictionary<string,object>{{"within_pose_tolerance",matches},{"maximum_translation_m",matches?0:.4},{"checked_component_count",15}});var d=D(e);Check(!d.ContainsKey("within_pose_tolerance"));Check((bool)d["cached_memory_matches_reopened_file"]==matches);Check(ResetPoseEvidence.WarningCodes(e).Length==(matches?0:1));Check((string)d["comparison"]=="post_save_cached_memory_vs_reopened_saved_live_document");}
+ foreach(bool matches in new[]{false,true}){var e=ResetPoseEvidence.CachedDeviation(new Dictionary<string,object>{{"within_pose_tolerance",matches},{"maximum_translation_m",matches?0:.4},{"checked_component_count",15}});var d=D(e);Check(!d.ContainsKey("within_pose_tolerance"));Check((bool)d["cached_memory_matches_reopened_file"]==matches);Check(ResetPoseEvidence.WarningCodes(e).Length==(matches?0:1));Check((string)d["comparison"]=="post_save_cached_memory_vs_reopened_saved_live_document");Check(Convert.ToDouble(d["comparison_translation_tolerance_m"])==PoseValidation.TranslationToleranceM);Check(Convert.ToDouble(d["comparison_rotation_tolerance_rad"])==PoseValidation.RotationToleranceRad);Check(((string)d["subsequent_baseline_policy"]).Contains("not_superseded_cached_memory"));}
  Check(!NativeOutputGridPolicy.Allows(.1,30));Check(!NativeOutputGridPolicy.Allows(.3,30));Check(NativeOutputGridPolicy.Allows(.1,100));Check(NativeOutputGridPolicy.Allows(1.0/3,30));Check(NativeOutputGridPolicy.Allows(.5,30));Check(NativeOutputGridPolicy.Allows(.1,120));
  Console.WriteLine(count);return 0;}catch(Exception e){Console.Error.WriteLine(e);return 1;}}
 }
@@ -38,7 +38,7 @@ class Checks {
     compiler = Path(os.environ['WINDIR'])/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
     exe = folder/'Checks.exe'
     subprocess.run([str(compiler), '/nologo', '/reference:System.Web.Extensions.dll', '/out:'+str(exe)] +
-                   [str(ROOT/'executor'/n) for n in ('GeometryQueryScope.cs', 'GeometryScanBudget.cs', 'ResetPoseEvidence.cs', 'NativeOutputGridPolicy.cs')] + [str(source)], check=True)
+                   [str(ROOT/'executor'/n) for n in ('GeometryQueryScope.cs', 'GeometryScanBudget.cs', 'ResetPoseEvidence.cs', 'PoseValidation.cs', 'NativeOutputGridPolicy.cs')] + [str(source)], check=True)
     count = int(subprocess.check_output([str(exe)], text=True).strip())
     result = {'all_passed': True, 'checks': count, 'cad_connection_used': False}
     (folder/'result.json').write_text(json.dumps(result), encoding='utf-8')

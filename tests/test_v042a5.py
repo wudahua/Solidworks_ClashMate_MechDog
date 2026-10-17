@@ -27,8 +27,9 @@ class QueryAndDiagnosticsTests(unittest.TestCase):
                 motion_server.verify_motion_preservation("none", "test", "c", "e", "rotary", 1, duration_s=.1),
                 motion_server.preflight_motion("none", "test", compatibility_probe=True, probe_duration_s=.1),
             ):
-                with self.assertRaisesRegex(ValueError, "OUTPUT_GRID_TOO_SPARSE"):
-                    asyncio.run(call)
+                response = asyncio.run(call)
+                self.assertTrue(response.is_error)
+                self.assertEqual(response.structured_content["error"]["code"], "OUTPUT_GRID_TOO_SPARSE_FOR_NATIVE_ADAPTER")
             enqueue.assert_not_called()
 
     def test_scoped_summary_retains_unknown_model_and_parent_queue_contract(self):
