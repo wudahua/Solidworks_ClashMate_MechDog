@@ -36,17 +36,23 @@ def _summary(value, depth=0, key=""):
     return value
 
 
-def failure_chain(value, path="", rows=None):
+def failure_chain(value, path="", rows=None, seen=None):
     """Bounded error pointers, never infer a mechanical cause from names."""
     rows = [] if rows is None else rows
+    seen = set() if seen is None else seen
     if isinstance(value, dict):
         if isinstance(value.get("code"), str):
-            rows.append({"code": value["code"][:120], "path": path,
-                         "message": str(value.get("message", ""))[:240],
-                         "stage": value.get("stage", value.get("details", {}).get("stage") if isinstance(value.get("details"), dict) else None)})
+            # Deduplicate only identical error subtrees, never merely the same
+            # code/message from distinct operations. Canonical /error is visited first.
+            identity = encoded(value)
+            if identity not in seen:
+                seen.add(identity)
+                rows.append({"code": value["code"][:120], "path": path,
+                             "message": str(value.get("message", ""))[:240],
+                             "stage": value.get("stage", value.get("details", {}).get("stage") if isinstance(value.get("details"), dict) else None)})
         for k in ("error", "diagnostics", "details", "original_failure", "failure", "worker", "cause_details", "original_details", "late_response", "response"):
             if k in value and len(rows) < 12:
-                failure_chain(value[k], path + "/" + k, rows)
+                failure_chain(value[k], path + "/" + k, rows, seen)
     return rows
 
 
@@ -70,7 +76,7 @@ def bound(root: Path, job: dict):
                   summary_omits_details=True)
     query = job.get("result", {})
     if isinstance(query, dict) and "next_cursor" in query:
-        result["query_controls"] = {k: query[k] for k in ("next_cursor", "geometry_scan", "geometry_complete", "total_scope", "warning_codes", "query_completion_status", "client_next_action", "absence_of_kind_proven") if k in query}
+        result["query_controls"] = {k: query[k] for k in ("next_cursor", "geometry_scan", "geometry_complete", "scope_geometry_complete", "model_geometry_complete", "query_scope", "model_scan_state", "client_queue_contract", "total_scope", "warning_codes", "query_completion_status", "client_next_action", "absence_of_kind_proven") if k in query}
     chain = failure_chain(job)
     if chain:
         result["failure_chain"] = chain

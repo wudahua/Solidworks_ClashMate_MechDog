@@ -88,7 +88,7 @@ class ProbePublicTests(unittest.IsolatedAsyncioTestCase):
     async def test_explicit_probe_enqueues_bounded_copy_operation(self):
         import motion_server
         with patch.object(motion_server,'enqueue',return_value={'job_id':'test'}) as job:
-            await motion_server.preflight_motion('user_'+'a'*32,'Study',True,.1,30)
+            await motion_server.preflight_motion('user_'+'a'*32,'Study',True,.1,100)
         self.assertEqual(job.call_args.args[0],'probe_motion_compatibility');self.assertEqual(job.call_args.args[1]['duration_s'],.1)
     async def test_unsupported_probe_budget_never_queues(self):
         import motion_server

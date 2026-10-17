@@ -2,13 +2,13 @@
 
 SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.2-alpha.4`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.2-alpha.5`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.2-alpha.4.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.2-alpha.5.md)。
 
 本版本保留另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
 
-本版核对五份 v0.4.2-alpha.3 反馈，修订就地归零姿态、诊断根因和控制令牌、参考续查指引及原生性能观测；完整恢复证明与当前输入严格校验继续保留。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
+本版核对三份 v0.4.2-alpha.4 反馈，修订组件续查范围、缓存姿态差异处置与短网格准入，保留前版归零和诊断改进；完整恢复证明与当前输入严格校验继续保留。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
 
 - `apply_mate`、`create_motion_study`、`convert_motion_study`、`create_model_checkpoint` 和 `reset_study_time` 默认返回 `job_id`；用 `get_job` 轮询，确认 `succeeded` 后使用 `result`。`wait_for_completion=True` 保留同步方式，显式重算归零仍返回任务。默认归零任务不会自动获得计算许可，须明确 `allow_recalculate=True`。
 - 上述写操作执行器等待预算为 600 秒；这不是完成时间保证，也不能替代 MCP 客户端自身的等待限制。超时后保留原任务状态，用 `get_job` 查看 `late_response`，或用 `get_recovery_state(request_id=...)` 读取最终原始响应；无响应仍保持未知，不重复写入。`idle` 只说明请求已结束，配合是否应用看原响应与原生参数。
@@ -37,11 +37,20 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 
 
 
+## v0.4.2-alpha.5 本轮修订
+
+- 两种几何查询明确区分局部和模型范围。限定组件时 `scope_geometry_complete` 只表示本次组件/face_offset扫描完成，`geometry_complete=false`、`model_geometry_complete=null`；`geometry_scan.pending_query_count=null`，局部待办看 `scope_pending_query_count`。服务没有模型待办台账，客户端必须保留父查询队列，只替换刚处理的任务，不能清空兄弟组件。读完各任务游标和子续查、且没有未解析范围，才可自行汇总完成；状态变化后重新开始。
+- 就地归零提升 `cached_memory_pose_deviation` 与告警到顶层；它比较保存后缓存与重开文档，不能与操作前/后比较混用。检查点证明后再次核验当前文档与重开姿态，一致才提交；不一致回滚。缓存被重开状态替代不证明通用机械零位。
+- 当前SW2026适配要求 `duration_s × output_fps >= 10`（至少11帧）。0.1秒/30fps在派发前拒绝，明确给出0.1秒/100fps或1/3秒/30fps等可选参数，不自动改参。这是本MCP实测准入，**不是SolidWorks统一126帧下限**。实际原生设置、时间轴和速度继续严格校验。
+- 创建时给出马达特征持久身份观测与不可用告警，区分面引用/恒速参数核对和马达身份；完整独立算例马达清单仍未证明。
+- 相同错误子树去重并优先 `/error` 路径；不同错误不按代码或名称合并。增加等待阶段耗时、统一无效组件指引、几何等价键与实体身份说明。
+- 离线策略统一入口：`python tests/run_offline_policies.py`。逐套件输出检查数，历史重叠计入执行总数，不据测试数推断机构覆盖率。
+
 ## v0.4.2-alpha.4 本轮修订
 
 - `get_job` 大响应保留 `failure_chain` / `root_cause_code` / `root_cause_path`，`root_cause_read` 直接指向原始错误对象。可传 `response_artifact_id` 和 `response_json_pointer`（RFC6901，如 `/error/diagnostics/details/original_failure`）读取子树；`offset` 是该子树的 Unicode 字符位置，`limit` 为1–2000。哈希校验仍覆盖完整原文。
 - 分页控制令牌不再按展示文本截断。配合参考游标用短哈希绑定完整观测集合；摘要的 `query_controls` 保留游标和几何续查指引。模型或扫描集合变化仍拒绝旧游标。
-- **两种参考查询必须完成续查**：`geometry_complete=false` 或 `pending_query_count>0` 时，缺少圆柱面不证明模型没有圆柱面。先读完 `next_cursor` 的当前观测页，再按 `geometry_scan.next_queries` 的组件和 `face_offset` 续查、按 `entity_id` 去重。若 `next_queries_truncated=true`，通过 `inspect_model(detail_level="components")` 取得其余组件逐一查询；编辑后从0重查。虚拟零件不等于无几何，不能仅凭虚拟状态跳过。
+- **两种参考查询必须完成续查**：`geometry_complete=false` 或无过滤查询的 `pending_query_count>0` 时，缺少圆柱面不证明模型没有圆柱面。先读完 `next_cursor` 的当前观测页，再保留父队列，按 `geometry_scan.next_queries` 的组件和 `face_offset` 续查、按 `entity_id` 去重；单组件完成仅处理该任务，不清空兄弟待办。若 `next_queries_truncated=true`，通过 `inspect_model(detail_level="components")` 取得其余组件逐一查询；编辑后从0重查。虚拟零件不等于无几何，不能仅凭虚拟状态跳过。
 - 就地归零始终显式选帧，显式允许计算时对非零算例执行预算内缓存重算（已为0时不强制计算高帧率缓存）；全部姿态必须通过独立检查点重开证明。新分支增加末帧→零帧选择，保持最终时长/帧率。稳定和可重开证明不能单独等同独立运动学零位，仍逐组件验收。
 - 配合添加前健康重建改读原生错误，避免为健康检查展开全部面的几何；仅同心配合读取锁旋转定义。完整检查点证明逐次保留，不使用弱哈希或跨写入复用。
 - 采样审计增加逐帧选时、组件清单/抑制/名称/变换/数组读取耗时及明确范围的调用计数。原采样逐帧身份检查、全部姿态、原生时间轴与恢复标准保持；未证明跨机变慢由版本引起，不承诺固定速度。
@@ -51,7 +60,7 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 若 PowerShell 执行策略阻止外层脚本，可直接使用基础 Python，不修改系统策略：
 
 ```powershell
-C:\Python312\python.exe scripts/upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2-alpha.4_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
+C:\Python312\python.exe scripts/upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2-alpha.5_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
 ```
 
 DryRun通过后使用同样参数去掉 `--dry-run`。`--python` 必须指基础Python；安装目录优先显式参数、`SW_INSTALL_DIR`，否则读取运行进程模块路径及供应商/COM注册表并验证Interop DLL；多个有效安装须显式选择，不自动选版本。发现结果传递给编译器。无法发现时才回落标准目录，缺失仍拒绝。
@@ -162,7 +171,7 @@ DryRun通过后使用同样参数去掉 `--dry-run`。`--python` 必须指基础
 先停用旧安装目录的MCP服务，保留SolidWorks打开；从新包目录调用：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2-alpha.4_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2-alpha.5_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
 # PythonPath填写基础Python；非默认SolidWorks安装请同时指定-SolidWorksInstallDir。
 # 预检通过后移除-DryRun；未来网络及编译仍可能失败，保留自动回滚。
 ```

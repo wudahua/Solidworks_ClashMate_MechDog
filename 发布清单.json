@@ -1,5 +1,5 @@
 {
-  "version": "0.4.2-alpha.4",
+  "version": "0.4.2-alpha.5",
   "kind": "source_only",
   "text_line_endings": "LF",
   "includes_user_cad": false,
@@ -8,13 +8,13 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 69838,
-      "sha256": "7ab7c96c115e6ff7a54a65d5a43aa9f31a847cde0dfe283618522bde5be043a7"
+      "bytes": 71671,
+      "sha256": "a64ba7790b8facffab836c289a65e228b83c0178b9a4d3a513c27f7608a2f3ed"
     },
     {
-      "path": "发布说明_v0.4.2-alpha.4.md",
-      "bytes": 7257,
-      "sha256": "5f5eb90fa1173fee49a98ece18d9ff41ed973322e325fd05420644d4e0e83a68"
+      "path": "发布说明_v0.4.2-alpha.5.md",
+      "bytes": 4764,
+      "sha256": "68e34fcb9599fec0ab220a5c6dc15a6aa3e488b3ed36c5679c9dde526cfd5b75"
     },
     {
       "path": "LICENSE",
@@ -48,8 +48,8 @@
     },
     {
       "path": "motion_server.py",
-      "bytes": 28852,
-      "sha256": "aeae1b14c43feb5054f1059ae2277649b2b04334e575244750defa9c1b7b4506"
+      "bytes": 29399,
+      "sha256": "3f42922b9587b7d5ec05deb64b1b86f5143ec851f27d48c8ccff431d81359fa8"
     },
     {
       "path": "mcp-config.example.json",
@@ -88,8 +88,8 @@
     },
     {
       "path": "executor/Advanced.cs",
-      "bytes": 17173,
-      "sha256": "1538519376d30c57e49ddf2feb5c6502c9eef6d57207f687d298ebfb1101ca22"
+      "bytes": 17430,
+      "sha256": "60a681bec9c5413af922499d480f346ec4bbd4efa8c470eadd204a39b3039e74"
     },
     {
       "path": "executor/AtomicMetadata.cs",
@@ -98,8 +98,8 @@
     },
     {
       "path": "executor/BasicMates.cs",
-      "bytes": 41695,
-      "sha256": "49668ef4d910b7a7b992e3265922135f07eda780a723d285769388e19e5017a0"
+      "bytes": 42332,
+      "sha256": "75590004cacf905df2ac30c70223ad0287623dc022c04b8a65683e2174291060"
     },
     {
       "path": "executor/Cad.cs",
@@ -138,8 +138,8 @@
     },
     {
       "path": "executor/CompatibilityProbe.cs",
-      "bytes": 10905,
-      "sha256": "bb3f97f72cce11207696d044d8e7791246e4b62c845c8aa83fa518a51f60d90b"
+      "bytes": 10952,
+      "sha256": "eea5cd45a796a82fc408468ae995da0e41327edd5384aa3df3556a020775d07d"
     },
     {
       "path": "executor/ComponentMotionOverview.cs",
@@ -148,8 +148,8 @@
     },
     {
       "path": "executor/DriveCandidates.cs",
-      "bytes": 9630,
-      "sha256": "9005200536410fde001921c42ba1527a4b4d9a3d46d05b0b7e94e7667246cefa"
+      "bytes": 10540,
+      "sha256": "4543d8cb49a30523b26e6c8c6e570d2de9b6ef67ed99bc8b85d4ad941c97f072"
     },
     {
       "path": "executor/Examples.cs",
@@ -172,9 +172,14 @@
       "sha256": "df21c6c9ad498ea8c6a853b98e8544f73c7e1ac1bd5414d95b38000675f3e5f0"
     },
     {
+      "path": "executor/GeometryQueryScope.cs",
+      "bytes": 2392,
+      "sha256": "d80a9ee70229ecff4a0294eb318ac8df75dd61adc55048c795049d51a43a3500"
+    },
+    {
       "path": "executor/GeometryScanBudget.cs",
-      "bytes": 1792,
-      "sha256": "7bbb44e194374750ab1730379fdeb235df3bfb074ea9bd5a71ea92474996605b"
+      "bytes": 2246,
+      "sha256": "cfae3c16b3ebfba5811e165391fe23af87dda6c47179b940a9af85e4b74a053a"
     },
     {
       "path": "executor/HistoryObservation.cs",
@@ -223,8 +228,8 @@
     },
     {
       "path": "executor/MatePreflight.cs",
-      "bytes": 3423,
-      "sha256": "df0bc2cfeff0311e25c2d4b29acc30ee200147707d37e683365dfb4a3e74f949"
+      "bytes": 3601,
+      "sha256": "e9480bf155243a36430da6e94355c65b198b3d132828c802633ef1f0a4884606"
     },
     {
       "path": "executor/MotionBudgets.cs",
@@ -238,8 +243,8 @@
     },
     {
       "path": "executor/MotionFeatureInventory.cs",
-      "bytes": 4066,
-      "sha256": "f83e6438310e2e2a4d423c0de6e910791b60867b0ea4b39b07af42c0e730ca06"
+      "bytes": 4124,
+      "sha256": "ca7ed185e37c408aa74fb5c90de4e110097e0269f2b2a8223b411786a1011c2e"
     },
     {
       "path": "executor/MotionIntent.cs",
@@ -260,6 +265,11 @@
       "path": "executor/NativeMotorEvidence.cs",
       "bytes": 3079,
       "sha256": "74a914f84bfe9a1b60ef0f3ec4a252430fc8720cf6bdc4cccf641ac2f1038324"
+    },
+    {
+      "path": "executor/NativeOutputGridPolicy.cs",
+      "bytes": 1014,
+      "sha256": "c95c2fb0ce92a5d96adfc65aa777ff27f4c7e23d1140d77901eae7ebbaafcd20"
     },
     {
       "path": "executor/OperationTiming.cs",
@@ -312,6 +322,11 @@
       "sha256": "04fd55a7627fa330b72249eb1205280570f03b641cbdb06787cb348fe3eaad19"
     },
     {
+      "path": "executor/ResetPoseEvidence.cs",
+      "bytes": 1049,
+      "sha256": "b4f0f97debf59e799ba36867467a751191eac284be103e5aade51a7b384fefff"
+    },
+    {
       "path": "executor/Runtime.cs",
       "bytes": 40125,
       "sha256": "19b34204d5911a330dc545ad1f42dffd5b166142d39f1758932797ad20c05d2b"
@@ -343,8 +358,8 @@
     },
     {
       "path": "executor/SolverEvidence.cs",
-      "bytes": 3068,
-      "sha256": "f42cbd2b0f5bcd09bdc4a3530d613b0a7466257ec6ba8af5bea55248307d601a"
+      "bytes": 3493,
+      "sha256": "a7bb291a1c859b0f2a90266ae3d251bdd8accae2d977b783feb392de9e42284f"
     },
     {
       "path": "executor/SolverStatus.cs",
@@ -373,18 +388,18 @@
     },
     {
       "path": "executor/StudyReset.cs",
-      "bytes": 11499,
-      "sha256": "59df05ffad745964d0c9092e75420a7d45aaf0b9128eacfa1e1ae0572d49fdc6"
+      "bytes": 12860,
+      "sha256": "709dcaa852debd5601b7dd3db965768e44f883dc2c75600742be8a9a50090a3a"
     },
     {
       "path": "executor/StudyResetBranch.cs",
-      "bytes": 13916,
-      "sha256": "f72f8623a563ba43c27ac77fe73cef9360e71717bcd6b3c0334fe1b425e70901"
+      "bytes": 14084,
+      "sha256": "d9f9e768c8980d32ad420f7737999ba1c05452477fed3b03dad9382b8668fb49"
     },
     {
       "path": "executor/TimeAxis.cs",
-      "bytes": 3957,
-      "sha256": "69e412b57826365519fdbe6deb5375e688e90832af593158b0940e1f79f4bccd"
+      "bytes": 4493,
+      "sha256": "eaf124272ab1b54124028a311cff2f13d2bc49b274996b044c0100adddb0c37c"
     },
     {
       "path": "executor/UserMeasurement.cs",
@@ -393,8 +408,8 @@
     },
     {
       "path": "executor/UserMotion.cs",
-      "bytes": 63215,
-      "sha256": "96bda57fdd6a5f42c7d59833c8566798b6fb7a6759ab1de5de7aa6d948c3853c"
+      "bytes": 64260,
+      "sha256": "5d33fd50b3c17d941a48081f302bfb0e55acaabf83488635d432f2f7fc312865"
     },
     {
       "path": "executor/VirtualImport.cs",
@@ -428,13 +443,18 @@
     },
     {
       "path": "sw_mcp/job_payload.py",
-      "bytes": 8855,
-      "sha256": "6d73693e5ab74aa80ae8827edd73716b412fdc4b29c47e48c132549734081eab"
+      "bytes": 9318,
+      "sha256": "8b81303541e983442f7bf1ece80fe548fc67e4696ea90c1b9b80945f3ba5ff2b"
     },
     {
       "path": "sw_mcp/jobs.py",
-      "bytes": 9243,
-      "sha256": "6bd252436b41eb2fa12d513ad67ce6c00926f69316321eae632c85e855861c6c"
+      "bytes": 9989,
+      "sha256": "31c1590053c24f34cb7393f47209401b8f81be803427be7e7700b93f0bff4d34"
+    },
+    {
+      "path": "sw_mcp/native_grid.py",
+      "bytes": 765,
+      "sha256": "5611501595c889f990f08ff373e28c10bc8a351ba5554efd1c5b03bde7998d31"
     },
     {
       "path": "sw_mcp/replay_diagnostics.py",
@@ -473,8 +493,8 @@
     },
     {
       "path": "scripts/build_release.py",
-      "bytes": 7346,
-      "sha256": "e7a01d57504f81337c6c75d6ae7a997e1a52c5651ab3631fa737dec65c75af54"
+      "bytes": 7544,
+      "sha256": "4c7640cdb743be38827536b45a02c0e73a0fe85399b3cdbbd2e9035416d46368"
     },
     {
       "path": "scripts/verify_release.py",
@@ -668,8 +688,8 @@
     },
     {
       "path": "tests/test_alpha5.py",
-      "bytes": 9818,
-      "sha256": "2b95fe3b6f5c329a843c8e0b82dd75726a13e6cd8ee4fd2cb197755ecf79c3d3"
+      "bytes": 9819,
+      "sha256": "2a2055aa16c256974c7f73f896c7e48c85c33fe7c344fe957a75fa774b643fc4"
     },
     {
       "path": "tests/alpha5_evidence_checks.py",
@@ -718,8 +738,38 @@
     },
     {
       "path": ".github/workflows/release-validation.yml",
-      "bytes": 1149,
-      "sha256": "a44f32640d55d4a7269fe131860c87198b58d56f73111624ba04cd853cfe206f"
+      "bytes": 635,
+      "sha256": "fd4a52489e6a04da6a06ec3426b20000b00eacc9f165e0d80fa362559defa9dd"
+    },
+    {
+      "path": "tests/test_v042a5.py",
+      "bytes": 5818,
+      "sha256": "f6e61b90154901674c12f43c6f570e0b970e8d05ec561c008a6dcf67703819b4"
+    },
+    {
+      "path": "tests/v042a5_policy_checks.py",
+      "bytes": 3946,
+      "sha256": "ec8d83e780c4ba579e87822256866794c9eea65b48422ff95a35fc10103a506e"
+    },
+    {
+      "path": "tests/v042a5_short_native.py",
+      "bytes": 3154,
+      "sha256": "d2699a7a6152082b004f86d410a8ad33937261796f575a9cca3a620ef344fcc5"
+    },
+    {
+      "path": "tests/v042a5_query_native.py",
+      "bytes": 3950,
+      "sha256": "0fdcd7c5b9954e02ab8e8a45bc6165277c6575b7e639dc97272f1e6333c2451b"
+    },
+    {
+      "path": "tests/v042a5_reset_native.py",
+      "bytes": 1085,
+      "sha256": "bfefba30e980be212794baa2195dad781385a69e2fe725c3f332652396ff484a"
+    },
+    {
+      "path": "tests/run_offline_policies.py",
+      "bytes": 1707,
+      "sha256": "221e42a5345ce30b81a81a0b3a70b121aad0125e518a3a3b188ca026118ae1c1"
     },
     {
       "path": "tests/test_v042a4.py",

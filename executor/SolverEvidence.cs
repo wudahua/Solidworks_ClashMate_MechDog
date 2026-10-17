@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using SolidWorks.Interop.swmotionstudy;
 
 public partial class Cad {
+    void RequireNativeOutputGrid(double duration,int fps){if(!NativeOutputGridPolicy.Allows(duration,fps))throw new CadFault("OUTPUT_GRID_TOO_SPARSE_FOR_NATIVE_ADAPTER","当前SW2026适配器要求至少10个输出间隔（11帧）。请按诊断显式提高帧率或延长时长；不是统一126帧下限，未自动改参。",NativeOutputGridPolicy.Describe(duration,fps));}
     void ConfigureSolveSettings(IMotionStudy study,string modelId,string name,double duration,int fps) {
+        RequireNativeOutputGrid(duration,fps);
         var before=HistorySettings(study);bool active=study.IsActive,playing=study.IsPlaying;
         bool? durationAccepted=null,fpsAccepted=null;string stage="settings_read";
         try {
