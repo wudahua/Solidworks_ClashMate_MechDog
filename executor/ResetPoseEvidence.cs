@@ -14,10 +14,17 @@ public static class ResetPoseEvidence {
         result["comparison_translation_tolerance_m"]=PoseValidation.TranslationToleranceM;
         result["comparison_rotation_tolerance_rad"]=PoseValidation.RotationToleranceRad;
         result["subsequent_baseline_policy"]="use_verified_reopened_live_state_and_its_checkpoint_not_superseded_cached_memory";
+        double translation=Convert.ToDouble(difference["maximum_translation_m"])/PoseValidation.TranslationToleranceM;
+        double rotation=Convert.ToDouble(difference["maximum_rotation_rad"])/PoseValidation.RotationToleranceRad;
+        result["translation_tolerance_ratio"]=translation;result["rotation_tolerance_ratio"]=rotation;
+        result["severity"]=matches?"info":Math.Max(translation,rotation)>=1000?"high_warning":"warning";
+        result["severity_policy"]=new{high_warning_ratio=1000,scope="observation_triage_only_not_mechanical_acceptance_or_write_permission",does_not_override_final_live_or_checkpoint_proof=true};
+        result["subsequent_baseline_impact"]="superseded_cache_not_used_for_preview_pose_budget; reopened_live_baseline_requires_new_preview; clearance_interference_and_mechanical_zero_not_certified";
         return result;
     }
     public static string[] WarningCodes(object evidence){
         var d=(Dictionary<string,object>)evidence;
-        return Convert.ToBoolean(d["cached_memory_matches_reopened_file"])?new string[0]:new[]{"RESET_CACHED_MEMORY_POSE_DEVIATION_SUPERSEDED_BY_VERIFIED_REOPEN"};
+        if(Convert.ToBoolean(d["cached_memory_matches_reopened_file"]))return new string[0];
+        return (string)d["severity"]=="high_warning"?new[]{"RESET_CACHED_MEMORY_POSE_DEVIATION_SUPERSEDED_BY_VERIFIED_REOPEN","RESET_CACHED_MEMORY_POSE_DEVIATION_HIGH_MAGNITUDE"}:new[]{"RESET_CACHED_MEMORY_POSE_DEVIATION_SUPERSEDED_BY_VERIFIED_REOPEN"};
     }
 }

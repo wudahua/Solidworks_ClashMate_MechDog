@@ -20,7 +20,7 @@ public partial class Cad {
         Process owned=null;Cad cad=null;string resultPath=Path.Combine(Path.GetDirectoryName(requestPath),"worker-result.json");
         var elapsed=Stopwatch.StartNew();var phases=new List<object>();long previous=0;string previousStage="worker_initialization";
         Action<string> phase=stage=>{try{long now=elapsed.ElapsedMilliseconds;phases.Add(new{stage=stage,elapsed_ms=now,previous_stage=previousStage,previous_phase_elapsed_ms=now-previous,observed_at_utc=DateTime.UtcNow.ToString("o")});previous=now;previousStage=stage;AtomicJson(Path.Combine(Path.GetDirectoryName(resultPath),"worker-phase.json"),new{stage=stage,elapsed_ms=now,phases=phases.Take(32).ToArray(),phase_only_not_cad_completion_proof=true,completion_evidence="worker-result.json"});}catch{}};
-        object result=null;Exception failure=null,cleanup=null;int? nativeExit=null;bool ownedConnected=false;UserModel probeModel=null;
+        object result=null;Exception failure=null,cleanup=null;int? nativeExit=null;bool ownedConnected=false;UserModel probeModel=null;string failureStage=null;
         try {
             var request=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(requestPath));
             string root=Path.GetDirectoryName(Path.GetFullPath(requestPath));
@@ -62,14 +62,14 @@ public partial class Cad {
                 using(var scope=new Scope(cad,model.Path,null)){cad.InspectUserCore(model,scope.Doc);cad.SaveUserModel(model);}
                 phase("running_snapshot_study");result=cad.RunUserStudy(model.Id,(string)request["study"],Convert.ToDouble(request["duration_s"]),Convert.ToInt32(request["output_fps"]),(string)request["run_id"]);
             } else throw new Exception("INVALID_PROBE_WORKER_KIND");
-        }catch(Exception error){failure=error;}
+        }catch(Exception error){failure=error;failureStage=previousStage;}
         finally {
             phase("cleanup_owned_instance");if(cad!=null&&ownedConnected)try{var docs=(cad.Sw.GetDocuments() as object[]??new object[0]).Cast<IModelDoc2>().ToArray();
                 var titles=docs.Where(d=>probeModel!=null&&probeModel.Files.Contains(d.GetPathName(),StringComparer.OrdinalIgnoreCase)).Select(d=>d.GetTitle()).ToArray();foreach(string title in titles)try{cad.Sw.CloseDoc(title);}catch(System.Runtime.InteropServices.COMException){}
                 if((cad.Sw.GetDocuments() as object[]??new object[0]).Length!=0)throw new Exception("PROBE_UNEXPECTED_DOCUMENTS_EXIT_REFUSED");phase("exiting_owned_solidworks");cad.Sw.ExitApp();
             }catch(Exception error){cleanup=error;}
             if(owned!=null){phase("waiting_owned_process_exit");if(owned.WaitForExit(30000))nativeExit=owned.ExitCode;else cleanup=new Exception("PROBE_INSTANCE_EXIT_NOT_CONFIRMED");}
-            phase("completed");AtomicJson(resultPath,new{completed=true,phase_timings=phases.Take(32).ToArray(),elapsed_ms=elapsed.ElapsedMilliseconds,success=failure==null&&cleanup==null,managed_operation_success=failure==null&&cleanup==null,native_shutdown_status=nativeExit.HasValue?(nativeExit==0?"exited_zero":"exited_nonzero_cause_unproven"):"exit_unconfirmed",success_scope="managed_operation_and_verified_cleanup_not_native_zero_exit",result=result,failure=failure==null?null:FailureEvidence(failure),cleanup_failure=cleanup==null?null:FailureEvidence(cleanup),owned_solidworks_pid=owned==null?(int?)null:owned.Id,owned_process_exited=nativeExit.HasValue,native_exit_code=nativeExit,native_exit_code_interpretation=nativeExit==0?"zero_exit":"nonzero_observed_cause_not_proven",managed_completion_is_separate_from_native_exit=true});
+            phase("completed");AtomicJson(resultPath,new{completed=true,phase_timings=phases.Take(32).ToArray(),elapsed_ms=elapsed.ElapsedMilliseconds,success=failure==null&&cleanup==null,managed_operation_success=failure==null,cleanup_verified=cleanup==null&&nativeExit.HasValue,native_shutdown_status=nativeExit.HasValue?(nativeExit==0?"exited_zero":"exited_nonzero_cause_unproven"):"exit_unconfirmed",success_scope="managed_operation_and_verified_cleanup_not_native_zero_exit",result=result,failure=failure==null?null:FailureEvidence(failure),failure_stage=failureStage,failure_hresult=failure==null?(int?)null:failure.HResult,automatic_reconnect_or_retry=false,cleanup_failure=cleanup==null?null:FailureEvidence(cleanup),owned_solidworks_pid=owned==null?(int?)null:owned.Id,owned_process_exited=nativeExit.HasValue,native_exit_code=nativeExit,native_exit_code_process="owned_SOLIDWORKS_not_managed_worker",native_exit_code_interpretation=nativeExit==0?"zero_exit":"nonzero_observed_cause_not_proven",managed_completion_is_separate_from_native_exit=true});
         }
         return failure==null&&cleanup==null?0:1;
     }
@@ -88,7 +88,7 @@ public partial class Cad {
             }
             File.WriteAllText(Path.Combine(folder,"worker-stdout.log"),stdout.Result);File.WriteAllText(Path.Combine(folder,"worker-stderr.log"),stderr.Result);
             hostTiming.Start("read_worker_completion");string result=Path.Combine(folder,"worker-result.json");if(!File.Exists(result))throw new CadFault("PROBE_WORKER_RESULT_MISSING","独立探测未留下完成证据；未添加配合。",new{worker_pid=worker.Id,worker_exit=worker.ExitCode,evidence_directory=folder});
-            var evidence=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(result));hostTiming.Finish();evidence["host_round_trip_timings"]=hostTiming.Export();evidence["evidence_path"]=result;evidence["evidence_sha256"]=FileHash(result).Replace("-","").ToLowerInvariant();
+            var evidence=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(result));hostTiming.Finish();evidence["host_round_trip_timings"]=hostTiming.Export();string hostRecord=Path.Combine(folder,"worker-host-observation.json");AtomicJson(hostRecord,new{worker_pid=worker.Id,worker_exit_code=worker.ExitCode,worker_exit_code_process="managed_probe_helper_0_success_1_failure",child_result_path=result,child_result_sha256=FileHash(result),observed_at_utc=DateTime.UtcNow.ToString("o")});evidence["worker_host_observation_path"]=hostRecord;evidence["worker_host_observation_sha256"]=FileHash(hostRecord);evidence["worker_exit_code"]=worker.ExitCode;evidence["worker_exit_code_process"]="managed_probe_helper_0_success_1_failure";evidence["exit_code_contract"]="worker_exit_code_controls_managed_probe_outcome; native_exit_code_is_separate_owned_SOLIDWORKS_exit_observation_not_pass_fail_mapping";evidence["evidence_path"]=result;evidence["evidence_sha256"]=FileHash(result).Replace("-","").ToLowerInvariant();
             if(!Convert.ToBoolean(evidence["owned_process_exited"])||evidence["cleanup_failure"]!=null)throw new CadFault("ISOLATED_PROBE_RECOVERY_REQUIRED","临时实例退出或清理未确认；保留所有进程与证据。",new{worker=evidence,evidence_path=result});
             if(worker.ExitCode!=0||!Convert.ToBoolean(evidence["success"])) {
                 var failed=evidence["failure"] as Dictionary<string,object>;object code;
