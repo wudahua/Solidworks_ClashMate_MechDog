@@ -21,7 +21,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.2-alpha.2", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.2-alpha.3", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 
 def packed(data, error=False):
@@ -97,11 +97,13 @@ async def preflight_motion(model_id: str, study: str = "", compatibility_probe: 
 
 
 @mcp.tool()
-async def list_drive_candidates(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal"] = "", limit: int = 20, cursor: str = "", group_faces: bool = True, detail_level: Literal["full", "compact"] = "full", wait_for_completion: bool = True) -> CallToolResult:
+async def list_drive_candidates(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal"] = "", limit: int = 20, cursor: str = "", group_faces: bool = True, detail_level: Literal["full", "compact"] = "full", wait_for_completion: bool = True, face_offset: int = 0) -> CallToolResult:
     """几何驱动候选，不证明关节相容；wait_for_completion=False返回job_id，大装配先inspect_model(detail_level="components")再按component_id筛选；排除固定件并报告原因，容忍合法空体。默认分组，group_faces=False查看逐面；limit是1–50条上限，16KB字节预算可能缩页。compact省略冗余字段；改变筛选/分组/详情后重新分页。"""
     if not 1 <= limit <= 50:
         raise ToolError("limit 须在 1–50。")
-    params = dict(model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor, group_faces=group_faces, detail_level=detail_level)
+    if face_offset < 0 or (face_offset and not component_id):
+        raise ToolError("非零 face_offset 需要 component_id；修改模型后从0重新查询。")
+    params = dict(model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor, group_faces=group_faces, detail_level=detail_level, face_offset=face_offset)
     return await call("list_drive_candidates", **params) if wait_for_completion else enqueue("list_drive_candidates", params)
 
 
@@ -118,11 +120,13 @@ async def create_motion_study(model_id: str, study: str, component_id: str, enti
 
 
 @mcp.tool()
-async def list_mate_references(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal"] = "", limit: int = 20, cursor: str = "", detail_level: Literal["full", "compact"] = "full", wait_for_completion: bool = True) -> CallToolResult:
+async def list_mate_references(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal"] = "", limit: int = 20, cursor: str = "", detail_level: Literal["full", "compact"] = "full", wait_for_completion: bool = True, face_offset: int = 0) -> CallToolResult:
     """顶层配合面，包含固定支座，不支持边缘、顶点或草图段，不自动换成邻面；wait_for_completion=False异步取job_id；空体/异常报告原因，不推断缺失配合。每零件最多128面并报告截断；limit条数上限与16KB预算同时限制。compact提供较短结果，改变详情后重查第一页。"""
     if not 1 <= limit <= 50:
         raise ToolError("limit 须在1–50。")
-    params = dict(model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor, detail_level=detail_level)
+    if face_offset < 0 or (face_offset and not component_id):
+        raise ToolError("非零 face_offset 需要 component_id；修改模型后从0重新查询。")
+    params = dict(model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor, detail_level=detail_level, face_offset=face_offset)
     return await call("list_mate_references", **params) if wait_for_completion else enqueue("list_mate_references", params)
 
 
@@ -169,10 +173,10 @@ async def run_motion_study(model_id: str, study: str, duration_s: float = 1, out
 
 
 @mcp.tool()
-async def get_job(job_id: str) -> CallToolResult:
+async def get_job(job_id: str, response_artifact_id: str = "", offset: int = 0, limit: int = 2000) -> CallToolResult:
     """读取缓存状态/进度，不进入COM队列。succeeded只表示执行完成；运动是否通过看verification_status。超时后不可假定CAD已停止，恢复未确认时必须按检查点恢复。"""
     try:
-        return packed(jobs.get(job_id))
+        return packed(jobs.get(job_id, response_artifact_id, offset, limit))
     except ValueError as exc:
         raise ToolError(str(exc)) from exc
 
