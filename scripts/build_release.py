@@ -8,11 +8,11 @@ from pathlib import Path
 from verify_release import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.2-alpha.5"
+VERSION = "0.4.2-alpha.6"
 
 
 def build(candidate=False):
-    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.2-alpha.5.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
+    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.2-alpha.6.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
     sources += sorted((ROOT/"executor").glob("*.cs"))
     sources += [ROOT/"executor/build.ps1"]
     sources += sorted((ROOT/"sw_mcp").glob("*.py"))
@@ -27,6 +27,7 @@ def build(candidate=False):
     sources += [ROOT/"tests"/name for name in ("test_kulisse_feedback.py", "kulisse_evidence_checks.py", "virtual_import_native_checks.py", "kulisse_protocol_checks.py", "virtual_import_matrix_checks.py", "checkpoint_probe_native_checks.py", "test_checkpoint_preparation.py")]
     sources += [ROOT/".github/workflows/release-validation.yml"]
     sources += [ROOT/"tests"/name for name in ("test_v042a5.py", "v042a5_policy_checks.py", "v042a5_short_native.py", "v042a5_query_native.py", "v042a5_reset_native.py", "run_offline_policies.py")]
+    sources += [ROOT/"tests/test_v042a6.py", ROOT/"tests/grid_protocol_checks.py"]
     sources += [ROOT/"tests/test_v042a4.py", ROOT/"tests/v042a4_reset_native.py", ROOT/"tests/v042a4_query_native.py", ROOT/"tests/v042a4_performance_native.py"]
     sources += [ROOT/"tests/v042a3_query_native.py", ROOT/"tests/test_v042a3.py", ROOT/"tests/v042a3_reset_native.py", ROOT/"tests/v042a3_policy_checks.py"]
     sources += [ROOT/"tests/test_v042a2.py", ROOT/"tests/v042a2_snapshot_native.py", ROOT/"tests/v042a2_policy_checks.py"]

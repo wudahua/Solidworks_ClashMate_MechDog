@@ -1,5 +1,5 @@
 {
-  "version": "0.4.2-alpha.5",
+  "version": "0.4.2-alpha.6",
   "kind": "source_only",
   "text_line_endings": "LF",
   "includes_user_cad": false,
@@ -8,13 +8,13 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 71671,
-      "sha256": "a64ba7790b8facffab836c289a65e228b83c0178b9a4d3a513c27f7608a2f3ed"
+      "bytes": 73196,
+      "sha256": "d89e4e4c8e72851838b47b0d9035e354ba08734acf40aa1ccb1e5dbcbf307e0d"
     },
     {
-      "path": "发布说明_v0.4.2-alpha.5.md",
-      "bytes": 4764,
-      "sha256": "68e34fcb9599fec0ab220a5c6dc15a6aa3e488b3ed36c5679c9dde526cfd5b75"
+      "path": "发布说明_v0.4.2-alpha.6.md",
+      "bytes": 3633,
+      "sha256": "ffa53e2533f6be01fb9c9ffcac3000c5569831252fdc816d0f88b8eb4ba1d03e"
     },
     {
       "path": "LICENSE",
@@ -48,8 +48,8 @@
     },
     {
       "path": "motion_server.py",
-      "bytes": 29399,
-      "sha256": "3f42922b9587b7d5ec05deb64b1b86f5143ec851f27d48c8ccff431d81359fa8"
+      "bytes": 31658,
+      "sha256": "3c5529c41b7d827b211a1d496c7fa366ae00100885ee2ea688bab04eff12276d"
     },
     {
       "path": "mcp-config.example.json",
@@ -323,8 +323,8 @@
     },
     {
       "path": "executor/ResetPoseEvidence.cs",
-      "bytes": 1049,
-      "sha256": "b4f0f97debf59e799ba36867467a751191eac284be103e5aade51a7b384fefff"
+      "bytes": 1358,
+      "sha256": "60604878e4800963e6ee0245e3dbd591787b7ff5bb80d895f167065b3b27585e"
     },
     {
       "path": "executor/Runtime.cs",
@@ -409,7 +409,7 @@
     {
       "path": "executor/UserMotion.cs",
       "bytes": 64260,
-      "sha256": "5d33fd50b3c17d941a48081f302bfb0e55acaabf83488635d432f2f7fc312865"
+      "sha256": "1710d2833a76791fef4918e3f634805058a061743c4443831389d30afcc1be12"
     },
     {
       "path": "executor/VirtualImport.cs",
@@ -453,8 +453,8 @@
     },
     {
       "path": "sw_mcp/native_grid.py",
-      "bytes": 765,
-      "sha256": "5611501595c889f990f08ff373e28c10bc8a351ba5554efd1c5b03bde7998d31"
+      "bytes": 2413,
+      "sha256": "7b4547048c33b3774f185c59bfeb237a402b0d0b1b34a10684302e5b3610f39f"
     },
     {
       "path": "sw_mcp/replay_diagnostics.py",
@@ -493,8 +493,8 @@
     },
     {
       "path": "scripts/build_release.py",
-      "bytes": 7544,
-      "sha256": "4c7640cdb743be38827536b45a02c0e73a0fe85399b3cdbbd2e9035416d46368"
+      "bytes": 7627,
+      "sha256": "02db98c375756d1d4f05a59705610b1c2a1ea24bb3f9ab5afdd36a30743391d5"
     },
     {
       "path": "scripts/verify_release.py",
@@ -658,8 +658,8 @@
     },
     {
       "path": "tests/transport_cleanup.py",
-      "bytes": 1181,
-      "sha256": "a604c61dd9f52a87c7cba8b94bd04d31c2cb79d3b1ec2b61d5fb6a4e68d6b524"
+      "bytes": 1781,
+      "sha256": "e9b6ecd1d4077f545df1066b20a1c8519cc883e64e30b695753744a14dcd7710"
     },
     {
       "path": "tests/test_qzc_feedback.py",
@@ -743,13 +743,13 @@
     },
     {
       "path": "tests/test_v042a5.py",
-      "bytes": 5818,
-      "sha256": "f6e61b90154901674c12f43c6f570e0b970e8d05ec561c008a6dcf67703819b4"
+      "bytes": 5917,
+      "sha256": "f249848f145dd2b24e4f479727152cb76f8bf12fc849b6e1d6def9fd1ef010db"
     },
     {
       "path": "tests/v042a5_policy_checks.py",
-      "bytes": 3946,
-      "sha256": "ec8d83e780c4ba579e87822256866794c9eea65b48422ff95a35fc10103a506e"
+      "bytes": 4261,
+      "sha256": "860b0af0cab035d3f012eccdb45a7742d4daee1752ff924d30f956488bab1d73"
     },
     {
       "path": "tests/v042a5_short_native.py",
@@ -768,8 +768,18 @@
     },
     {
       "path": "tests/run_offline_policies.py",
-      "bytes": 1707,
-      "sha256": "221e42a5345ce30b81a81a0b3a70b121aad0125e518a3a3b188ca026118ae1c1"
+      "bytes": 1863,
+      "sha256": "8da51ac1ba7b0fc3267c194600092afed54d3c2914d21d50ec17c247d43dcbaa"
+    },
+    {
+      "path": "tests/test_v042a6.py",
+      "bytes": 4523,
+      "sha256": "ec709ea445709980c0971befa9fbb56e4a7dc972a6c7e5feba1f191c73fcab5a"
+    },
+    {
+      "path": "tests/grid_protocol_checks.py",
+      "bytes": 7677,
+      "sha256": "4671e7c47c96c5c1921c0f793a311537e5a2f25f31bebe3fd9ca3b248726ae6e"
     },
     {
       "path": "tests/test_v042a4.py",

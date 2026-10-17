@@ -1,5 +1,7 @@
 """Drain test-owned helpers before deleting a verified test directory."""
 import shutil
+import errno
+import time
 
 
 def drain_bridge(bridge):
@@ -23,10 +25,19 @@ def drain_bridge(bridge):
 
 
 def remove_test_root(root, base):
-    root.resolve().relative_to(base.resolve())
-    if root.is_symlink() or root.resolve() == base.resolve():
-        raise RuntimeError(f"Unsafe cleanup target: {root}")
-    try:
-        shutil.rmtree(root)
-    except BaseException as error:
-        raise RuntimeError(f"Test cleanup failed; preserved {root}") from error
+    for attempt in range(3):
+        # Recheck resolved boundaries before every recursive deletion attempt.
+        root.resolve().relative_to(base.resolve())
+        if root.is_symlink() or (hasattr(root, 'is_junction') and root.is_junction()) or root.resolve() == base.resolve():
+            raise RuntimeError(f"Unsafe cleanup target: {root}")
+        try:
+            shutil.rmtree(root)
+            return
+        except OSError as error:
+            transient = (isinstance(error, PermissionError) or
+                         error.errno in (errno.EACCES, errno.EBUSY, errno.ETXTBSY) or
+                         getattr(error, 'winerror', None) in (5, 32, 33))
+            if transient and attempt < 2:
+                time.sleep((.05, .15)[attempt])
+                continue
+            raise RuntimeError(f"Test cleanup failed after {attempt + 1} attempt(s); preserved {root}") from error

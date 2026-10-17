@@ -14,7 +14,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
 from sw_mcp.bridge import Bridge, CadError
 from sw_mcp.jobs import Jobs
-from sw_mcp.native_grid import require_grid
+from sw_mcp.native_grid import GridAdmissionError, require_grid
 from sw_mcp.artifacts import Artifacts, ArtifactError
 
 ROOT = Path(__file__).resolve().parent
@@ -22,11 +22,25 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.2-alpha.5", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = MCPServer("SolidWorks ClashMate MechDog", version="0.4.2-alpha.6", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 
 def packed(data, error=False):
     return CallToolResult(content=[TextContent(type="text", text=json.dumps(data, ensure_ascii=False))], structured_content=data, is_error=error)
+
+
+def grid_refusal(tool, arguments, duration_key="duration_s", fps_key="output_fps"):
+    """Convert expected policy errors before the SDK masks ordinary exceptions."""
+    try:
+        require_grid(arguments[duration_key], arguments[fps_key])
+    except GridAdmissionError as exc:
+        options = [{"tool": tool, "arguments": {**arguments, duration_key: d, fps_key: f}}
+                   for d, f in exc.alternatives]
+        return packed({"ok": False, "error": {"code": exc.code, "message": str(exc),
+            "diagnostics": {**exc.diagnostics, "model_id": arguments["model_id"]},
+            "next_action": {"automatic_retry": False,
+                "instruction": "请用户选择调整参数；保留原目标与其余参数，不自动创建或求解。", "options": options}}}, True)
+    return None
 
 
 async def call(operation, **params):
@@ -87,11 +101,13 @@ async def list_motion_studies(model_id: str, inspect_native_drives: bool = False
 
 @mcp.tool()
 async def preflight_motion(model_id: str, study: str = "", compatibility_probe: bool = False, probe_duration_s: float = 1.0, probe_output_fps: int = 30, checkpoint_id: str = "") -> CallToolResult:
-    """基础预检不保证求解相容。显式compatibility_probe异步短算，默认1秒；显式最多5秒601帧；推荐传create_model_checkpoint返回的checkpoint_id，在独立SolidWorks实例验证该快照，不能证明当前未保存内存。原副本不隐式保存；用get_job读取结果。"""
+    """基础预检不保证求解相容。探测至少10个输出间隔（11帧），短网格返回OUTPUT_GRID_TOO_SPARSE_FOR_NATIVE_ADAPTER及next_action.options，不自动改参。显式compatibility_probe异步短算，默认1秒；显式最多5秒601帧；推荐传create_model_checkpoint返回的checkpoint_id，在独立SolidWorks实例验证该快照，不能证明当前未保存内存。原副本不隐式保存；用get_job读取结果。"""
     if compatibility_probe:
         if not study or not 0 < probe_duration_s <= 5 or not 5 <= probe_output_fps <= 120 or abs(probe_duration_s * probe_output_fps - round(probe_duration_s * probe_output_fps)) > 1e-8:
             raise ToolError("指定算例和探测预算（默认1秒，显式最多5秒、601帧，时长乘fps须为整数）。")
-        require_grid(probe_duration_s, probe_output_fps)
+        refusal = grid_refusal("preflight_motion", dict(model_id=model_id, study=study, compatibility_probe=True, probe_duration_s=probe_duration_s, probe_output_fps=probe_output_fps, checkpoint_id=checkpoint_id), "probe_duration_s", "probe_output_fps")
+        if refusal is not None:
+            return refusal
         return enqueue("probe_motion_compatibility", {"model_id": model_id, "study": study, "duration_s": probe_duration_s, "output_fps": probe_output_fps, "checkpoint_id": checkpoint_id})
     if checkpoint_id:
         raise ToolError("checkpoint_id 仅用于 compatibility_probe=True 的快照探测。")
@@ -111,14 +127,16 @@ async def list_drive_candidates(model_id: str, component_id: str = "", kind: Lit
 
 @mcp.tool()
 async def create_motion_study(model_id: str, study: str, component_id: str, entity_id: str, motor_type: Literal["rotary", "linear"], speed: float, reverse_direction: bool = False, reference_component_id: str = "", duration_s: float = 1, output_fps: int = 30, wait_for_completion: bool = False) -> CallToolResult:
-    """新建算例与单一恒速马达，默认异步job_id，用get_job查询；wait_for_completion=True兼容同步。study须为新名称，不向已有算例追加。时长/fps可选默认1s/30fps；当前适配至少10个输出间隔，0.1s须≥100fps。rotary选圆柱轴、rpm；linear选平面法向、mm/s。reference_component_id指定相对参考零件。创建不证明驱动相容，先建立检查点。"""
+    """新建算例与单一恒速马达，默认异步job_id，用get_job查询；wait_for_completion=True兼容同步。study须为新名称，不向已有算例追加。时长/fps可选默认1s/30fps；当前适配至少10个输出间隔，0.1s须≥100fps；不足时返回OUTPUT_GRID_TOO_SPARSE_FOR_NATIVE_ADAPTER及next_action.options，不自动改参。rotary选圆柱轴、rpm；linear选平面法向、mm/s。reference_component_id指定相对参考零件。创建不证明驱动相容，先建立检查点。"""
     limit = 6000 if motor_type == "rotary" else 500
     if not math.isfinite(speed) or not 0 < speed <= limit:
         raise ToolError(f"速度须为有限正数，最大 {limit}。")
     if not math.isfinite(duration_s) or not 0 < duration_s <= 30 or not 5 <= output_fps <= 120 or abs(duration_s*output_fps-round(duration_s*output_fps)) > 1e-8 or round(duration_s*output_fps)+1 > 1801:
         raise ToolError("创建时长须在(0,30]秒、帧率5–120并对齐输出帧，最多1801帧。")
-    require_grid(duration_s, output_fps)
     params = dict(model_id=model_id, study=study, component_id=component_id, entity_id=entity_id, motor_type=motor_type, speed=speed, reverse_direction=reverse_direction, reference_component_id=reference_component_id, duration_s=duration_s, output_fps=output_fps)
+    refusal = grid_refusal("create_motion_study", {**params, "wait_for_completion": wait_for_completion})
+    if refusal is not None:
+        return refusal
     return await call("create_motion_study", **params) if wait_for_completion else enqueue("create_motion_study", params)
 
 
@@ -148,18 +166,23 @@ async def apply_mate(plan_id: str, confirmed: bool = False, wait_for_completion:
     """用户确认具体方案后异步执行，返回job_id并轮询get_job；wait_for_completion=True兼容同步。默认方案预算1mm/1度，装配对齐等较大移动需在preview_mate显式选择maximum_translation_mm/maximum_rotation_deg后确认。建检查点、独立恢复预演、建配合并重建，超预算回滚后给retry_guidance；启动/插件开销不保证固定耗时。超时不重试写入，查询迟到最终响应；成功后另验运动。"""
     if not confirmed:
         raise ToolError("须由用户明确确认配合方案后传入confirmed=True。")
+    if re.fullmatch(r"[0-9a-f]{32}", plan_id) is None:
+        return packed({"ok": False, "error": {"code": "INVALID_MATE_PLAN_ID", "message": "配合方案标识须为32位小写十六进制；请先调用preview_mate并确认返回的具体方案。", "diagnostics": {"cad_dispatched": False, "job_created": False}, "next_action": {"tool": "preview_mate", "automatic_retry": False}}}, True)
     return await call("apply_mate", plan_id=plan_id, confirmed=confirmed) if wait_for_completion else enqueue("apply_mate", {"plan_id": plan_id, "confirmed": confirmed})
 
 
 @mcp.tool()
 async def verify_motion_preservation(model_id: str, study: str, component_id: str, entity_id: str, expected_motion: Literal["rotary", "linear"], minimum_travel: float, duration_s: float = 1, output_fps: int = 30, plan_id: str = "", reference_component_id: str = "") -> CallToolResult:
-    """显式异步试算声明的运动要求（最低量deg/mm），不是所有DOF证明。linear要求参考系中的直线平动；摆动液压杆须指定reference_component_id为缸体。返回verification_status=pass/fail/inconclusive，job succeeded只表示执行完成。指定已应用plan_id可比较基线并返回配合前检查点；独立验证返回试算前检查点。失败不自动删除新增配合。"""
+    """显式异步试算声明的运动要求（最低量deg/mm），至少10个输出间隔（11帧），短网格返回OUTPUT_GRID_TOO_SPARSE_FOR_NATIVE_ADAPTER及next_action.options，不自动改参；不是所有DOF证明。linear要求参考系中的直线平动；摆动液压杆须指定reference_component_id为缸体。返回verification_status=pass/fail/inconclusive，job succeeded只表示执行完成。指定已应用plan_id可比较基线并返回配合前检查点；独立验证返回试算前检查点。失败不自动删除新增配合。"""
     if not math.isfinite(minimum_travel) or minimum_travel <= 0:
         raise ToolError("minimum_travel须为有限正数，旋转单位deg、直线单位mm。")
     if not math.isfinite(duration_s) or not 0 < duration_s <= 5 or not 5 <= output_fps <= 120 or abs(duration_s*output_fps-round(duration_s*output_fps)) > 1e-8 or round(duration_s*output_fps)+1 > 601:
         raise ToolError("验证时长须在(0,5]秒、帧率5–120并对齐输出帧，最多601帧。")
-    require_grid(duration_s, output_fps)
-    return enqueue("verify_motion_preservation", {"model_id": model_id, "study": study, "component_id": component_id, "entity_id": entity_id, "expected_motion": expected_motion, "minimum_travel": minimum_travel, "duration_s": duration_s, "output_fps": output_fps, "plan_id": plan_id, "reference_component_id": reference_component_id})
+    params = dict(model_id=model_id, study=study, component_id=component_id, entity_id=entity_id, expected_motion=expected_motion, minimum_travel=minimum_travel, duration_s=duration_s, output_fps=output_fps, plan_id=plan_id, reference_component_id=reference_component_id)
+    refusal = grid_refusal("verify_motion_preservation", params)
+    if refusal is not None:
+        return refusal
+    return enqueue("verify_motion_preservation", params)
 
 
 @mcp.tool()
@@ -170,11 +193,14 @@ async def convert_motion_study(model_id: str, study: str, wait_for_completion: b
 
 @mcp.tool()
 async def run_motion_study(model_id: str, study: str, duration_s: float = 1, output_fps: int = 30) -> CallToolResult:
-    """异步求解 Motion Analysis。最多30秒、1801帧、10万组件姿态；验证实际时间轴，核对新建驱动速度并恢复姿态。"""
+    """异步求解 Motion Analysis。至少10个输出间隔（11帧），短网格返回OUTPUT_GRID_TOO_SPARSE_FOR_NATIVE_ADAPTER及next_action.options，不自动改参。最多30秒、1801帧、10万组件姿态；验证实际时间轴，核对新建驱动速度并恢复姿态。"""
     if not math.isfinite(duration_s) or not 0 < duration_s <= 30 or not 5 <= output_fps <= 120 or abs(duration_s*output_fps-round(duration_s*output_fps)) > 1e-8 or round(duration_s*output_fps)+1 > 1801:
         raise ToolError("时长须在 (0,30] 秒、帧率5–120并对齐输出帧，总帧数不超过1801。")
-    require_grid(duration_s, output_fps)
-    return enqueue("run_user_study", {"model_id": model_id, "study": study, "duration_s": duration_s, "output_fps": output_fps})
+    params = dict(model_id=model_id, study=study, duration_s=duration_s, output_fps=output_fps)
+    refusal = grid_refusal("run_motion_study", params)
+    if refusal is not None:
+        return refusal
+    return enqueue("run_user_study", params)
 
 
 @mcp.tool()
