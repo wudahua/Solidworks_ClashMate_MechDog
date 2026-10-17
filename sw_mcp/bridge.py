@@ -515,6 +515,14 @@ class Bridge:
                                "model_id": model_id,
                                "executor_pid": self._process.pid, "solidworks_pid": self._startup.result().get("process_id"),
                                "recovering": recovering, "previous_state": state if recovering else None})
+                job_id = params.get("job_id")
+                if isinstance(job_id, str) and re.fullmatch(r"[a-f0-9]{32}", job_id):
+                    directory = self.root / "runs/jobs"
+                    directory.mkdir(parents=True, exist_ok=True)
+                    mapping = directory / (job_id + ".request.json")
+                    temporary = mapping.with_suffix(".tmp")
+                    temporary.write_text(json.dumps({"job_id": job_id, "request_id": request_id, "operation": operation}), encoding="utf-8")
+                    temporary.replace(mapping)
                 self._process.stdin.write(wire)
                 self._process.stdin.flush()
                 deadline = self._wait_budget(operation, params)
