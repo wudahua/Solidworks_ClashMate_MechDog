@@ -153,7 +153,18 @@ class Jobs:
                 job["progress"] = value
         except (OSError, ValueError):
             pass
-        job["service_observed_at"] = time.time()
+        observed_at = time.time()
+        if isinstance(job.get("progress"), dict):
+            progress = job["progress"]
+            end = job.get("finished_at", observed_at)
+            start = job.get("started_at", job.get("created_at", end))
+            progress["elapsed_s"] = max(0.0, end - start)
+            stage_start = progress.get("stage_started_at", progress.get("updated_at"))
+            if isinstance(stage_start, (int, float)):
+                progress["current_stage_elapsed_ms"] = max(0.0, (end - stage_start) * 1000)
+            progress["elapsed_scope"] = "service_wall_clock_since_start_stage_since_last_native_stage_observation_not_completion_proof"
+            progress["fraction_known"] = bool(progress.get("total", 0))
+        job["service_observed_at"] = observed_at
         job["service_observation_is_native_progress"] = False
         if "verification_passed" not in job:
             job.update(verification_fields(job["operation"], job.get("result"), job.get("error")))
