@@ -54,12 +54,12 @@ public partial class Cad {
             stage="select_zero_and_save";WorkerPhase("reset_select_zero_and_save");Dictionary<string,double[]> previous=null;bool stable=false;
             // Always reselect zero, even if the clock already reads zero. Save can flush a pending pose update.
             for(int attempt=0;attempt<4;attempt++) {
-                study.Stop();Application.DoEvents();bool selected=study.SetTime(0);Application.DoEvents();study.Stop();
+                study.Stop();Application.DoEvents();bool endSelected=study.SetTime(initial.duration_s);Application.DoEvents();study.Stop();bool selected=study.SetTime(0);Application.DoEvents();study.Stop();
                 SaveOwnedDocuments(branch);Save(scope.Doc,branch.Path);Application.DoEvents();
                 study=(IMotionStudy)((IMotionStudyManager)scope.Doc.Extension.GetMotionStudyManager()).GetMotionStudy(studyName);
                 var current=Transforms(scope.Doc);var state=StudyStates(scope.Doc).Single(v=>v.name==studyName);
                 stable=previous!=null&&ResetPosesMatch(previous,current);
-                trace.Add(new{stage=stage,attempt=attempt,native_set_time_return=selected,actual=state,playing=study.IsPlaying,pose_stable_after_save=stable,pose_change=previous==null?null:PoseChange(previous,current)});
+                trace.Add(new{stage=stage,attempt=attempt,native_end_frame_return=endSelected,native_set_time_return=selected,actual=state,playing=study.IsPlaying,pose_stable_after_save=stable,pose_change=previous==null?null:PoseChange(previous,current)});
                 if(Math.Abs(state.time_s)>1e-8||study.IsPlaying||state.fps!=fps||Math.Abs(state.duration_s-initial.duration_s)>1e-8||state.type!=initial.type)throw new CadFault("STUDY_RESET_UNVERIFIED","新副本归零的时钟、播放状态或设置未通过。",new{stage=stage,expected_type=initial.type,expected_duration_s=initial.duration_s,expected_fps=fps,actual=state,playing=study.IsPlaying,native_steps=trace});
                 previous=current;if(stable)break;
             }

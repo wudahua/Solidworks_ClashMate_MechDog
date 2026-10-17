@@ -27,12 +27,13 @@ public partial class Cad {
         if(actual.Length!=expected.Length)throw new Exception("CHECKPOINT_STUDY_SET_MISMATCH");
         foreach(var state in expected){var s=actual.SingleOrDefault(v=>v.name==state.name);if(s==null||s.type!=state.type||s.fps!=state.fps||Math.Abs(s.duration_s-state.duration_s)>1e-8||Math.Abs(s.time_s-state.time_s)>1e-8||s.active!=state.active)throw new Exception("CHECKPOINT_SETTINGS_MISMATCH "+Json.Serialize(new{expected=state,actual=s}));}
     }
-    static void ApplyStudyStates(IModelDoc2 doc,StudyState[] states,Dictionary<string,double[]> expectedPoses=null) {
+    static void ApplyStudyStates(IModelDoc2 doc,StudyState[] states,Dictionary<string,double[]> expectedPoses=null,Action<string> phase=null) {
+        Action<string> report=phase??(s=>{});report("checkpoint_reading_study_states");
         var mgr=(IMotionStudyManager)doc.Extension.GetMotionStudyManager();bool cacheRehydrated=false;
         if(expectedPoses!=null)Log("RESTORE_BEFORE_APPLY_STATES "+Json.Serialize(new{pose_change=PoseChange(expectedPoses,Transforms(doc)),studies=StudyStates(doc)}));
         // An inactive study's clock is independent of the selected tab. Never activate every study.
         foreach(var state in states){var s=(IMotionStudy)mgr.GetMotionStudy(state.name);if(s==null)throw new Exception("CHECKPOINT_STUDY_MISSING");if(s.StudyType!=state.type)s.StudyType=state.type;if(Math.Abs(s.GetDuration()-state.duration_s)>1e-8&&!s.SetDuration(state.duration_s))throw new Exception("CHECKPOINT_SETTINGS_MISMATCH");var props=(IMotionStudyProperties)s.GetProperties(s.StudyType);if(props.GetFrameRate()!=state.fps)props.SetFrameRate(state.fps);if(!state.active&&Math.Abs(s.GetTime()-state.time_s)>1e-8 ){bool selected=s.SetTime(state.time_s);Application.DoEvents();s.Stop();if(Math.Abs(s.GetTime()-state.time_s)>1e-8||s.IsPlaying)throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","未激活算例时间回读不符。",new{study=state.name,set_time_return=selected,actual_time_s=s.GetTime(),expected_time_s=state.time_s,playing=s.IsPlaying});}}
-        foreach(var state in states.Where(v=>v.active)){var s=(IMotionStudy)mgr.GetMotionStudy(state.name);if(!s.IsActive&&!s.Activate())throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","算例激活失败。",new{stage="activate",study=state.name});s.Stop();
+        report("checkpoint_restoring_active_study");foreach(var state in states.Where(v=>v.active)){var s=(IMotionStudy)mgr.GetMotionStudy(state.name);if(!s.IsActive&&!s.Activate())throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","算例激活失败。",new{stage="activate",study=state.name});s.Stop();
             // Animation can report zero while displaying another tab's cached pose.
             // A new Motion Analysis at zero may instead contain the authored assembly
             // pose, which must not be replaced with a newly solved frame-zero pose.
@@ -42,11 +43,11 @@ public partial class Cad {
                 // Saved animation clocks can reopen without their calculated cache. Reconstruct
                 // only the recorded active study, with its exact original settings and a budget.
                 if(!CheckpointCachePolicy.Allows(state.type,state.active,cacheRehydrated,state.duration_s,state.fps))throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","恢复时间需要重建结果缓存，但原设置超过预算。",new{stage="rehydrate_budget",study=state});
-                cacheRehydrated=true;Log("RESTORE_REHYDRATE_ACTIVE_STUDY "+Json.Serialize(state));bool calculated=s.Calculate();s.Stop();Application.DoEvents();s.Stop();
+                report("checkpoint_rehydrating_native_cache");cacheRehydrated=true;Log("RESTORE_REHYDRATE_ACTIVE_STUDY "+Json.Serialize(state));bool calculated=s.Calculate();s.Stop();Application.DoEvents();s.Stop();
                 bool selected=s.SetTime(state.time_s);Application.DoEvents();s.Stop();if(!calculated||Math.Abs(s.GetTime()-state.time_s)>1e-8||s.IsPlaying)throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","重建缓存后仍无法恢复算例时间。",new{stage="set_time_after_rehydrate",study=state.name,calculate_return=calculated,expected_time_s=state.time_s,actual_time_s=s.GetTime()});
             }
             Application.DoEvents();s.Stop();}
-        VerifyStudyStates(doc,states);
+        report("checkpoint_verifying_settings_and_all_poses");VerifyStudyStates(doc,states);
         if(expectedPoses!=null) {
             var difference=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(PoseDifference(expectedPoses,Transforms(doc))));
             if(Convert.ToDouble(difference["maximum_transform_delta"])>1e-7) {
@@ -60,10 +61,10 @@ public partial class Cad {
                     Log("RESTORE_RESELECT_RECORDED_FRAME "+Json.Serialize(new{study=active.name,requested_time_s=active.time_s,set_time_return=cachedSelected,actual_time_s=recorded.GetTime(),pose_verified=matches,pose_change=PoseChange(expectedPoses,cached),calculated=false}));
                     if(matches&&Math.Abs(recorded.GetTime()-active.time_s)<=1e-8&&!recorded.IsPlaying){VerifyStudyStates(doc,states);return;}
                 }
-                if(active==null||!CheckpointCachePolicy.Allows(active.type,active.active,cacheRehydrated,active.duration_s,active.fps))throw new CadFault("CHECKPOINT_POSE_RESTORE_FAILED","时间回读相符但姿态不符，且记录算例不支持预算内缓存重建；未改写期望姿态。",difference);
-                cacheRehydrated=true;var s=(IMotionStudy)mgr.GetMotionStudy(active.name);Log("RESTORE_REHYDRATE_POSE_MISMATCH "+Json.Serialize(difference));bool calculated=s.Calculate();s.Stop();Application.DoEvents();s.Stop();bool selected=s.SetTime(active.time_s);Application.DoEvents();s.Stop();
+                if(active==null||!CheckpointCachePolicy.Allows(active.type,active.active,cacheRehydrated,active.duration_s,active.fps))throw new CadFault("CHECKPOINT_POSE_RESTORE_FAILED","时间回读相符但姿态不符，且记录算例不支持预算内缓存重建；未改写期望姿态。",new{difference=difference,worst_components=ResetPoseDifferences(expectedPoses,Transforms(doc)),expected_pose_source="recorded_checkpoint_not_reopened_actual"});
+                report("checkpoint_rehydrating_pose_cache");cacheRehydrated=true;var s=(IMotionStudy)mgr.GetMotionStudy(active.name);Log("RESTORE_REHYDRATE_POSE_MISMATCH "+Json.Serialize(difference));bool calculated=s.Calculate();s.Stop();Application.DoEvents();s.Stop();bool selected=s.SetTime(active.time_s);Application.DoEvents();s.Stop();
                 var after=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(PoseDifference(expectedPoses,Transforms(doc))));
-                if(!calculated||Math.Abs(s.GetTime()-active.time_s)>1e-8||s.IsPlaying||Convert.ToDouble(after["maximum_transform_delta"])>1e-7)throw new CadFault("CHECKPOINT_POSE_RESTORE_FAILED","重建缓存后姿态仍与检查点不符。",new{study=active.name,calculate_return=calculated,set_time_return=selected,expected_time_s=active.time_s,actual_time_s=s.GetTime(),playing=s.IsPlaying,before=difference,after=after,cache_rehydration_attempted=true,expected_poses_changed=false,recorded_settings=active,pose_change=PoseChange(expectedPoses,Transforms(doc))});
+                if(!calculated||Math.Abs(s.GetTime()-active.time_s)>1e-8||s.IsPlaying||Convert.ToDouble(after["maximum_transform_delta"])>1e-7)throw new CadFault("CHECKPOINT_POSE_RESTORE_FAILED","重建缓存后姿态仍与检查点不符。",new{study=active.name,calculate_return=calculated,set_time_return=selected,expected_time_s=active.time_s,actual_time_s=s.GetTime(),playing=s.IsPlaying,before=difference,after=after,cache_rehydration_attempted=true,expected_poses_changed=false,recorded_settings=active,pose_change=PoseChange(expectedPoses,Transforms(doc)),worst_components=ResetPoseDifferences(expectedPoses,Transforms(doc))});
                 VerifyStudyStates(doc,states);
             }
         }
