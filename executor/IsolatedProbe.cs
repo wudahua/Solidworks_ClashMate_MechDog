@@ -7,6 +7,8 @@ using System.Collections.Generic;
 using SolidWorks.Interop.sldworks;
 
 public partial class Cad {
+    internal Action<string> IsolatedWorkerPhase;
+    void WorkerPhase(string stage){if(IsolatedWorkerPhase!=null)IsolatedWorkerPhase(stage);}
     static string ProbeOwnedPath(string path,string boundary) {
         string root=Path.GetFullPath(boundary),full=Path.GetFullPath(path);
         if(!full.StartsWith(root+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))throw new Exception("PROBE_PATH_OUTSIDE_BOUNDARY");
@@ -38,7 +40,7 @@ public partial class Cad {
                 ProbeOwnedPath(fileBoundary,Directory.GetParent(root).Parent.Parent.FullName);
             }
             foreach(string file in model.Files)ProbeOwnedPath(file,fileBoundary);
-            cad.SaveUserModel(model);phase("loading_motion_addin");cad.LoadUserMotion();phase("motion_addin_loaded");
+            cad.IsolatedWorkerPhase=phase;cad.SaveUserModel(model);phase("loading_motion_addin");cad.LoadUserMotion();phase("motion_addin_loaded");
             if((string)request["kind"]=="checkpoint") {
                 phase("opening_checkpoint_copy");using(var scope=new Scope(cad,model.Path,null)) {
                     phase("checkpoint_copy_opened");
@@ -80,7 +82,11 @@ public partial class Cad {
         hostTiming.Start("start_and_wait_worker");using(var worker=Process.Start(start)) {
             var stdout=worker.StandardOutput.ReadToEndAsync();var stderr=worker.StandardError.ReadToEndAsync();
             // Like a native COM call, this is not forcibly cancelled at the client's wait deadline.
-            worker.WaitForExit();File.WriteAllText(Path.Combine(folder,"worker-stdout.log"),stdout.Result);File.WriteAllText(Path.Combine(folder,"worker-stderr.log"),stderr.Result);
+            string observedPhase=null;
+            while(!worker.WaitForExit(500)) {
+                try{var p=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(Path.Combine(folder,"worker-phase.json")));string stage=Convert.ToString(p["stage"]);if(stage!=observedPhase){observedPhase=stage;Progress(activeJobId,"isolated_worker_"+stage,0,0,null);}}catch(IOException){}catch(ArgumentException){}
+            }
+            File.WriteAllText(Path.Combine(folder,"worker-stdout.log"),stdout.Result);File.WriteAllText(Path.Combine(folder,"worker-stderr.log"),stderr.Result);
             hostTiming.Start("read_worker_completion");string result=Path.Combine(folder,"worker-result.json");if(!File.Exists(result))throw new CadFault("PROBE_WORKER_RESULT_MISSING","独立探测未留下完成证据；未添加配合。",new{worker_pid=worker.Id,worker_exit=worker.ExitCode,evidence_directory=folder});
             var evidence=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(result));hostTiming.Finish();evidence["host_round_trip_timings"]=hostTiming.Export();evidence["evidence_path"]=result;evidence["evidence_sha256"]=FileHash(result).Replace("-","").ToLowerInvariant();
             if(!Convert.ToBoolean(evidence["owned_process_exited"])||evidence["cleanup_failure"]!=null)throw new CadFault("ISOLATED_PROBE_RECOVERY_REQUIRED","临时实例退出或清理未确认；保留所有进程与证据。",new{worker=evidence,evidence_path=result});

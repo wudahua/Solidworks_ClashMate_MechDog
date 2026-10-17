@@ -35,7 +35,7 @@ public partial class Cad {
         AtomicJson(path,new {diagnostic=diagnostic,native_time_s=finite?times:null,expected_time_s=expected});
         if(!valid){
             bool incomplete=finite&&(times.Length<2||times[times.Length-1]<duration-1e-7);
-            throw new CadFault(incomplete?"MOTION_RESULTS_INCOMPLETE":"NATIVE_TIME_AXIS_MISMATCH",incomplete?"原生结果未覆盖请求时段；请检查驱动与配合相容性，诊断和实际时间轴已保存。":"原生结果时间轴与请求网格不一致；诊断和完整时间轴已保存。",new {time_axis=diagnostic,time_axis_file=path});
+            throw new CadFault(incomplete?"MOTION_RESULTS_INCOMPLETE":"NATIVE_TIME_AXIS_MISMATCH",incomplete?"原生结果未覆盖请求时段；请检查驱动与配合相容性，诊断和实际时间轴已保存。":"原生结果时间轴与请求网格不一致；诊断和完整时间轴已保存。",new {time_axis=diagnostic,time_axis_file=path,requested_grid=new{duration_s=duration,output_fps=fps},next_action="review_native_time_axis_and_explicit_duration_fps_no_automatic_retry",candidate_cause=(string)null,cause_status="not_proven_time_axis_cannot_identify_dead_point_or_offending_part",review_items=new[]{"selected_native_motor_and_relative_body","constraints_and_allowed_motion_range","explicit_duration_s_and_output_fps_within_new_solve_budget"},automatic_switch_motor_or_oscillation=false});
         }
         return times;
     }
