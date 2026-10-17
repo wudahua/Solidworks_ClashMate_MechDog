@@ -2,13 +2,13 @@
 
 SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.2-alpha.5`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.2-alpha.6`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.2-alpha.5.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.2-alpha.6.md)。
 
 本版本保留另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
 
-本版核对三份 v0.4.2-alpha.4 反馈，修订组件续查范围、缓存姿态差异处置与短网格准入，保留前版归零和诊断改进；完整恢复证明与当前输入严格校验继续保留。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
+本版修复三份短网格反馈确认的 MCP 诊断丢失：四个运动工具返回结构化错误和可行参数，入口拒绝无效配合方案 ID；补充真实 stdio 回归与清理有限重试。完整恢复证明与当前输入严格校验继续保留。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
 
 - `apply_mate`、`create_motion_study`、`convert_motion_study`、`create_model_checkpoint` 和 `reset_study_time` 默认返回 `job_id`；用 `get_job` 轮询，确认 `succeeded` 后使用 `result`。`wait_for_completion=True` 保留同步方式，显式重算归零仍返回任务。默认归零任务不会自动获得计算许可，须明确 `allow_recalculate=True`。
 - 上述写操作执行器等待预算为 600 秒；这不是完成时间保证，也不能替代 MCP 客户端自身的等待限制。超时后保留原任务状态，用 `get_job` 查看 `late_response`，或用 `get_recovery_state(request_id=...)` 读取最终原始响应；无响应仍保持未知，不重复写入。`idle` 只说明请求已结束，配合是否应用看原响应与原生参数。
@@ -37,7 +37,15 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 
 
 
-## v0.4.2-alpha.5 本轮修订
+## v0.4.2-alpha.6 本轮修订
+
+- `create_motion_study`、`run_motion_study`、`verify_motion_preservation`、`preflight_motion(compatibility_probe=True)` 对短网格统一返回 `isError=true`，文本和 `structuredContent.error` 均保留 `OUTPUT_GRID_TOO_SPARSE_FOR_NATIVE_ADAPTER`、请求值、10 间隔/11 帧门槛和 `next_action.options`。拒绝不创建任务、不调用 CAD。
+- 例如 0.1 秒/30 fps 可显式选择 0.1 秒/100 fps；保留 30 fps 的选项使用精确 `10/30` 秒。应读取结构化参数，手动将时长舍入为 0.334 秒会破坏帧对齐。选项保留其余调用参数，不自动重试或修改时长/帧率。该门槛是当前适配器实测范围，不是 SolidWorks 的统一最少帧数。
+- `apply_mate` 空或非 32 位小写十六进制 `plan_id` 在入口返回 `INVALID_MATE_PLAN_ID` 并提示先预览；格式有效仍须原生校验方案归属、时效、确认和消费状态。
+- 归零缓存对比公开原有严格数值容差 `1e-7 m` / `1e-6 rad`，后续基线取经过验证的重开实况及其检查点；缓存差异不是机械零位证明。没有增加任意毫米级放行阈值。
+- 测试目录的临时共享锁最多重试三次；持续拒绝仍使测试失败并保留原始异常和现场。无需关闭杀毒软件或绕过主机保护。`unittest discover` 包含真实 stdio 回归及 alpha.4 诊断测试；`run_offline_policies.py` 负责独立 C# 策略入口，两者均须通过。
+
+## v0.4.2-alpha.5 历史修订
 
 - 两种几何查询明确区分局部和模型范围。限定组件时 `scope_geometry_complete` 只表示本次组件/face_offset扫描完成，`geometry_complete=false`、`model_geometry_complete=null`；`geometry_scan.pending_query_count=null`，局部待办看 `scope_pending_query_count`。服务没有模型待办台账，客户端必须保留父查询队列，只替换刚处理的任务，不能清空兄弟组件。读完各任务游标和子续查、且没有未解析范围，才可自行汇总完成；状态变化后重新开始。
 - 就地归零提升 `cached_memory_pose_deviation` 与告警到顶层；它比较保存后缓存与重开文档，不能与操作前/后比较混用。检查点证明后再次核验当前文档与重开姿态，一致才提交；不一致回滚。缓存被重开状态替代不证明通用机械零位。
@@ -60,7 +68,7 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 若 PowerShell 执行策略阻止外层脚本，可直接使用基础 Python，不修改系统策略：
 
 ```powershell
-C:\Python312\python.exe scripts/upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2-alpha.5_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
+C:\Python312\python.exe scripts/upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2-alpha.6_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
 ```
 
 DryRun通过后使用同样参数去掉 `--dry-run`。`--python` 必须指基础Python；安装目录优先显式参数、`SW_INSTALL_DIR`，否则读取运行进程模块路径及供应商/COM注册表并验证Interop DLL；多个有效安装须显式选择，不自动选版本。发现结果传递给编译器。无法发现时才回落标准目录，缺失仍拒绝。
@@ -171,7 +179,7 @@ DryRun通过后使用同样参数去掉 `--dry-run`。`--python` 必须指基础
 先停用旧安装目录的MCP服务，保留SolidWorks打开；从新包目录调用：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2-alpha.5_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2-alpha.6_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
 # PythonPath填写基础Python；非默认SolidWorks安装请同时指定-SolidWorksInstallDir。
 # 预检通过后移除-DryRun；未来网络及编译仍可能失败，保留自动回滚。
 ```
