@@ -8,11 +8,11 @@ from pathlib import Path
 from verify_release import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.2-alpha.2"
+VERSION = "0.4.2-alpha.3"
 
 
 def build(candidate=False):
-    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.2-alpha.2.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
+    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.2-alpha.3.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
     sources += sorted((ROOT/"executor").glob("*.cs"))
     sources += [ROOT/"executor/build.ps1"]
     sources += sorted((ROOT/"sw_mcp").glob("*.py"))
@@ -26,6 +26,7 @@ def build(candidate=False):
     sources += [ROOT/"tests"/name for name in ("test_alpha5.py", "alpha5_evidence_checks.py", "alpha5_native_checks.py")]
     sources += [ROOT/"tests"/name for name in ("test_kulisse_feedback.py", "kulisse_evidence_checks.py", "virtual_import_native_checks.py", "kulisse_protocol_checks.py", "virtual_import_matrix_checks.py", "checkpoint_probe_native_checks.py", "test_checkpoint_preparation.py")]
     sources += [ROOT/".github/workflows/release-validation.yml"]
+    sources += [ROOT/"tests/v042a3_query_native.py", ROOT/"tests/test_v042a3.py", ROOT/"tests/v042a3_reset_native.py", ROOT/"tests/v042a3_policy_checks.py"]
     sources += [ROOT/"tests/test_v042a2.py", ROOT/"tests/v042a2_snapshot_native.py", ROOT/"tests/v042a2_policy_checks.py"]
     sources += [ROOT/"tests/test_alpha8.py", ROOT/"tests/alpha8_policy_checks.py", ROOT/"tests/alpha8_native_checks.py"]
     sources += [ROOT/"tests/alpha9_policy_checks.py", ROOT/"tests/alpha9_native_checks.py"]
