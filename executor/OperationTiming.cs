@@ -4,8 +4,8 @@ using System.Diagnostics;
 
 // Monotonic, sequential phases. Nested worker durations must not be summed with these.
 public sealed class OperationTiming {
-    readonly Stopwatch timer=Stopwatch.StartNew();readonly List<object> rows=new List<object>();string stage;long start;
+    readonly Stopwatch timer=Stopwatch.StartNew();readonly List<object> rows=new List<object>();string stage;long start,finished,accounted;
     public void Start(string name){Finish();stage=name;start=timer.ElapsedMilliseconds;}
-    public void Finish(){if(stage==null)return;rows.Add(new{stage=stage,elapsed_ms=timer.ElapsedMilliseconds-start});stage=null;}
-    public object Export(){return new{phases=rows.ToArray(),total_elapsed_ms=timer.ElapsedMilliseconds,current_stage=stage,current_stage_elapsed_ms=stage==null?0:timer.ElapsedMilliseconds-start,clock="monotonic_stopwatch",claim="timing_only_not_native_completion_proof"};}
+    public void Finish(){if(stage==null)return;finished=timer.ElapsedMilliseconds;long duration=finished-start;accounted+=duration;rows.Add(new{stage=stage,elapsed_ms=duration});stage=null;}
+    public object Export(){long total=stage==null?finished:timer.ElapsedMilliseconds;return new{phases=rows.ToArray(),total_elapsed_ms=total,current_stage=stage,current_stage_elapsed_ms=stage==null?0:total-start,unattributed_elapsed_ms=Math.Max(0,total-accounted-(stage==null?0:total-start)),clock="monotonic_stopwatch",total_scope=stage==null?"through_last_finished_phase_frozen":"current_observation",claim="timing_only_not_native_completion_proof"};}
 }

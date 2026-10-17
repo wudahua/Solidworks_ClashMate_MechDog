@@ -5,10 +5,12 @@ using System.Collections.Generic;
 using SolidWorks.Interop.sldworks;
 
 public partial class Cad {
+    internal long GeometryQueryTestBudgetMs=0;
+    GeometryScanBudget NewGeometryBudget(){if(GeometryQueryTestBudgetMs>0&&System.Environment.GetEnvironmentVariable("SW_MCP_FAULT_TESTS")!="1")throw new CadFault("FAULT_TESTS_DISABLED","几何预算注入仅允许显式测试环境。");return new GeometryScanBudget(GeometryQueryTestBudgetMs>0?GeometryQueryTestBudgetMs:10000);}
     object[] NativeMateHealth(IModelDoc2 doc) {
         return BasicMateFeatures(doc).GroupBy(f=>f.GetID()).Select(g=>g.First()).Select(f=>{
             bool warning;int error=f.GetErrorCode2(out warning);
-            return (object)new{name=f.Name,native_feature_id=f.GetID(),error=error,warning=warning};
+            return (object)new{name=f.Name,native_feature_id=f.GetID(),error=error,warning=warning,error_enum="swFeatureError_e",error_name=Enum.GetName(typeof(SolidWorks.Interop.swconst.swFeatureError_e),error)};
         }).ToArray();
     }
     object InspectUserComponents(string id) {

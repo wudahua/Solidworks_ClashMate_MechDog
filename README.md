@@ -2,13 +2,13 @@
 
 SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.2-alpha.2`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.2-alpha.3`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.2-alpha.2.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.2-alpha.3.md)。
 
 本版本保留另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
 
-本版核对五份 v0.4.2-alpha.1 反馈，新增轻量组件清单、几何查询异步入口、冻结输入快照回放和新副本降帧归零；补齐引用能力、固定状态来源、预检错误和计时范围诊断。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
+本版核对五份 v0.4.2-alpha.2 反馈，修订新副本归零、统一任务判据、响应分页、候选几何预算和错误指引；完整恢复证明与当前输入严格校验继续保留。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
 
 - `apply_mate`、`create_motion_study`、`convert_motion_study`、`create_model_checkpoint` 和 `reset_study_time` 默认返回 `job_id`；用 `get_job` 轮询，确认 `succeeded` 后使用 `result`。`wait_for_completion=True` 保留同步方式，显式重算归零仍返回任务。默认归零任务不会自动获得计算许可，须明确 `allow_recalculate=True`。
 - 上述写操作执行器等待预算为 600 秒；这不是完成时间保证，也不能替代 MCP 客户端自身的等待限制。超时后保留原任务状态，用 `get_job` 查看 `late_response`，或用 `get_recovery_state(request_id=...)` 读取最终原始响应；无响应仍保持未知，不重复写入。`idle` 只说明请求已结束，配合是否应用看原响应与原生参数。
@@ -35,6 +35,16 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 
 这是供试用的运动仿真版本。已有有效配合的刚体机构可直接进入运动流程；缺少基础配合时可由设计者选定参考和类型，再让助手执行。尚未完成“大部分机械装配均可用”的样本覆盖验收。
 
+
+## v0.4.2-alpha.3 使用变化
+
+- 新副本归零在重复选择0时刻并保存后确认姿态稳定，再重开验证全部组件；错误包含底层阶段、设置和姿态差异。高帧率配合阻塞指引现在包含显式检查点→新副本路径。
+- 所有新job的`verification_passed`采用三值。仅`verify_motion_preservation`的显式要求可为true/false，其余任务为null、`verification_status=not_requested`；执行成功、数据完整和机械要求通过是不同结论。
+- `get_job`默认最多16000 UTF-8字节；若`response_summarized=true`，按`full_response_read`用`response_artifact_id/offset/limit`离线分页获取SHA256绑定的完整响应。历史任务使用完整32位job_id和同一安装目录，未知操作不自动续跑。
+- 候选几何和配合关联各有独立10秒协作扫描预算；整条查询仍包括文档打开、组件清单和分页一致性验证，原生单次调用不能取消。几何未扫描完时按`geometry_scan.next_queries`选择`component_id`与`face_offset`继续，编辑后从0重查。`next_cursor`只分页本次已观察集合，不代表完整装配。关联不完整时匹配数为null，已观察下界单列，不能推断自由轴。
+- 配合参考compact保留面积，圆柱面带半径和原生面索引，独立面ID不合并。ID来自该模型原生持久引用哈希，复制/外部化/拓扑变化后重新查询。
+- apply减少健康检查的重复面几何遍历；全部原生错误、参考/参数、姿态、文件和独立恢复证明仍保留。后探测参考核验独立计时，原模型观察增加逐项计时。特征错误1按swFeatureError_e解释为未知错误，不等同于AddMate的成功1。
+- 边缘/草图段创建仍为能力边界；设计者确认圆柱面/平面表达符合设计意图时可显式选面，不能自动等价替换。安全替代流程、任务判据和实例选择语义见[本版发布说明](发布说明_v0.4.2-alpha.3.md)。
 
 ## v0.4.2-alpha.2 使用变化
 

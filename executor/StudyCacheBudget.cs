@@ -10,6 +10,7 @@ public static class StudyCacheBudget {
     }
     public static object ResetGuidance(string name,double duration,int fps,int type,bool active) {
         bool calculate=Allows(duration,fps),cached=active&&type!=1;
-        return new{study=name,budget=Describe(duration,fps),direct_cache_attempt_allowed=cached,arguments=calculate||cached?(object)new{study=name,allow_recalculate=calculate}:null,action=calculate?"explicit_reset_then_new_preview":cached?"cached_time_selection_only_or_designer_prepare_initial_state_in_owned_copy":"designer_prepare_initial_state_in_owned_copy",reset_success_guaranteed=false};
+        bool branch=(type==1||type==4)&&Allows(duration,30);
+        return new{study=name,budget=Describe(duration,fps),direct_cache_attempt_allowed=cached,arguments=calculate||cached?(object)new{study=name,allow_recalculate=calculate}:null,action=calculate?"explicit_reset_then_new_preview":cached?"cached_time_selection_only_or_explicit_checkpoint_new_model":branch?"explicit_checkpoint_then_reset_in_new_model":"designer_prepare_initial_state_in_owned_copy",new_model_reset_option=branch?(object)new{tool="reset_study_time",arguments=new{study=name,allow_recalculate=true,reset_output_fps=30,create_new_model=true},required_first_tool="create_model_checkpoint",checkpoint_id_source="successful_explicit_create_model_checkpoint_response",checkpoint_id_required=true,checkpoint_id_placeholder_is_not_callable=true,original_model_preserved=true,new_model_requires_new_queries=true,target_budget=Describe(duration,30)}:null,reset_success_guaranteed=false};
     }
 }
