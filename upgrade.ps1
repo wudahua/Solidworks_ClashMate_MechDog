@@ -1,5 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$SourcePackage, [Parameter(Mandatory=$true)][string]$TargetDir, [string]$PythonPath = '', [string]$SolidWorksInstallDir = '', [switch]$DryRun)
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $pythonStarted = $false
 $pythonPid = $null
 $stage = 'resolve_python'
@@ -52,8 +53,17 @@ exit $resultCode
     $instruction = 'Check PythonPath or use the equivalent scripts/upgrade.py entry. If Python started, inspect its receipt before any retry.'
     $failure = @{ok=$false; schema_version=2; code=$code; stage=$stage; python_started=$pythonStarted; target_mutation_started=$null; backup_created=$null; receipt_path=$null; committed=$null; rollback_status='unknown'; rollback_verified=$null; safe_to_start_mcp=$false; processes_stopped=$false; automatic_retry=$false; error=@{code=$code; message=$_.Exception.Message; stage=$stage; diagnostics=@{python_pid=$null}; next_action=@{automatic_retry=$false; instruction=$instruction}}}
     $failure.upgrade_result_schema_version = 1
+    $failure.receipt_schema_version = 2
+    $failure.failure_stage = $stage
+    $failure.installation_state = 'unknown'
+    $failure.managed_files_consistent = $null
+    $failure.receipt_stage_persisted = $null
+    $failure.receipt_write_error = $null
+    $failure.recovery_journal_unchanged = $null
+    $failure.rollback_attempted = $null
+    $failure.mcp_start_admission = 'not_evaluated_use_normal_lease_recovery_and_COM_handshake'
     if ($pythonStarted) { $failure.error.diagnostics.python_pid = $pythonPid }
-    else { $failure.target_mutation_started=$false; $failure.backup_created=$false; $failure.committed=$false; $failure.rollback_status='not_required' }
+    else { $failure.target_mutation_started=$false; $failure.backup_created=$false; $failure.committed=$false; $failure.rollback_status='not_required'; $failure.rollback_attempted=$false; $failure.installation_state='unchanged'; $failure.managed_files_consistent=$true; $failure.safe_to_start_mcp=$null }
     Write-Output ($failure | ConvertTo-Json -Depth 8 -Compress)
     exit 1
 }
