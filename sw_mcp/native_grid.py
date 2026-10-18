@@ -44,7 +44,7 @@ class GridAdmissionError(ValueError):
                   f"有 {duration*fps:g} 个间隔，时长×帧率须为整数；未按舍入后的帧数执行。")
         super().__init__(
             f"{self.code}：请求 {duration:g}s × {fps}fps {reason}"
-            "请显式选择 next_action.options 中对齐输出帧的参数，例如0.1s/100fps。"
+            "请显式选择 next_action.options 中对齐输出帧的参数。"
             "这是本MCP的实测准入范围，并非SolidWorks统一126帧下限；未派发CAD，不自动改参。")
 
 

@@ -117,7 +117,7 @@ class Artifacts:
 
     def summary(self, run_id, require_verified=False):
         data, manifest, poses = self._load(run_id)
-        keys = ("run_id", "model_id", "parent_model_id", "probe_input_scope", "probe_checkpoint_id", "study", "solver_status", "calculate_returned_success", "physics_validation_status", "result_validity_scope", "sampling_status", "restoration_status", "result_validity", "duration_s", "output_fps", "frames", "components", "motion_detected", "maximum_translation_from_frame0_m", "maximum_component_origin_translation_from_frame0_m", "translation_metric_definition", "maximum_rotation_coefficient_delta_from_frame0", "input_pose_to_frame0_difference", "failure", "failure_diagnostics", "restoration_failure", "drive_validation", "validation_scope", "motion_validation", "component_motion_overview", "history_usage")
+        keys = ("run_id", "model_id", "parent_model_id", "probe_input_scope", "probe_checkpoint_id", "study", "solver_status", "calculate_returned_success", "physics_validation_status", "result_validity_scope", "sampling_status", "restoration_status", "result_validity", "duration_s", "output_fps", "frames", "components", "motion_detected", "maximum_translation_from_frame0_m", "maximum_component_origin_translation_from_frame0_m", "translation_metric_definition", "maximum_rotation_coefficient_delta_from_frame0", "input_pose_to_frame0_difference", "failure", "failure_diagnostics", "restoration_failure", "drive_validation", "validation_scope", "motion_validation", "component_motion_overview", "history_usage", "sampling_performance", "sampling_api_batch", "sampling_api_batch_restored", "time_selection_audit", "requested_drive", "native_motor_snapshot")
         info = self._csv_info(data, poses) if poses.is_file() else {}
         if require_verified: self._require_verified(data, info)
         from sw_mcp.replay_images import ReplayImages
@@ -125,7 +125,14 @@ class Artifacts:
             images = ReplayImages(self.root).list(run_id)
         except (ArtifactError, OSError) as error:
             images = {"status":"unavailable", "images":[], "error_code":getattr(error,"code","IMAGE_ACCESS_FAILED"), "message":str(error), "claim":"image_failure_does_not_invalidate_independently_verified_pose_csv"}
-        return {**{k: data[k] for k in keys if k in data}, **info, "saved_frame_images": images, "manifest_status": data['manifest_status'], "legacy_without_manifest": data.get('legacy_without_manifest', False), "access": "saved_artifacts_without_COM", "historical_data": True, "physical_validation_claim": False, "current_model_validity": "not_checked_offline", "manifest_path": str(manifest) if manifest.is_file() else None, "poses_available": poses.is_file(), "poses_csv": str(poses) if poses.is_file() else None}
+        return {**{k: data[k] for k in keys if k in data}, **info, "history_usage": self.history_usage(run_id), "saved_frame_images": images, "manifest_status": data['manifest_status'], "legacy_without_manifest": data.get('legacy_without_manifest', False), "access": "saved_artifacts_without_COM", "historical_data": True, "physical_validation_claim": False, "current_model_validity": "not_checked_offline", "manifest_path": str(manifest) if manifest.is_file() else None, "poses_available": poses.is_file(), "poses_csv": str(poses) if poses.is_file() else None}
+
+    @staticmethod
+    def history_usage(run_id):
+        return {'scope': 'recorded_run_inputs_offline_artifact', 'default_summary_requires_verified_complete_sampling_and_restoration': True,
+                'offline_export_option': 'allow_unverified_history_required_only_for_inconclusive_runs',
+                'artifact_query': {'tool': 'get_run_artifacts', 'arguments': {'run_id': run_id}},
+                'current_model_validity': 'not_checked_offline', 'warning': 'offline history does not prove current CAD validity'}
 
     def replay_diagnostics(self, run_id, limit=20, cursor=''):
         from sw_mcp.replay_diagnostics import read
@@ -227,7 +234,7 @@ class Artifacts:
             writer.writerows((r['time_s'],v) for r,v in zip(rows,values))
         temporary.replace(target)
         result = {'run_id': run_id, 'component_id': component_id, 'quantity': quantity, 'axis': axis, 'unit': unit, 'sample_count': count, 'min': min(values), 'max': max(values), 'csv_path': str(target), 'metadata_path': str(metadata), 'result_validity': data.get('result_validity','inconclusive'), 'restoration_status': data.get('restoration_status','unknown'), 'artifact_integrity': 'verified', 'poses_sha256': info['observed_poses_sha256'], 'current_model_validity': 'not_checked_offline', 'access': 'explicit_saved_history_without_COM', 'coordinate_frame': 'assembly_global', 'reference_point': 'component_coordinate_origin', 'physical_validation_claim': False, 'warning': '仅导出已保存采样，不证明请求运动通过或当前CAD状态有效；速度为数值导数。'}
-        result.update(historical_data=True, history_input_scope='recorded_run_inputs_not_current_model',
+        result.update(historical_data=True, history_input_scope='recorded_run_inputs_not_current_model', history_usage=self.history_usage(run_id),
                       access='verified_saved_history_without_COM' if require_verified else 'explicit_saved_history_without_COM',
                       verification_requirement='verified_complete_sampling_and_restoration' if require_verified else 'explicit_historical_diagnostic_read')
         metadata_temporary = metadata.with_suffix('.json.tmp')

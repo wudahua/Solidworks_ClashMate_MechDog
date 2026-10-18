@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from pathlib import Path
 
@@ -22,6 +23,84 @@ def wire_size(value):
 CONTROLS = {"next_cursor", "cursor", "face_offset", "job_id", "checkpoint_id", "plan_id", "model_id", "entity_id", "component_id", "run_id", "response_artifact_id", "next_queries", "next_action"}
 EVIDENCE = {'Axis', 'AxisLocal', 'PointLocal', 'axis_global', 'reference_point_global_m', 'review_items'}
 EVIDENCE_CONTAINERS = {'requested_drive', 'native_motor_snapshot', 'parameters', 'direction_reference', 'geometry'}
+EVIDENCE_KINDS = ('requested_drive', 'native_motor_snapshot', 'artifacts', 'time_selection_audit',
+                  'sampling_performance', 'sampling_api_batch', 'drive_validation', 'review_items')
+
+
+def artifact_query(job_id, digest, pointer):
+    return {'tool': 'get_job', 'arguments': {'job_id': job_id, 'response_artifact_id': digest,
+            'response_json_pointer': pointer, 'offset': 0, 'limit': 2000}}
+
+
+def evidence_projection(job, digest):
+    """Stable typed reads survive every compaction pass; small evidence is inline.
+
+    Never copy arbitrary native containers wholesale into the budget reserve.
+    Exact values remain in the SHA-checked response artifact.
+    """
+    found = {}
+    def visit(value, path, depth=0):
+        if not isinstance(value, dict) or depth > 10:
+            return
+        for key, child in value.items():
+            if key == 'late_response':
+                continue
+            pointer = path + '/' + key.replace('~', '~0').replace('/', '~1')
+            if key in EVIDENCE_KINDS and key not in found:
+                found[key] = (pointer, child)
+            if isinstance(child, dict):
+                visit(child, pointer, depth + 1)
+    for key in ('result', 'error'):
+        visit(job.get(key), '/' + key)
+    rows = {}
+    identity = {key: job.get('result', {}).get(key) for key in
+                ('study', 'model_id', 'run_id', 'frames', 'components', 'result_validity', 'duration_s', 'output_fps')
+                if isinstance(job.get('result'), dict) and key in job['result']
+                and not isinstance(job['result'][key], (dict, list)) and len(encoded(job['result'][key])) <= 160}
+    if identity:
+        rows['result_identity'] = {'value': identity}
+    for kind in EVIDENCE_KINDS:
+        if kind not in found:
+            continue
+        pointer, value = found[kind]
+        if len(pointer) > 512:
+            # Deep, unusually named wrappers remain losslessly available from
+            # the containing root. Never manufacture a truncated JSON Pointer.
+            pointer, value = ('/error', job['error']) if pointer.startswith('/error/') else ('/result', job['result'])
+        row = {'path': pointer, 'read': artifact_query(job['job_id'], digest, pointer)}
+        inline = _summary(value)
+        if wire_size(inline) <= 1600:
+            row['value'] = inline
+        elif isinstance(value, dict):
+            # Axes/points and their owner are a mechanical input identity, not
+            # an interpretation of intent. Copy only finite native observations.
+            def identity(node, depth=0):
+                if not isinstance(node, dict) or depth > 4:
+                    return {}
+                projected = {}
+                for k, v in node.items():
+                    if k in EVIDENCE and isinstance(v, list) and len(v) == 3 and all(type(n) in (int, float) and math.isfinite(n) for n in v):
+                        projected[k] = v
+                    elif k in {'component_id', 'entity_id', 'study', 'type', 'speed', 'speed_rpm', 'speed_mm_s', 'name'} and isinstance(v, (str, int, float, bool)) and len(encoded(v)) <= 160:
+                        projected[k] = v
+                    elif isinstance(v, dict):
+                        nested = identity(v, depth + 1)
+                        if nested:
+                            projected[k] = nested
+                return projected
+            small = identity(value)
+            if small and wire_size(small) <= 1600:
+                row['value'] = small
+                row['value_is_partial'] = True
+        rows[kind] = row
+    # Preserve typed reads before inline values; reserve their actual wire size.
+    for kind in reversed(EVIDENCE_KINDS):
+        if wire_size(rows) <= 6500:
+            break
+        if kind in rows:
+            rows[kind].pop('value', None)
+            rows[kind].pop('value_is_partial', None)
+    return rows
 
 
 def _summary(value, depth=0, key=""):
@@ -64,6 +143,7 @@ def failure_chain(value, path="", rows=None, seen=None):
             if identity not in seen:
                 seen.add(identity)
                 rows.append({"code": value["code"][:120], "path": path,
+                             "path_role": "archived_native_response" if path.startswith('/late_response/') else "canonical_failure",
                              "message": str(value.get("message", ""))[:240],
                              "stage": value.get("stage", value.get("details", {}).get("stage") if isinstance(value.get("details"), dict) else None)})
         for k in ("error", "diagnostics", "details", "original_failure", "failure", "worker", "cause_details", "original_details", "late_response", "response"):
@@ -97,14 +177,18 @@ def bound(root: Path, job: dict):
         result["query_controls"] = {k: query[k] for k in ("next_cursor", "geometry_scan", "geometry_complete", "scope_geometry_complete", "model_geometry_complete", "query_scope", "model_scan_state", "client_queue_contract", "total_scope", "warning_codes", "query_completion_status", "client_next_action", "absence_of_kind_proven") if k in query}
     chain = failure_chain(job)
     if chain:
+        canonical = [row for row in chain if row['path'].startswith('/error')]
+        cause = max(canonical or chain, key=lambda row: row['path'].count('/'))
         result["failure_chain"] = chain
-        result["root_cause_code"] = chain[-1]["code"]
-        result["root_cause_path"] = chain[-1]["path"]
+        result["root_cause_code"] = cause["code"]
+        result["root_cause_path"] = cause["path"]
         result["root_cause_scope"] = "deepest_reported_failure_not_proven_mechanical_origin"
         result["root_cause_read"] = {"tool": "get_job", "arguments": {
             "job_id": job["job_id"], "response_artifact_id": digest,
-            "response_json_pointer": chain[-1]["path"], "limit": 2000}}
-    if wire_size(result) > BUDGET:
+            "response_json_pointer": cause["path"], "limit": 2000}}
+    evidence = evidence_projection(job, digest)
+    compact_budget = BUDGET - wire_size(evidence) - 700
+    if wire_size(result) > compact_budget:
         keep = {"job_id", "operation", "status", "execution_status", "execution_succeeded",
                 "verification_passed", "verification_status", "verification_scope", "historical_job_read_only",
                 "cad_operation_state", "response_summarized", "payload_budget_bytes", "full_response_bytes",
@@ -118,7 +202,7 @@ def bound(root: Path, job: dict):
                 if k == 'error' and isinstance(job[k].get('next_action'), dict):
                     result[k]['next_action'] = {'automatic_retry': False, 'options': [], 'instruction': '先读取完整失败信封与恢复状态，不自动重试。',
                         'error_read': {**result['full_response_read'], 'arguments': {**result['full_response_read']['arguments'], 'response_json_pointer': '/error'}}}
-    if wire_size(result) > BUDGET:
+    if wire_size(result) > compact_budget:
         for key in ("result", "error", "progress"):
             if isinstance(result.get(key), dict):
                 keep = {"code", "message", "restoration_status", "stage", "assertion", "verification_status",
@@ -126,8 +210,8 @@ def bound(root: Path, job: dict):
                 result[key] = {k: v for k, v in result[key].items() if k in keep or k in CONTROLS}
     # An indivisible control token must either survive byte-for-byte or be explicitly
     # unavailable with a direct artifact query, never a callable-looking placeholder.
-    if wire_size(result) > BUDGET:
-        if "query_controls" in result and wire_size({"query_controls": result["query_controls"]}) > 7000:
+    if wire_size(result) > compact_budget:
+        if "query_controls" in result and wire_size({"query_controls": result["query_controls"]}) > min(7000, compact_budget // 2):
             result["query_controls"] = {"controls_require_artifact_read": True, "tool": "get_job", "arguments": {"job_id": job["job_id"], "response_artifact_id": digest, "response_json_pointer": "/result/next_cursor", "limit": 2000}}
         result.pop("failure_chain", None)
         result.pop("progress", None)
@@ -140,13 +224,22 @@ def bound(root: Path, job: dict):
         contract = {key: original_error.get(key) for key in ('code', 'message', 'assertion', 'restoration_status', 'document_context_restoration_status')}
         contract['message'] = str(contract['message'] or '')[:800]
         contract['next_action'] = {'automatic_retry': False, 'instruction': '先读取完整失败诊断并核对 get_recovery_state，不自动重试。', 'options': [], 'error_read': error_read}
+        original_action = original_error['next_action']
+        for key in ('action_code', 'options_status', 'recovery_state_query'):
+            if key in original_action and wire_size(original_action[key]) <= 1200:
+                contract['next_action'][key] = original_action[key]
+        if wire_size(original_action) <= 2400:
+            contract['next_action'] = {**original_action, 'error_read': error_read}
         contract['diagnostics'] = {key: original_error.get('diagnostics', {}).get(key) for key in ('cad_dispatched', 'job_created')}
         contract['diagnostics']['full_error_read'] = error_read
         current = result.get('error', {})
         # Preserve useful diagnostics when they fit; contract fields never vanish
         # merely because a deeper native error required compaction.
         result['error'] = {**contract, **current}
-        if wire_size(result) > BUDGET: result['error'] = contract
+        result['error']['next_action'] = contract['next_action']
+        if wire_size(result) > compact_budget: result['error'] = contract
+    if evidence:
+        result['evidence'] = evidence
     omitted = omitted_paths(job, result)
     result['summary_omitted_path_count'] = len(omitted)
     result['summary_omitted_paths'] = omitted[:16]
