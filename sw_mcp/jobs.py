@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import copy
+import hashlib
 import json
 import threading
 import time
@@ -84,9 +85,25 @@ class Jobs:
                     'poses_csv': str(folder / 'component-poses.csv') if (folder / 'component-poses.csv').is_file() else None,
                     'solve_performance_file': str(folder / 'solve-performance.json') if (folder / 'solve-performance.json').is_file() else None,
                     'query': {'tool': 'get_run_artifacts', 'arguments': {'run_id': run_id}}}
+                # Read only the completed local timing artifact, never dispatch CAD.
+                timing_file=folder/'solve-performance.json'
+                try:
+                    if timing_file.is_symlink() or timing_file.stat().st_size>262144:raise ValueError('timing artifact size or link refused')
+                    timing_bytes=timing_file.read_bytes();measurement=json.loads(timing_bytes)
+                    phases=measurement['phase_totals_ms']
+                    slowest=sorted(phases.items(),key=lambda row:float(row[1]),reverse=True)[:3]
+                    update['error']['diagnostics']['solve_performance']={
+                        **{key:measurement.get(key) for key in ('schema_version','scope','total_elapsed_ms','execution_completed')},
+                        'phase_count':len(phases),'slowest_phases_ms':dict(slowest),
+                        'projection_scope':'top_three_only_full_saved_artifact_via_get_run_artifacts'}
+                    update['error']['diagnostics']['artifacts']['solve_performance_sha256']=hashlib.sha256(timing_bytes).hexdigest()
+                except (OSError,ValueError,KeyError,TypeError,AttributeError):
+                    pass
         with self._lock:
             job.update(update, finished_at=time.time())
-            job["service_timings"] = {"queue_wait_s": job["started_at"] - job["created_at"],
+            job["service_timings"] = {"schema_version":1,"clock":"time_time_wall_clock_not_monotonic",
+                                      "excluded":["queue_wait_from_bridge_round_trip","client_rendering"],
+                                      "queue_wait_s": job["started_at"] - job["created_at"],
                                       "bridge_round_trip_s": job["finished_at"] - job["started_at"],
                                       "scope": "service_wall_clock_timestamps_includes_executor_native_and_transport_not_client_rendering"}
             progress_file = self.root / "runs" / "progress" / f"{job_id}.json"

@@ -5,7 +5,7 @@ import json
 import subprocess
 import threading
 import uuid
-from scripts.lease_access import open_lease_file, lease_diagnostics
+from scripts.lease_access import open_lease_file, lock_lease_file, lease_diagnostics
 import os
 import time
 import ctypes
@@ -138,18 +138,14 @@ class Bridge:
                            "无法打开或初始化服务锁；请核对文件权限、属性或过滤器阻止。现有证据不能证明服务持有或仅是目录权限问题。",
                            "not_required", diagnostics) from exc
         try:
-            if os.name == "nt":
-                import msvcrt
-                msvcrt.locking(lease.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_lease_file(lease)
         except OSError as exc:
             lease.close()
-            raise CadError("MCP_OWNER_ALREADY_RUNNING", "本安装目录已有 MCP 服务持有请求日志；请先停用该服务。", "not_required",
-                           {'lease_path': str(directory / 'executor-owner.lock'), 'owner_pid': None,
-                            'owner_identity_status': 'OS_lock_does_not_expose_holder_PID',
-                            'cad_dispatched': False, 'next_action': 'disconnect_other_client_then_explicitly_retry'}) from exc
+            diagnostics = lease_diagnostics(directory / 'executor-owner.lock', exc, 'lock_lease')
+            busy = diagnostics['occupied_proven'] or (os.name != 'nt' and isinstance(exc, BlockingIOError))
+            raise CadError("MCP_OWNER_ALREADY_RUNNING" if busy else "MCP_LEASE_UNAVAILABLE",
+                           "服务锁存在原生锁冲突；请停用相关服务后显式重试，持有者身份未证明。" if busy else "获取服务锁失败；现有证据不能证明有其他持有者。",
+                           "not_required", diagnostics) from exc
         self._lease = lease
 
     @staticmethod

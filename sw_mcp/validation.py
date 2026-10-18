@@ -72,6 +72,7 @@ class StrictMCPServer(MCPServer):
                     'constraint': issue.validator, 'accepted_keys': accepted, 'nullable_keys': [], 'error_count': len(errors)}
             if issue.validator == 'required':
                 diag['missing_keys'] = sorted(set(schema.get('required', [])) - set(arguments))
+                if diag['missing_keys']: diag['field'] = diag['missing_keys'][0]
             if 'enum' in schema: diag['accepted_values'] = schema['enum']
             if 'const' in schema: diag['accepted_values'] = [schema['const']]
             label = ', '.join(diag['missing_keys']) if issue.validator == 'required' else field
