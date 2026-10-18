@@ -42,6 +42,7 @@ class UpgradeFailure(RuntimeError):
         return {'ok': False, 'schema_version': 2, 'receipt_schema_version': 2, 'upgrade_result_schema_version': 1, 'code': self.code,
                 **{key: state.get(key) for key in ('stage','failure_stage','python_started','target_mutation_started','backup_created','receipt_path','receipt_stage_persisted','receipt_write_error','committed','rollback_attempted','rollback_verified','rollback_status','recovery_journal_unchanged','installation_state')},
                 'processes_stopped': False, 'automatic_retry': False,
+                'dry_run': state.get('dry_run'), 'target_directory': state.get('target_directory'),
                 'stage': stage, 'failure_stage': state.get('failure_stage') or stage,
                 'safe_to_start_mcp': False if state.get('target_mutation_started') else None,
                 'mcp_start_admission': 'not_evaluated_use_normal_lease_recovery_and_COM_handshake',
@@ -130,7 +131,7 @@ def upgrade(package,target,python,solidworks_dir='',dry_run=False,install=True):
            'recovery_journal_unchanged':None,'receipt_stage_persisted':None,'receipt_write_error':None,
            'safe_to_start_mcp':None,'managed_files_consistent':True,
            'mcp_start_admission':'not_evaluated_use_normal_lease_recovery_and_COM_handshake',
-           'target_directory':str(Path(target).absolute())}
+           'target_directory':str(Path(target).absolute()), 'dry_run':dry_run}
     try:return _upgrade(package,target,python,solidworks_dir,dry_run,install,state)
     except Exception as error:
         code=error.code if isinstance(error,UpgradeFailure) else {
@@ -251,8 +252,8 @@ def main():
     # CLI wire contract is independent of Windows console code page or caller env.
     if hasattr(sys.stdout,'reconfigure'):sys.stdout.reconfigure(encoding='utf-8',errors='strict')
     if hasattr(sys.stderr,'reconfigure'):sys.stderr.reconfigure(encoding='utf-8',errors='strict')
-    parser=argparse.ArgumentParser();parser.add_argument('--package',required=True);parser.add_argument('--target',required=True);parser.add_argument('--python',required=True);parser.add_argument('--solidworks-install-dir',default='');parser.add_argument('--dry-run',action='store_true');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--package',required=True);parser.add_argument('--target',required=True);parser.add_argument('--python',required=True);parser.add_argument('--solidworks-install-dir',default='');parser.add_argument('--dry-run',action='store_true');parser.add_argument('--ascii-json',action='store_true',help='Escape non-ASCII JSON characters for legacy native-process capture');args=parser.parse_args()
     try:result=upgrade(args.package,args.target,args.python,args.solidworks_install_dir,args.dry_run)
-    except UpgradeFailure as error:print(json.dumps(error.payload(),ensure_ascii=False));return 1
-    print(json.dumps({'ok':True,**result},ensure_ascii=False,indent=2));return 0
+    except UpgradeFailure as error:print(json.dumps(error.payload(),ensure_ascii=args.ascii_json));return 1
+    print(json.dumps({'ok':True,**result},ensure_ascii=args.ascii_json,indent=2));return 0
 if __name__=='__main__':raise SystemExit(main())
