@@ -25,5 +25,8 @@ class PreparationProtocolTests(unittest.TestCase):
         with path.open('w',newline='',encoding='utf-8') as stream:
             writer=csv.writer(stream);writer.writerow(['frame','time_s','component_id','instance','x_m','y_m','z_m','r00','r01','r02','r10','r11','r12','r20','r21','r22']);writer.writerow([0,0,'component_a','moving',0,0,0,1,0,0,0,1,0,0,0,1]);writer.writerow([1,1,'component_a','moving',.01,0,0,1,0,0,0,1,0,0,0,1])
         (folder/'solve.json').write_text(json.dumps({'run_id':identifier,'poses_sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'history_usage':{'later_write_or_checkpoint_restore_may_invalidate_current_binding':True},'restoration_status':'unknown'}),encoding='utf-8')
-        result=Artifacts(self.root).summary(identifier);self.assertTrue(result['history_usage']['later_write_or_checkpoint_restore_may_invalidate_current_binding']);self.assertEqual(result['current_model_validity'],'not_checked_offline')
+        before=(folder/'solve.json').read_bytes()
+        result=Artifacts(self.root).summary(identifier);self.assertEqual(result['history_usage']['scope'],'recorded_run_inputs_offline_artifact');self.assertEqual(result['current_model_validity'],'not_checked_offline')
+        self.assertNotIn('later_write_or_checkpoint_restore_may_invalidate_current_binding',result['history_usage'])
+        self.assertEqual((folder/'solve.json').read_bytes(),before)
 if __name__=='__main__':unittest.main()

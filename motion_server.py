@@ -23,7 +23,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.2-alpha.8", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.2-alpha.9", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 
 def grid_refusal(tool, arguments, duration_key="duration_s", fps_key="output_fps"):
@@ -50,6 +50,18 @@ def enqueue(operation, params):
         return packed(jobs.submit(operation, params))
     except ValueError as exc:
         raise InputRefusal("INVALID_ARGUMENT", str(exc)) from exc
+
+
+def history_refusal(exc, fallback, tool, arguments):
+    error = operational_error(getattr(exc, 'code', fallback), str(exc), 'not_required',
+                              {'cad_dispatched': False, 'job_created': False}, job_created=False)
+    if error['code'] == 'RESULTS_UNVERIFIED':
+        error['next_action'].update(
+            instruction='先读工件；显式选择诊断读取不会把未验证结果改为通过，也不认证当前 CAD。',
+            options=[{'tool': 'get_run_artifacts', 'arguments': {'run_id': arguments['run_id']}, 'example_kind': 'callable_arguments'},
+                     {'tool': tool, 'arguments': {**arguments, 'allow_unverified_history': True}, 'example_kind': 'callable_arguments'}],
+            options_status='explicit_diagnostic_read_choice_not_verification')
+    return packed({'ok': False, 'error': error}, True)
 
 
 @mcp.tool()
@@ -158,7 +170,7 @@ async def preview_mate(model_id: str, entity_a: str, entity_b: str, mate_type: L
 
 @mcp.tool()
 async def apply_mate(plan_id: str, confirmed: bool = False, wait_for_completion: bool = False) -> CallToolResult:
-    """plan_id须为preview_mate返回的32位小写十六进制，否则入口返回INVALID_MATE_PLAN_ID；用户确认具体方案后异步执行，返回job_id并轮询get_job；wait_for_completion=True兼容同步。默认方案预算1mm/1度，装配对齐等较大移动需在preview_mate显式选择maximum_translation_mm/maximum_rotation_deg后确认。建检查点、独立恢复预演、建配合并重建，超预算回滚后给retry_guidance；启动/插件开销不保证固定耗时。超时不重试写入，查询迟到最终响应；成功后另验运动。"""
+    """先检查confirmed=True，否则返回CONFIRMATION_REQUIRED；随后校验plan_id须为preview_mate返回的32位小写十六进制，否则返回INVALID_MATE_PLAN_ID。用户确认具体方案后异步执行，返回job_id并轮询get_job；wait_for_completion=True兼容同步。默认方案预算1mm/1度，装配对齐等较大移动需在preview_mate显式选择maximum_translation_mm/maximum_rotation_deg后确认。建检查点、独立恢复预演、建配合并重建，超预算回滚后给retry_guidance；启动/插件开销不保证固定耗时。超时不重试写入，查询迟到最终响应；成功后另验运动。"""
     if not confirmed:
         raise InputRefusal("CONFIRMATION_REQUIRED", "须由用户明确确认配合方案后传入confirmed=True。")
     if re.fullmatch(r"[0-9a-f]{32}", plan_id) is None:
@@ -215,7 +227,7 @@ async def get_motion_summary(run_id: str, allow_unverified_history: bool = False
         return packed({"ok": True, "result": {**data, 'history_input_scope': 'recorded_run_inputs_not_current_model',
                        'verification_requirement': 'explicit_historical_diagnostic_read' if allow_unverified_history else 'verified_complete_sampling_and_restoration'}})
     except (ArtifactError, ValueError) as exc:
-        return packed({"ok": False, "error": operational_error(getattr(exc, "code", "INVALID_HISTORY_SUMMARY"), str(exc), 'not_required', {'cad_dispatched': False, 'job_created': False})}, True)
+        return history_refusal(exc, 'INVALID_HISTORY_SUMMARY', 'get_motion_summary', {'run_id': run_id})
 
 
 @mcp.tool()
@@ -225,7 +237,7 @@ async def export_motion_curve(run_id: str, component_id: str, quantity: Literal[
         data = await asyncio.to_thread(artifacts.export_history_curve, run_id, component_id, quantity, axis, not allow_unverified_history)
         return packed({"ok": True, "result": data})
     except (ArtifactError, ValueError) as exc:
-        return packed({"ok": False, "error": operational_error(getattr(exc, "code", "INVALID_HISTORY_EXPORT"), str(exc), 'not_required', {'cad_dispatched': False, 'job_created': False})}, True)
+        return history_refusal(exc, 'INVALID_HISTORY_EXPORT', 'export_motion_curve', {'run_id': run_id, 'component_id': component_id, 'quantity': quantity, 'axis': axis})
 
 
 @mcp.tool()

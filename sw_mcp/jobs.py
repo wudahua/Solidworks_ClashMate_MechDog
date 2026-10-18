@@ -145,7 +145,10 @@ class Jobs:
                     request_id = mapping.get("request_id")
             except (OSError, ValueError, AttributeError):
                 pass
-        if request_id and hasattr(self.bridge, "get_request_result"):
+        # A normal terminal job already contains the canonical native outcome.
+        # Only attach a late outcome when the original wait was inconclusive;
+        # duplicating every successful response needlessly doubles wire size.
+        if request_id and job['status'] in {'timed_out', 'executor_lost', 'queued', 'running'} and hasattr(self.bridge, "get_request_result"):
             try:
                 completed = self.bridge.get_request_result(request_id)
                 if completed and completed.get("params", {}).get("job_id") == job_id and completed.get("operation") == job["operation"]:

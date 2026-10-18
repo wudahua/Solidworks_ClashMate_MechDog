@@ -140,7 +140,10 @@ class Bridge:
                 fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
             lease.close()
-            raise CadError("MCP_OWNER_ALREADY_RUNNING", "本安装目录已有 MCP 服务持有请求日志；请先停用该服务。", "not_required") from exc
+            raise CadError("MCP_OWNER_ALREADY_RUNNING", "本安装目录已有 MCP 服务持有请求日志；请先停用该服务。", "not_required",
+                           {'lease_path': str(directory / 'executor-owner.lock'), 'owner_pid': None,
+                            'owner_identity_status': 'OS_lock_does_not_expose_holder_PID',
+                            'cad_dispatched': False, 'next_action': 'disconnect_other_client_then_explicitly_retry'}) from exc
         self._lease = lease
 
     @staticmethod

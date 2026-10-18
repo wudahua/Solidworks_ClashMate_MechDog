@@ -6,6 +6,7 @@ from jsonschema import Draft202012Validator
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from mcp.types import CallToolResult, TextContent
+from sw_mcp.errors import operational_error
 
 
 def packed(data, error=False):
@@ -13,12 +14,15 @@ def packed(data, error=False):
 
 
 def refuse(code, message, diagnostics=None, next_action=None):
-    return packed({'ok': False, 'error': {
-        'code': code, 'message': message, 'assertion': 'not_applicable',
-        'restoration_status': 'not_required', 'document_context_restoration_status': 'not_required',
-        'diagnostics': {'cad_dispatched': False, 'job_created': False, **(diagnostics or {})},
-        'next_action': {'automatic_retry': False, 'options': [], 'instruction': '核对工具声明与参数后显式重新调用；未自动重试。', **(next_action or {})},
-    }}, True)
+    error = operational_error(code, message, 'not_required',
+                              {'cad_dispatched': False, 'job_created': False, **(diagnostics or {})}, job_created=False)
+    error['assertion'] = 'not_applicable'
+    error['next_action'].update({'instruction': '核对工具声明与参数后显式重新调用；未自动重试。', **(next_action or {})})
+    if error['next_action']['options']:
+        error['next_action']['options_status'] = 'explicit_user_selection_required'
+    elif error['next_action'].get('tool'):
+        error['next_action']['options_status'] = 'tool_identified_arguments_require_user_input'
+    return packed({'ok': False, 'error': error}, True)
 
 
 class InputRefusal(ToolError):
@@ -68,7 +72,8 @@ class StrictMCPServer(MCPServer):
                 diag['missing_keys'] = sorted(set(schema.get('required', [])) - set(arguments))
             if 'enum' in schema: diag['accepted_values'] = schema['enum']
             if 'const' in schema: diag['accepted_values'] = [schema['const']]
-            return refuse('INVALID_ARGUMENT', '参数不符合工具声明：' + field + '；请按字段类型、必填项和允许值填写。', diag)
+            label = ', '.join(diag['missing_keys']) if issue.validator == 'required' else field
+            return refuse('INVALID_ARGUMENT', '参数不符合工具声明：' + label + '；请按字段类型、必填项和允许值填写。', diag)
         try:
             return await super().call_tool(name, arguments, context)
         except UnexpectedToolError:
