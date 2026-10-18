@@ -23,7 +23,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.2", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.3", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。配合关联mate_context_complete=false时只作几何参考，不推断没有配合；可按mate_context_next_query显式从空cursor重扫，保留原几何待办，改变mate_context_budget_s后重新分页。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 
 def grid_refusal(tool, arguments, duration_key="duration_s", fps_key="output_fps"):
@@ -122,13 +122,15 @@ async def preflight_motion(model_id: str, study: str = "", compatibility_probe: 
 
 
 @mcp.tool()
-async def list_drive_candidates(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal"] = "", limit: int = 20, cursor: str = "", group_faces: bool = True, detail_level: Literal["full", "compact"] = "full", wait_for_completion: bool = True, face_offset: int = 0) -> CallToolResult:
-    """几何驱动候选，不证明关节相容；几何不完整时必须按geometry_scan.next_queries保留父查询全部待办，逐组件续查直到客户端队列为空，不能用单组件scope_pending_query_count=0清空兄弟待办，并读完各页；缺席不证明没有圆柱面。wait_for_completion=False返回job_id，大装配先inspect_model(detail_level="components")再按component_id筛选；排除固定件并报告原因，容忍合法空体。默认分组，group_faces=False查看逐面；limit是1–50条上限，16KB字节预算可能缩页。compact省略冗余字段；改变筛选/分组/详情后重新分页。"""
+async def list_drive_candidates(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal"] = "", limit: int = 20, cursor: str = "", group_faces: bool = True, detail_level: Literal["full", "compact"] = "full", wait_for_completion: bool = True, face_offset: int = 0, mate_context_budget_s: float = 10) -> CallToolResult:
+    """配合关联扫描默认10秒，mate_context_budget_s显式可选1–30秒；mate_context_next_query是从头重扫建议，需明确调用且不能清空几何待办。几何驱动候选，不证明关节相容；几何不完整时必须按geometry_scan.next_queries保留父查询全部待办，逐组件续查直到客户端队列为空，不能用单组件scope_pending_query_count=0清空兄弟待办，并读完各页；缺席不证明没有圆柱面。wait_for_completion=False返回job_id，大装配先inspect_model(detail_level="components")再按component_id筛选；排除固定件并报告原因，容忍合法空体。默认分组，group_faces=False查看逐面；limit是1–50条上限，16KB字节预算可能缩页。compact省略冗余字段；改变筛选/分组/详情后重新分页。"""
     if not 1 <= limit <= 50:
         raise InputRefusal("LIMIT_OUT_OF_RANGE", "limit 须在 1–50。")
     if face_offset < 0 or (face_offset and not component_id):
         raise InputRefusal("INVALID_FACE_OFFSET", "非零 face_offset 需要 component_id；修改模型后从0重新查询。")
-    params = dict(model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor, group_faces=group_faces, detail_level=detail_level, face_offset=face_offset)
+    if not math.isfinite(mate_context_budget_s) or not 1 <= mate_context_budget_s <= 30:
+        raise InputRefusal("INVALID_MATE_CONTEXT_BUDGET", "mate_context_budget_s 须为1–30秒有限数值。", {"field": "mate_context_budget_s", "minimum": 1, "maximum": 30})
+    params = dict(model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor, group_faces=group_faces, detail_level=detail_level, face_offset=face_offset, mate_context_budget_s=mate_context_budget_s)
     return await call("list_drive_candidates", **params) if wait_for_completion else enqueue("list_drive_candidates", params)
 
 
@@ -148,13 +150,15 @@ async def create_motion_study(model_id: str, study: str, component_id: str, enti
 
 
 @mcp.tool()
-async def list_mate_references(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal"] = "", limit: int = 20, cursor: str = "", detail_level: Literal["full", "compact"] = "full", wait_for_completion: bool = True, face_offset: int = 0) -> CallToolResult:
-    """顶层配合面，包含固定支座；geometry_complete=false时必须按geometry_scan.next_queries保留父查询全部待办，逐组件续查至客户端队列为空，单组件scope_geometry_complete不代表全模型完成并读完各页，缺席不证明没有圆柱面；不支持边缘、顶点或草图段，不自动换成邻面；wait_for_completion=False异步取job_id；空体/异常报告原因，不推断缺失配合。每零件最多128面并报告截断；limit条数上限与16KB预算同时限制。compact提供较短结果，改变详情后重查第一页。"""
+async def list_mate_references(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal"] = "", limit: int = 20, cursor: str = "", detail_level: Literal["full", "compact"] = "full", wait_for_completion: bool = True, face_offset: int = 0, mate_context_budget_s: float = 10) -> CallToolResult:
+    """配合关联扫描默认10秒，mate_context_budget_s显式可选1–30秒；mate_context_next_query是从头重扫建议，需明确调用且不能清空几何待办。顶层配合面，包含固定支座；geometry_complete=false时必须按geometry_scan.next_queries保留父查询全部待办，逐组件续查至客户端队列为空，单组件scope_geometry_complete不代表全模型完成并读完各页，缺席不证明没有圆柱面；不支持边缘、顶点或草图段，不自动换成邻面；wait_for_completion=False异步取job_id；空体/异常报告原因，不推断缺失配合。每零件最多128面并报告截断；limit条数上限与16KB预算同时限制。compact提供较短结果，改变详情后重查第一页。"""
     if not 1 <= limit <= 50:
         raise InputRefusal("LIMIT_OUT_OF_RANGE", "limit 须在1–50。")
     if face_offset < 0 or (face_offset and not component_id):
         raise InputRefusal("INVALID_FACE_OFFSET", "非零 face_offset 需要 component_id；修改模型后从0重新查询。")
-    params = dict(model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor, detail_level=detail_level, face_offset=face_offset)
+    if not math.isfinite(mate_context_budget_s) or not 1 <= mate_context_budget_s <= 30:
+        raise InputRefusal("INVALID_MATE_CONTEXT_BUDGET", "mate_context_budget_s 须为1–30秒有限数值。", {"field": "mate_context_budget_s", "minimum": 1, "maximum": 30})
+    params = dict(model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor, detail_level=detail_level, face_offset=face_offset, mate_context_budget_s=mate_context_budget_s)
     return await call("list_mate_references", **params) if wait_for_completion else enqueue("list_mate_references", params)
 
 
