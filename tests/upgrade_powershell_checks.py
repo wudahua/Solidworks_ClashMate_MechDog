@@ -46,6 +46,8 @@ def check():
             assert json.loads(observed.read_text(encoding='utf-8-sig'))['encoding'] == previous
             if start_failure:
                 assert value['code'] == 'UPGRADE_WRAPPER_START_FAILED' and value['python_started'] is False
+                assert value['error']['code'] == value['code'] and value['schema_version'] == 2
+                assert value['rollback_status'] == 'not_required' and value['safe_to_start_mcp'] is False
                 assert value['target_mutation_started'] is False and value['backup_created'] is False
                 assert not (root/'target').exists()
             else:

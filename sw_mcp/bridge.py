@@ -5,6 +5,7 @@ import json
 import subprocess
 import threading
 import uuid
+from scripts.lease_access import open_lease_file, lease_diagnostics
 import os
 import time
 import ctypes
@@ -121,7 +122,7 @@ class Bridge:
         lease = None
         try:
             directory.mkdir(parents=True, exist_ok=True)
-            lease = (directory / "executor-owner.lock").open("a+b")
+            lease = open_lease_file(directory / "executor-owner.lock")
             if lease.seek(0, 2) == 0:
                 lease.write(b"0")
                 lease.flush()
@@ -129,8 +130,13 @@ class Bridge:
         except OSError as exc:
             if lease is not None:
                 lease.close()
-            raise CadError("MCP_LEASE_UNAVAILABLE", "无法创建服务锁文件；请检查安装目录的写权限。", "not_required",
-                           executor_diagnostics(self.root / "executor/bin/SwExecutor.exe", stage="open_lease", error=exc)) from exc
+            diagnostics = {**executor_diagnostics(self.root / "executor/bin/SwExecutor.exe", stage="open_lease", error=exc),
+                           **lease_diagnostics(directory / 'executor-owner.lock', exc, 'open_lease')}
+            busy = diagnostics['sharing_conflict_proven']
+            raise CadError("MCP_OWNER_ALREADY_RUNNING" if busy else "MCP_LEASE_UNAVAILABLE",
+                           "锁文件存在原生共享冲突；请停用相关安装目录的服务或检查占用句柄后显式重试，持有者身份未证明。" if busy else
+                           "无法打开或初始化服务锁；请核对文件权限、属性或过滤器阻止。现有证据不能证明服务持有或仅是目录权限问题。",
+                           "not_required", diagnostics) from exc
         try:
             if os.name == "nt":
                 import msvcrt

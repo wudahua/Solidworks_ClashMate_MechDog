@@ -64,7 +64,7 @@ class ReleaseUpgradeTests(unittest.TestCase):
             (self.target/'executor/bin/build-manifest.json').write_bytes(b'new manifest')
             raise RuntimeError('controlled compiler failure')
         with patch('scripts.upgrade.preflight',return_value={'solidworks_install_dir':'test-sw'}),patch('scripts.upgrade.idle_installation',return_value=nullcontext()),patch('scripts.upgrade.subprocess.run',side_effect=failing):
-            with self.assertRaisesRegex(RuntimeError,'rollback recorded'):upgrade(self.package,self.target,sys.executable)
+            with self.assertRaisesRegex(RuntimeError,'rollback verified'):upgrade(self.package,self.target,sys.executable)
         self.assertEqual((self.target/'motion_server.py').read_bytes(),b'old source');self.assertEqual((self.target/'executor/bin/SwExecutor.exe').read_bytes(),b'old binary');self.assertFalse((self.target/'executor/bin/build-manifest.json').exists());self.assertFalse((self.target/'tests/new_case.py').exists())
     def test_dry_run_does_not_change_sources(self):
         self.write_zip();

@@ -19,6 +19,8 @@ async def check(source=ROOT, observe=False):
     folder.mkdir(parents=True)
     shutil.copyfile(source / 'motion_server.py', folder / 'motion_server.py')
     shutil.copytree(source / 'sw_mcp', folder / 'sw_mcp', ignore=shutil.ignore_patterns('__pycache__'))
+    (folder / 'scripts').mkdir()
+    shutil.copyfile(source / 'scripts/lease_access.py', folder / 'scripts/lease_access.py')
     # Exercise the real entry point, SDK and JSON-RPC encoding. Only the final
     # CAD dispatch boundary is replaced, so accepted arguments can be inspected.
     (folder / 'launcher.py').write_text('''import json

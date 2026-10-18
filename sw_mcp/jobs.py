@@ -82,6 +82,7 @@ class Jobs:
                     'run_id': run_id, 'manifest_path': str(folder / 'solve.json') if (folder / 'solve.json').is_file() else None,
                     'time_axis_file': str(folder / 'time-axis.json') if (folder / 'time-axis.json').is_file() else None,
                     'poses_csv': str(folder / 'component-poses.csv') if (folder / 'component-poses.csv').is_file() else None,
+                    'solve_performance_file': str(folder / 'solve-performance.json') if (folder / 'solve-performance.json').is_file() else None,
                     'query': {'tool': 'get_run_artifacts', 'arguments': {'run_id': run_id}}}
         with self._lock:
             job.update(update, finished_at=time.time())

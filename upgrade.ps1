@@ -1,5 +1,9 @@
 param([Parameter(Mandatory=$true)][string]$SourcePackage, [Parameter(Mandatory=$true)][string]$TargetDir, [string]$PythonPath = '', [string]$SolidWorksInstallDir = '', [switch]$DryRun)
 $ErrorActionPreference = 'Stop'
+$pythonStarted = $false
+$pythonPid = $null
+$stage = 'resolve_python'
+try {
 if (-not $PythonPath) { $PythonPath = (Get-Command python -ErrorAction Stop).Source }
 $arguments = @((Join-Path $PSScriptRoot 'scripts\upgrade.py'), '--package', $SourcePackage, '--target', $TargetDir, '--python', $PythonPath)
 if ($SolidWorksInstallDir) { $arguments += @('--solidworks-install-dir', $SolidWorksInstallDir) }
@@ -22,23 +26,16 @@ $start.Arguments = (($arguments | ForEach-Object { Quote-NativeArgument $_ }) -j
 # PS5.1 may return null on the first EnvironmentVariables getter. Inherit a
 # process-scoped value instead, restoring the caller immediately after Start.
 $previousEncoding = [Environment]::GetEnvironmentVariable('PYTHONIOENCODING', 'Process')
-$pythonStarted = $false
-try {
+$stage = 'start_python'
     try {
         [Environment]::SetEnvironmentVariable('PYTHONIOENCODING', 'utf-8', 'Process')
         $process = [System.Diagnostics.Process]::Start($start)
         $pythonStarted = $true
+        $pythonPid = $process.Id
     } finally {
         [Environment]::SetEnvironmentVariable('PYTHONIOENCODING', $previousEncoding, 'Process')
     }
-} catch {
-    # Python has not started: no backup/receipt is claimed to exist. Do not
-    # relabel an error from a running Python upgrade as a pre-start failure.
-    $failure = @{ok=$false; code='UPGRADE_WRAPPER_START_FAILED'; stage='start_python'; python_started=$pythonStarted; target_mutation_started=$null; backup_created=$null; message=$_.Exception.Message; next_action='Check PythonPath, or run python scripts/upgrade.py --package PACKAGE --target TARGET --python PYTHON --dry-run from the new package. If Python started, inspect its receipt before any retry.'}
-    if (-not $pythonStarted) { $failure.target_mutation_started = $false; $failure.backup_created = $false }
-    Write-Output ($failure | ConvertTo-Json -Compress)
-    exit 1
-}
+$stage = 'capture_upgrade_output'
 $stdoutTask = $process.StandardOutput.ReadToEndAsync()
 $stderrTask = $process.StandardError.ReadToEndAsync()
 $process.WaitForExit()
@@ -49,3 +46,14 @@ $process.Dispose()
 if ($stdoutText) { Write-Output $stdoutText.TrimEnd() }
 if ($stderrText) { [Console]::Error.Write($stderrText) }
 exit $resultCode
+} catch {
+    $code = 'UPGRADE_WRAPPER_START_FAILED'
+    if ($pythonStarted) { $code = 'UPGRADE_WRAPPER_OUTPUT_FAILED' }
+    $instruction = 'Check PythonPath or use the equivalent scripts/upgrade.py entry. If Python started, inspect its receipt before any retry.'
+    $failure = @{ok=$false; schema_version=2; code=$code; stage=$stage; python_started=$pythonStarted; target_mutation_started=$null; backup_created=$null; receipt_path=$null; committed=$null; rollback_status='unknown'; rollback_verified=$null; safe_to_start_mcp=$false; processes_stopped=$false; automatic_retry=$false; error=@{code=$code; message=$_.Exception.Message; stage=$stage; diagnostics=@{python_pid=$null}; next_action=@{automatic_retry=$false; instruction=$instruction}}}
+    $failure.upgrade_result_schema_version = 1
+    if ($pythonStarted) { $failure.error.diagnostics.python_pid = $pythonPid }
+    else { $failure.target_mutation_started=$false; $failure.backup_created=$false; $failure.committed=$false; $failure.rollback_status='not_required' }
+    Write-Output ($failure | ConvertTo-Json -Depth 8 -Compress)
+    exit 1
+}

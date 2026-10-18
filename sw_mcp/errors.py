@@ -22,8 +22,10 @@ def operational_error(code, message, restoration_status='unknown', diagnostics=N
     if code == 'MCP_OWNER_ALREADY_RUNNING':
         action.update(instruction='停用同一安装目录的其他 MCP 服务，等待其退出后显式重试；不要终止不明进程或清除恢复日志。',
                       options_status='manual_service_disconnect_required_no_parameter_change')
-    elif code == 'MATE_OVERDEFINED':
+    elif code == 'MATE_OVERDEFINED' or (isinstance(diagnostics.get('details'), dict) and
+            isinstance(diagnostics['details'].get('original_failure'), dict) and diagnostics['details']['original_failure'].get('code') == 'MATE_OVERDEFINED'):
         action['instruction'] = '核对方案与既有配合约束；原生过定义不证明某个无关配合有错。修改具体方案并重新预演、确认后再提交，不重复重试原方案。'
+        action['options_status'] = 'manual_constraint_review_required_no_safe_geometry_inferred'
     return {'code': code, 'message': message, 'assertion': 'inconclusive',
             'restoration_status': restoration_status,
             'document_context_restoration_status': document_context_restoration_status,

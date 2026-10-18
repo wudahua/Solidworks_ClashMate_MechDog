@@ -8,15 +8,15 @@ from pathlib import Path
 from verify_release import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.2-alpha.9"
+VERSION = "0.4.3-alpha.0"
 
 
 def build(candidate=False):
-    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.2-alpha.9.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
+    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.3-alpha.0.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
     sources += sorted((ROOT/"executor").glob("*.cs"))
     sources += [ROOT/"executor/build.ps1"]
     sources += sorted((ROOT/"sw_mcp").glob("*.py"))
-    sources += [ROOT/"scripts"/name for name in ("self_check.py", "validate_runtime.py", "install_preflight.py", "build_release.py", "verify_release.py", "upgrade.py", "recover.py", "local_storage.py")]
+    sources += [ROOT/"scripts"/name for name in ("self_check.py", "validate_runtime.py", "install_preflight.py", "build_release.py", "verify_release.py", "upgrade.py", "recover.py", "local_storage.py", "lease_access.py")]
     sources += [ROOT/"tests"/name for name in ("test_service.py", "test_reliability.py", "motion_acceptance_v04.py", "motion_protocol_v04.py", "motion_recovery_v04.py", "motion_source_revision_v04.py", "motion_reliability_v04.py", "motion_reset_recovery_v04.py", "motion_time_axis_v04.py", "candidate_geometry_v04.py", "study_history_v04.py", "motion_startup_retry_v04.py", "motion_history_v04.py", "motion_feature_evidence_v04.py", "motion_history_diagnostics_v04.py", "motion_intent_v041.py", "basic_mates_v041.py", "mate_protocol_v041.py")]
     sources += [ROOT/"tests"/name for name in ("test_installation.py", "SessionConnectionTests.cs", "session_connection_checks.py", "session_connection_native.py", "installation_powershell_checks.py")]
     sources += [ROOT/"tests"/name for name in ("relative_motion_checks.py", "test_mechanism_feedback.py", "mechanism_protocol_checks.py")]
@@ -28,6 +28,7 @@ def build(candidate=False):
     sources += [ROOT/".github/workflows/release-validation.yml"]
     sources += [ROOT/"tests"/name for name in ("test_v042a5.py", "v042a5_policy_checks.py", "v042a5_short_native.py", "v042a5_query_native.py", "v042a5_reset_native.py", "run_offline_policies.py")]
     sources += [ROOT/"tests/test_v042a6.py", ROOT/"tests/grid_protocol_checks.py"]
+    sources += [ROOT/"tests/test_v043a0.py", ROOT/"tests/v043a0_policy_checks.py", ROOT/"tests/v043a0_timing_native.py"]
     sources += [ROOT/"tests/test_v042a9.py"]
     sources += [ROOT/"tests/check_entrypoints.py"]
     sources += [ROOT/"tests/test_v042a8.py", ROOT/"tests/v042a8_policy_checks.py", ROOT/"tests/v042a8_performance_native.py", ROOT/"tests/upgrade_powershell_checks.py"]
