@@ -104,10 +104,22 @@ class Artifacts:
             raise ValueError("identity")
         return item
 
-    def summary(self, run_id):
+    @staticmethod
+    def _require_verified(data, info):
+        if (type(data.get('frames')) is not int or type(data.get('components')) is not int
+                or data['frames'] < 2 or data['components'] < 1
+                or data.get('result_validity') != 'verified' or data.get('restoration_status') != 'restored'
+                or data.get('sampling_status') != 'completed' or info.get('artifact_integrity') != 'verified'
+                or data.get('native_time_axis_verified') is not True
+                or info.get('frames') != data.get('frames') or info.get('components') != data.get('components')
+                or info.get('pose_rows') != data.get('frames', 0) * data.get('components', 0)):
+            raise ArtifactError('RESULTS_UNVERIFIED', '历史结果缺少完整的已验证采样或恢复证明；使用 get_run_artifacts 审查，或显式 allow_unverified_history=True 读取诊断。不证明当前模型有效。')
+
+    def summary(self, run_id, require_verified=False):
         data, manifest, poses = self._load(run_id)
-        keys = ("run_id", "model_id", "parent_model_id", "probe_input_scope", "probe_checkpoint_id", "study", "solver_status", "calculate_returned_success", "physics_validation_status", "result_validity_scope", "sampling_status", "restoration_status", "result_validity", "duration_s", "output_fps", "frames", "components", "motion_detected", "maximum_translation_from_frame0_m", "maximum_rotation_coefficient_delta_from_frame0", "input_pose_to_frame0_difference", "failure", "failure_diagnostics", "restoration_failure", "drive_validation", "validation_scope", "motion_validation", "component_motion_overview", "history_usage")
+        keys = ("run_id", "model_id", "parent_model_id", "probe_input_scope", "probe_checkpoint_id", "study", "solver_status", "calculate_returned_success", "physics_validation_status", "result_validity_scope", "sampling_status", "restoration_status", "result_validity", "duration_s", "output_fps", "frames", "components", "motion_detected", "maximum_translation_from_frame0_m", "maximum_component_origin_translation_from_frame0_m", "translation_metric_definition", "maximum_rotation_coefficient_delta_from_frame0", "input_pose_to_frame0_difference", "failure", "failure_diagnostics", "restoration_failure", "drive_validation", "validation_scope", "motion_validation", "component_motion_overview", "history_usage")
         info = self._csv_info(data, poses) if poses.is_file() else {}
+        if require_verified: self._require_verified(data, info)
         from sw_mcp.replay_images import ReplayImages
         try:
             images = ReplayImages(self.root).list(run_id)
@@ -162,12 +174,13 @@ class Artifacts:
         next_cursor = base64.b64encode(json.dumps({**identity, "offset": offset+len(rows)}).encode()).decode() if more else None
         return {"run_id": run_id, "result_validity": data.get("result_validity", "inconclusive"), "restoration_status": data.get("restoration_status", "unknown"), "manifest_status": data['manifest_status'], "legacy_without_manifest": data.get('legacy_without_manifest', False), "current_model_validity": "not_checked_offline", **info, "rows": rows, "returned": len(rows), "next_cursor": next_cursor, "access": "saved_artifacts_without_COM"}
 
-    def export_history_curve(self, run_id, component_id, quantity, axis):
+    def export_history_curve(self, run_id, component_id, quantity, axis, require_verified=False):
         """Explicit saved-data export; does not consult or change any CAD session."""
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", component_id) or quantity not in {"position", "displacement", "linear_velocity", "angular_velocity"} or axis not in {"x", "y", "z", "magnitude"}:
             raise ValueError("曲线组件、类型或坐标轴无效。")
         data, manifest, path = self._load(run_id)
         info = self._csv_info(data, path)
+        if require_verified: self._require_verified(data, info)
         if info['artifact_integrity'] != 'verified' or data.get('sampling_status') != 'completed' or data.get('native_time_axis_verified') is not True:
             raise ArtifactError("HISTORY_EXPORT_INCOMPLETE", "只有哈希与原生时间轴已核验的完整采样可导出历史曲线。")
         with path.open(encoding='utf-8-sig', newline='') as stream:
@@ -214,6 +227,9 @@ class Artifacts:
             writer.writerows((r['time_s'],v) for r,v in zip(rows,values))
         temporary.replace(target)
         result = {'run_id': run_id, 'component_id': component_id, 'quantity': quantity, 'axis': axis, 'unit': unit, 'sample_count': count, 'min': min(values), 'max': max(values), 'csv_path': str(target), 'metadata_path': str(metadata), 'result_validity': data.get('result_validity','inconclusive'), 'restoration_status': data.get('restoration_status','unknown'), 'artifact_integrity': 'verified', 'poses_sha256': info['observed_poses_sha256'], 'current_model_validity': 'not_checked_offline', 'access': 'explicit_saved_history_without_COM', 'coordinate_frame': 'assembly_global', 'reference_point': 'component_coordinate_origin', 'physical_validation_claim': False, 'warning': '仅导出已保存采样，不证明请求运动通过或当前CAD状态有效；速度为数值导数。'}
+        result.update(historical_data=True, history_input_scope='recorded_run_inputs_not_current_model',
+                      access='verified_saved_history_without_COM' if require_verified else 'explicit_saved_history_without_COM',
+                      verification_requirement='verified_complete_sampling_and_restoration' if require_verified else 'explicit_historical_diagnostic_read')
         metadata_temporary = metadata.with_suffix('.json.tmp')
         with metadata_temporary.open('x',encoding='utf-8') as stream:
             stream.write(json.dumps(result,ensure_ascii=False,indent=2))

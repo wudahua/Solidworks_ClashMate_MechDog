@@ -22,6 +22,6 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
 }
 & $PythonPath -I $runtimeCheck --python $PythonPath --venv $venvPath
 if ($LASTEXITCODE -ne 0) { throw 'Virtual environment identity mismatch; inspect runtime diagnostics before reinstalling.' }
-& $venvPython -m pip --isolated install --index-url $PipIndexUrl -r (Join-Path $PSScriptRoot 'requirements.lock.txt')
+& $venvPython -m pip --isolated --disable-pip-version-check install --index-url $PipIndexUrl -r (Join-Path $PSScriptRoot 'requirements.lock.txt')
 if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
 & (Join-Path $PSScriptRoot 'executor\build.ps1')

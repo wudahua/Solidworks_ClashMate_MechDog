@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .bridge import Bridge, CadError
 from . import job_payload
+from .errors import operational_error
 
 
 def verification_fields(operation, result=None, error=None):
@@ -66,13 +67,22 @@ class Jobs:
             result = self.bridge.request(job["operation"], **job["params"])
         except CadError as exc:
             update = {"status": "timed_out" if exc.code == "CAD_TIMEOUT" else "executor_lost" if exc.code == "EXECUTOR_LOST" else "failed",
-                      "error": {"code": exc.code, "message": str(exc), "assertion": "inconclusive", "restoration_status": exc.restoration_status, "document_context_restoration_status": exc.document_context_restoration_status, "diagnostics": exc.diagnostics}}
+                      "error": operational_error(exc.code, str(exc), exc.restoration_status, exc.diagnostics, exc.document_context_restoration_status, job_created=True)}
         except Exception as exc:
-            update = {"status": "failed", "error": {"code": "SERVICE_ERROR", "message": str(exc), "assertion": "inconclusive"}}
+            update = {"status": "failed", "error": operational_error("SERVICE_ERROR", "任务服务发生异常；保留任务和恢复日志，先核对原请求状态。", job_created=True)}
         else:
             update = {"status": "succeeded", "execution_status": "completed", "result": result}
         update.update(verification_fields(job["operation"], update.get("result"), update.get("error")))
         update["execution_succeeded"] = update["status"] == "succeeded"
+        if 'error' in update and job['params'].get('run_id'):
+            run_id = job['params']['run_id']
+            if re.fullmatch(r'[a-f0-9]{32}', run_id):
+                folder = self.root / 'runs' / run_id
+                update['error']['diagnostics']['artifacts'] = {
+                    'run_id': run_id, 'manifest_path': str(folder / 'solve.json') if (folder / 'solve.json').is_file() else None,
+                    'time_axis_file': str(folder / 'time-axis.json') if (folder / 'time-axis.json').is_file() else None,
+                    'poses_csv': str(folder / 'component-poses.csv') if (folder / 'component-poses.csv').is_file() else None,
+                    'query': {'tool': 'get_run_artifacts', 'arguments': {'run_id': run_id}}}
         with self._lock:
             job.update(update, finished_at=time.time())
             job["service_timings"] = {"queue_wait_s": job["started_at"] - job["created_at"],
@@ -169,4 +179,8 @@ class Jobs:
         if "verification_passed" not in job:
             job.update(verification_fields(job["operation"], job.get("result"), job.get("error")))
             job["verification_fields_source"] = "derived_read_only_from_saved_explicit_assertion"
+        if isinstance(job.get('error'), dict) and 'next_action' not in job['error']:
+            old = job['error']
+            job['error'] = {**old, **operational_error(old['code'], old.get('message', ''), old.get('restoration_status', 'unknown'), old.get('diagnostics'), old.get('document_context_restoration_status', 'not_required'), job_created=True)}
+            job['error_contract_source'] = 'read_only_projection_saved_record_unchanged'
         return job_payload.bound(self.root, job)

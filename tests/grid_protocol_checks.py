@@ -61,6 +61,32 @@ server.mcp.run()
                         assert set(error['diagnostics']['accepted_keys']) == set(tool.input_schema.get('properties', {}))
                         assert error['assertion'] == 'not_applicable' and error['restoration_status'] == 'not_required'
                         assert not log.exists()
+                    type_cases = 0
+                    enum_cases = 0
+                    for tool in tools.tools:
+                        props = tool.input_schema.get('properties', {})
+                        valid = {}
+                        for key, schema in props.items():
+                            valid[key] = schema.get('default', schema.get('enum', [schema.get('const', {'string': 'none', 'number': 1, 'integer': 30, 'boolean': False}.get(schema.get('type'), 'none'))])[0])
+                        for key, schema in props.items():
+                            bad = {'number': [True, '1.0', None], 'integer': [True, '30', 30.5, None],
+                                   'boolean': [1, 'false', None], 'string': [True, 123, None]}.get(schema.get('type'), [])
+                            if 'enum' in schema or 'const' in schema:
+                                bad.append('__invalid_enum__')
+                            for value in bad:
+                                response = await client.call_tool(tool.name, {**valid, key: value})
+                                error = response.structured_content['error']
+                                assert response.is_error and error['code'] == 'INVALID_ARGUMENT', (tool.name, key, value)
+                                assert error['diagnostics']['field'] == key
+                                assert not error['diagnostics']['cad_dispatched'] and not error['diagnostics']['job_created']
+                                assert 'pydantic' not in response.content[0].text.lower() and 'Error executing tool' not in response.content[0].text
+                                if value == '__invalid_enum__':
+                                    assert error['diagnostics']['accepted_values']
+                                    enum_cases += 1
+                                type_cases += 1
+                                assert not log.exists()
+                    report['strict_type_and_enum_refusals'] = type_cases
+                    report['enum_refusals'] = enum_cases
                     for args in ({**base, 'compatibility_probe': True, 'duration_s': .05, 'output_fps': 100},
                                  {**base, 'compatibility_probe': True, 'probe_duration': .1}):
                         response = await client.call_tool('preflight_motion', args)

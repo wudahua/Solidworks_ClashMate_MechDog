@@ -1,0 +1,23 @@
+"""Shared operational failure contract. A timeout never proves CAD stopped."""
+import copy
+
+
+def operational_error(code, message, restoration_status='unknown', diagnostics=None,
+                      document_context_restoration_status='not_required', *, job_created=None):
+    diagnostics = copy.deepcopy(diagnostics or {})
+    diagnostics.setdefault('cad_dispatched', None)  # unknown is distinct from a pre-dispatch refusal
+    diagnostics.setdefault('job_created', job_created)
+    token = diagnostics.get('next_action')
+    if isinstance(token, str):
+        diagnostics['next_action_code'] = token  # retain legacy field for existing clients
+    uncertain = restoration_status not in {'restored', 'not_required'} or code in {'CAD_TIMEOUT', 'EXECUTOR_LOST', 'EXECUTOR_PROTOCOL_ERROR'}
+    action = {'automatic_retry': False, 'options': [],
+              'instruction': ('先读取 get_recovery_state 并核对原请求是否结束；恢复未知时使用该模型的检查点恢复。不要重复派发写入。'
+                              if uncertain else '读取完整失败诊断与已保存工件，核对参数、原生状态和恢复记录后再显式决定下一步。'),
+              'recovery_state_query': {'tool': 'get_recovery_state', 'arguments': {}},
+              'options_status': 'no_safe_parameter_change_inferred_from_error_code'}
+    if isinstance(token, str): action['action_code'] = token
+    return {'code': code, 'message': message, 'assertion': 'inconclusive',
+            'restoration_status': restoration_status,
+            'document_context_restoration_status': document_context_restoration_status,
+            'diagnostics': diagnostics, 'next_action': action}

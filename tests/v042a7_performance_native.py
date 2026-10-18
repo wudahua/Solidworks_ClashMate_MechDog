@@ -76,6 +76,7 @@ def main():
     save()
     print(json.dumps({k: v for k, v in report.items() if k not in ('source_hashes', 'executor_source_hashes', 'connection')}, ensure_ascii=True), flush=True)
     if not report['completed']: raise SystemExit(1)
+    return report
 
 
 if __name__ == '__main__': main()

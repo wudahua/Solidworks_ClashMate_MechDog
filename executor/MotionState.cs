@@ -30,6 +30,17 @@ public partial class Cad {
     static void ApplyStudyStates(IModelDoc2 doc,StudyState[] states,Dictionary<string,double[]> expectedPoses=null,Action<string> phase=null) {
         Action<string> report=phase??(s=>{});report("checkpoint_reading_study_states");
         var mgr=(IMotionStudyManager)doc.Extension.GetMotionStudyManager();bool cacheRehydrated=false;
+        // Exact reopened files often already contain the complete recorded state.
+        // Even Stop() can dirty the document in this case; avoid all native writes
+        // only after verifying clocks/settings, every pose, and stopped playback.
+        if(expectedPoses!=null){
+            bool stateMatches=true;try{VerifyStudyStates(doc,states);}catch(Exception e){if(!e.Message.StartsWith("CHECKPOINT_"))throw;stateMatches=false;}
+            var loaded=Transforms(doc);
+            bool posesMatch=expectedPoses.Count==loaded.Count&&expectedPoses.All(p=>loaded.ContainsKey(p.Key)&&PoseValidation.Matches(p.Value,loaded[p.Key])&&p.Value.Zip(loaded[p.Key],(a,b)=>Math.Abs(a-b)).Max()<=1e-7);
+            if(stateMatches&&posesMatch&&states.All(v=>!((IMotionStudy)mgr.GetMotionStudy(v.name)).IsPlaying)){
+                report("checkpoint_reopened_state_verified_without_native_writes");Log("RESTORE_REOPENED_STATE_ALREADY_VERIFIED no_native_writes=true");return;
+            }
+        }
         if(expectedPoses!=null)Log("RESTORE_BEFORE_APPLY_STATES "+Json.Serialize(new{pose_change=PoseChange(expectedPoses,Transforms(doc)),studies=StudyStates(doc)}));
         // An inactive study's clock is independent of the selected tab. Never activate every study.
         foreach(var state in states){var s=(IMotionStudy)mgr.GetMotionStudy(state.name);if(s==null)throw new Exception("CHECKPOINT_STUDY_MISSING");if(s.StudyType!=state.type)s.StudyType=state.type;if(Math.Abs(s.GetDuration()-state.duration_s)>1e-8&&!s.SetDuration(state.duration_s))throw new Exception("CHECKPOINT_SETTINGS_MISMATCH");var props=(IMotionStudyProperties)s.GetProperties(s.StudyType);if(props.GetFrameRate()!=state.fps)props.SetFrameRate(state.fps);if(!state.active&&Math.Abs(s.GetTime()-state.time_s)>1e-8 ){bool selected=s.SetTime(state.time_s);Application.DoEvents();s.Stop();if(Math.Abs(s.GetTime()-state.time_s)>1e-8||s.IsPlaying)throw new CadFault("CHECKPOINT_TIME_RESTORE_FAILED","未激活算例时间回读不符。",new{study=state.name,set_time_return=selected,actual_time_s=s.GetTime(),expected_time_s=state.time_s,playing=s.IsPlaying});}}

@@ -100,6 +100,13 @@ def upgrade(package,target,python,solidworks_dir='',dry_run=False,install=True):
         if install:preflight(target,python,solidworks_dir)
         journal=target/'runs/executor-state.json';before=journal.read_bytes() if journal.exists() else None
         backup=target/'upgrade-backups'/uuid.uuid4().hex;backup.mkdir(parents=True)
+        status={**plan,'backup_directory':str(backup),'committed':False,'rollback_verified':False,'stage':'backing_up'}
+        def receipt(stage):
+            status['stage']=stage
+            temporary=backup/'receipt.tmp'
+            temporary.write_text(json.dumps(status,ensure_ascii=False,indent=2),encoding='utf-8')
+            temporary.replace(backup/'receipt.json')
+        receipt('backing_up')
         managed={n:target/safe_relative(n) for n in contents};existing=set()
         bin_dir=target/'executor/bin'
         for name in ('SwExecutor.exe','build-manifest.json','SolidWorks.Interop.sldworks.dll','SolidWorks.Interop.swconst.dll','SolidWorks.Interop.swmotionstudy.dll'):
@@ -113,17 +120,21 @@ def upgrade(package,target,python,solidworks_dir='',dry_run=False,install=True):
             if p.exists():
                 if not p.is_file():raise ValueError('Source destination is not a file: '+name)
                 saved=backup/name;saved.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(p,saved);existing.add(name)
-        status={**plan,'backup_directory':str(backup),'committed':False,'rollback_verified':False}
+        receipt('backup_complete')
         try:
+            receipt('copying_sources')
             for name,data in contents.items():
                 p=target/safe_relative(name);reject_links(p,target);p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
             verify(target)
+            receipt('sources_verified')
             if install:
+                receipt('installing_and_compiling')
                 if not Path(python).is_file():raise ValueError('Specify an existing base Python runtime')
                 command=['powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',str(target/'install.ps1'),'-PythonPath',str(python)]
                 if solidworks_dir:command+=['-SolidWorksInstallDir',solidworks_dir]
                 subprocess.run(command,check=True)
             final_integrity=verify(target)
+            receipt('verifying_commit')
             after=journal.read_bytes() if journal.exists() else None
             if before!=after:raise RuntimeError('Recovery journal changed unexpectedly; preserve backup and inspect')
             status.update(committed=True,recovery_journal_unchanged=True,source_integrity_verified=True,final_source_files=final_integrity['source_files'],environment_scope='existing_venv_validated_by_install_not_snapshot_rollback',executor_compiled=install)
@@ -137,9 +148,9 @@ def upgrade(package,target,python,solidworks_dir='',dry_run=False,install=True):
                     elif p.is_file():p.unlink()
                 except Exception as failure:rollback_errors.append(str(failure))
             status.update(error=str(error),rollback_verified=not rollback_errors,rollback_errors=rollback_errors,recovery_journal_unchanged=(journal.read_bytes() if journal.exists() else None)==before)
-            (backup/'receipt.json').write_text(json.dumps(status,ensure_ascii=False,indent=2),encoding='utf-8')
+            receipt('failed_rollback_verified' if not rollback_errors else 'failed_rollback_incomplete')
             raise RuntimeError('Upgrade failed; source/binary rollback recorded at '+str(backup/'receipt.json')) from error
-        (backup/'receipt.json').write_text(json.dumps(status,ensure_ascii=False,indent=2),encoding='utf-8');return status
+        receipt('completed');return status
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--package',required=True);parser.add_argument('--target',required=True);parser.add_argument('--python',required=True);parser.add_argument('--solidworks-install-dir',default='');parser.add_argument('--dry-run',action='store_true');args=parser.parse_args()

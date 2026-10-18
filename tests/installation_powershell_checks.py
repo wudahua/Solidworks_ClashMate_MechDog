@@ -49,13 +49,13 @@ def main():
     successful = invoke(folder, "install.ps1", mirror)
     assert successful.returncode == 0, successful.stdout + successful.stderr
     calls = [json.loads(line) for line in (folder / "pip-calls.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert len(calls) == 1 and calls[0][:4] == ["--isolated", "install", "--index-url", mirror]
+    assert len(calls) == 1 and calls[0][:5] == ["--isolated", "--disable-pip-version-check", "install", "--index-url", mirror]
     assert "--trusted-host" not in calls[0] and "-r" in calls[0]
     report["cases"].append("Process Bypass installer passes locked requirements and selected HTTPS mirror to pip")
     wrapper = invoke(folder, "初始化环境.ps1", "https://pypi.org/simple")
     assert wrapper.returncode == 0, wrapper.stdout + wrapper.stderr
     calls = [json.loads(line) for line in (folder / "pip-calls.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert len(calls) == 2 and calls[1][3] == "https://pypi.org/simple"
+    assert len(calls) == 2 and calls[1][4] == "https://pypi.org/simple"
     report["cases"].append("Chinese compatibility entry forwards parameters in Windows PowerShell 5.1")
     before = (folder / "pip-calls.jsonl").read_bytes()
     for index in ("http://example.invalid/simple", "https://name:password@example.invalid/simple", "not-a-url", "https://example.invalid/simple?token=secret"):
