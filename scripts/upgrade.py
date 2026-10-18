@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import uuid
 import zipfile
 from contextlib import contextmanager
@@ -14,11 +15,11 @@ from pathlib import Path
 try:
     from .verify_release import safe_relative, reject_links, validate_manifest, verify
     from .install_preflight import preflight
-    from .lease_access import open_lease_file, lease_diagnostics
+    from .lease_access import open_lease_file, lock_lease_file, lease_diagnostics
 except ImportError:
     from verify_release import safe_relative, reject_links, validate_manifest, verify
     from install_preflight import preflight
-    from lease_access import open_lease_file, lease_diagnostics
+    from lease_access import open_lease_file, lock_lease_file, lease_diagnostics
 
 
 class UpgradeFailure(RuntimeError):
@@ -37,12 +38,15 @@ class UpgradeFailure(RuntimeError):
             instruction = '停用目标安装目录及其他客户端中的本项目 MCP，等待执行器退出后显式重新预检；不删除锁或恢复日志，不结束不明进程。'
         if self.code == 'UPGRADE_EXECUTOR_ABANDONED':
             instruction = '原生互斥体返回 WAIT_ABANDONED；保留并检查恢复日志，不能视为正常空闲或直接重试升级。'
-        return {'ok': False, 'schema_version': 2, 'upgrade_result_schema_version': 1, 'code': self.code,
+        stage = state.get('stage') or self.diagnostics.get('stage')
+        return {'ok': False, 'schema_version': 2, 'receipt_schema_version': 2, 'upgrade_result_schema_version': 1, 'code': self.code,
                 **{key: state.get(key) for key in ('stage','failure_stage','python_started','target_mutation_started','backup_created','receipt_path','receipt_stage_persisted','receipt_write_error','committed','rollback_attempted','rollback_verified','rollback_status','recovery_journal_unchanged','installation_state')},
                 'processes_stopped': False, 'automatic_retry': False,
-                'safe_to_start_mcp': False,
+                'stage': stage, 'failure_stage': state.get('failure_stage') or stage,
+                'safe_to_start_mcp': False if state.get('target_mutation_started') else None,
+                'mcp_start_admission': 'not_evaluated_use_normal_lease_recovery_and_COM_handshake',
                 'managed_files_consistent': not state.get('target_mutation_started', False) or rollback == 'verified',
-                'error': {'code': self.code, 'message': str(self), 'stage': state.get('stage'),
+                'error': {'code': self.code, 'message': str(self), 'stage': stage,
                           'diagnostics': {**self.diagnostics, 'rollback_errors': state.get('rollback_errors', []),
                                           'original_failure_message': state.get('error'), 'target_directory': state.get('target_directory'),
                                           'mutation_scope': 'managed_source_and_executor_binaries_not_dependency_environment'},
@@ -88,7 +92,6 @@ def idle_installation(root):
     if os.name!='nt':raise RuntimeError('Upgrade requires Windows')
     folder=root/'runs';reject_links(folder,root);folder.mkdir(exist_ok=True)
     path=folder/'executor-owner.lock';reject_links(path,root)
-    import msvcrt
     try:file=open_lease_file(path)
     except OSError as error:
         diagnostics=lease_diagnostics(path,error,'open_lease')
@@ -102,8 +105,11 @@ def idle_installation(root):
     try:
         if file.seek(0,2)==0:file.write(b'0');file.flush()
         file.seek(0)
-        try:msvcrt.locking(file.fileno(),msvcrt.LK_NBLCK,1);locked=True
-        except OSError as error:raise UpgradeFailure('UPGRADE_LEASE_BUSY','Stop this installation MCP service before upgrading; no process was stopped',diagnostics={**lease_diagnostics(path,error,'lock_lease'),'byte_lock_conflict_observed':True}) from error
+        try:lock_lease_file(file);locked=True
+        except OSError as error:
+            diagnostics=lease_diagnostics(path,error,'lock_lease')
+            raise UpgradeFailure('UPGRADE_LEASE_BUSY' if diagnostics['occupied_proven'] else 'UPGRADE_LEASE_ACCESS_FAILED',
+                                 '服务锁存在原生锁冲突；停用相关服务后显式重试。' if diagnostics['occupied_proven'] else '获取升级锁失败；未证明存在占用者。',diagnostics=diagnostics) from error
         mutex=kernel.CreateMutexW(None,False,'Local\\SolidWorksClashMate_MechDog_Executor')
         if not mutex:raise RuntimeError('Cannot verify executor mutex')
         status=kernel.WaitForSingleObject(mutex,0);owned=status in (0,0x80)
@@ -114,14 +120,17 @@ def idle_installation(root):
     finally:
         if owned:kernel.ReleaseMutex(mutex)
         if mutex:kernel.CloseHandle(mutex)
-        if locked:file.seek(0);msvcrt.locking(file.fileno(),msvcrt.LK_UNLCK,1)
+        if locked:lock_lease_file(file,unlock=True)
         file.close()
 
 def upgrade(package,target,python,solidworks_dir='',dry_run=False,install=True):
-    state={'schema_version':2,'upgrade_result_schema_version':1,'stage':'validating_target','python_started':True,'target_mutation_started':False,
+    state={'schema_version':2,'receipt_schema_version':2,'upgrade_result_schema_version':1,'stage':'validating_target','python_started':True,'target_mutation_started':False,
            'backup_created':False,'receipt_path':None,'committed':False,'rollback_attempted':False,
            'rollback_verified':None,'rollback_status':'not_required','installation_state':'unchanged',
-           'recovery_journal_unchanged':None,'target_directory':str(Path(target).absolute())}
+           'recovery_journal_unchanged':None,'receipt_stage_persisted':None,'receipt_write_error':None,
+           'safe_to_start_mcp':None,'managed_files_consistent':True,
+           'mcp_start_admission':'not_evaluated_use_normal_lease_recovery_and_COM_handshake',
+           'target_directory':str(Path(target).absolute())}
     try:return _upgrade(package,target,python,solidworks_dir,dry_run,install,state)
     except Exception as error:
         code=error.code if isinstance(error,UpgradeFailure) else {
@@ -134,9 +143,9 @@ def upgrade(package,target,python,solidworks_dir='',dry_run=False,install=True):
 
 def _upgrade(package,target,python,solidworks_dir,dry_run,install,state):
     target=Path(target).absolute()
-    if not target.is_dir():raise ValueError('Target must be an existing installation directory')
+    if not target.is_dir():raise UpgradeFailure('UPGRADE_TARGET_MISSING','目标安装目录不存在；请核对 TargetDir。')
     if target.resolve()!=target:raise ValueError('Aliased installation root refused')
-    if not (target/'motion_server.py').is_file() or not (target/'executor').is_dir():raise ValueError('Target is not a recognized MCP installation')
+    if not (target/'motion_server.py').is_file() or not (target/'executor').is_dir():raise UpgradeFailure('UPGRADE_TARGET_NOT_INSTALLATION','所选目录不是可识别的 MCP 安装目录。')
     reject_links(target,target)
     # Check every destination and its ancestors before changing any source file.
     state['stage']='validating_package'
@@ -164,7 +173,7 @@ def _upgrade(package,target,python,solidworks_dir,dry_run,install,state):
         journal=target/'runs/executor-state.json';before=journal.read_bytes() if journal.exists() else None
         state['stage']='creating_backup'
         backup=target/'upgrade-backups'/uuid.uuid4().hex;backup.mkdir(parents=True)
-        state.update(plan,backup_directory=str(backup),backup_created=True,receipt_path=str(backup/'receipt.json'),rollback_verified=False,stage='backing_up')
+        state.update(plan,backup_directory=str(backup),backup_created=True,receipt_path=str(backup/'receipt.json'),rollback_verified=None,stage='backing_up')
         status=state
         def receipt(stage):
             status['stage']=stage
@@ -204,7 +213,7 @@ def _upgrade(package,target,python,solidworks_dir,dry_run,install,state):
                 if not Path(python).is_file():raise ValueError('Specify an existing base Python runtime')
                 command=['powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',str(target/'install.ps1'),'-PythonPath',str(python)]
                 if solidworks_dir:command+=['-SolidWorksInstallDir',solidworks_dir]
-                subprocess.run(command,check=True)
+                subprocess.run(command,check=True,stdout=sys.stderr)
             final_integrity=verify(target)
             receipt('verifying_commit')
             after=journal.read_bytes() if journal.exists() else None
@@ -239,6 +248,9 @@ def _upgrade(package,target,python,solidworks_dir,dry_run,install,state):
         receipt('completed');return status
 
 def main():
+    # CLI wire contract is independent of Windows console code page or caller env.
+    if hasattr(sys.stdout,'reconfigure'):sys.stdout.reconfigure(encoding='utf-8',errors='strict')
+    if hasattr(sys.stderr,'reconfigure'):sys.stderr.reconfigure(encoding='utf-8',errors='strict')
     parser=argparse.ArgumentParser();parser.add_argument('--package',required=True);parser.add_argument('--target',required=True);parser.add_argument('--python',required=True);parser.add_argument('--solidworks-install-dir',default='');parser.add_argument('--dry-run',action='store_true');args=parser.parse_args()
     try:result=upgrade(args.package,args.target,args.python,args.solidworks_install_dir,args.dry_run)
     except UpgradeFailure as error:print(json.dumps(error.payload(),ensure_ascii=False));return 1
