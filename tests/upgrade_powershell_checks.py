@@ -47,7 +47,7 @@ def check():
             if start_failure:
                 assert value['code'] == 'UPGRADE_WRAPPER_START_FAILED' and value['python_started'] is False
                 assert value['error']['code'] == value['code'] and value['schema_version'] == 2
-                assert value['rollback_status'] == 'not_required' and value['safe_to_start_mcp'] is False
+                assert value['rollback_status'] == 'not_required' and value['safe_to_start_mcp'] is None
                 assert value['target_mutation_started'] is False and value['backup_created'] is False
                 assert not (root/'target').exists()
             else:
@@ -55,6 +55,19 @@ def check():
                 assert value['message'] == '参数原样保留' and value['encoding'] == 'utf-8'
                 assert b'informational stderr' in result.stderr
             rows.append({'dry_run': dry, 'start_failure': start_failure, 'exit_code': result.returncode, 'captured_json': True, 'parent_environment_restored': True})
+        # Cross the outer console encoding boundary: no Out-String or WriteAllText.
+        for start_failure in (False,True):
+            executable=str(root/'missing-python.exe') if start_failure else sys.executable
+            command="[Console]::OutputEncoding=[Text.Encoding]::GetEncoding(936); & "+quote(root/'upgrade.ps1')+' -SourcePackage '+quote(root/'package.zip')+' -TargetDir '+quote(root/'target')+' -PythonPath '+quote(executable)+'; exit $LASTEXITCODE'
+            raw=subprocess.run([powershell,'-NoProfile','-ExecutionPolicy','Bypass','-Command',command],env=clean_env,capture_output=True,timeout=30)
+            assert not raw.stdout.startswith(b'\xef\xbb\xbf')
+            value=json.loads(raw.stdout.decode('utf-8'))
+            assert raw.returncode==(1 if start_failure else 0)
+            if start_failure:
+                assert value['installation_state']=='unchanged' and value['managed_files_consistent'] is True
+                assert value['failure_stage']=='start_python' and value['rollback_attempted'] is False
+            else:assert value['message']=='参数原样保留'
+            rows.append({'raw_bytes_utf8':True,'forced_parent_codepage':936,'start_failure':start_failure})
     assert 'EnvironmentVariables[' not in (ROOT/'upgrade.ps1').read_text(encoding='utf-8')
     return {'all_passed': True, 'checks': len(rows), 'cases': rows, 'powershell': powershell, 'runtime': runtime,
             'wrapper_sha256': hashlib.sha256((ROOT/'upgrade.ps1').read_bytes()).hexdigest(),
