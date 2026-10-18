@@ -117,7 +117,7 @@ class Artifacts:
 
     def summary(self, run_id, require_verified=False):
         data, manifest, poses = self._load(run_id)
-        keys = ("run_id", "model_id", "parent_model_id", "probe_input_scope", "probe_checkpoint_id", "study", "solver_status", "calculate_returned_success", "physics_validation_status", "result_validity_scope", "sampling_status", "restoration_status", "result_validity", "duration_s", "output_fps", "frames", "components", "motion_detected", "maximum_translation_from_frame0_m", "maximum_component_origin_translation_from_frame0_m", "translation_metric_definition", "maximum_rotation_coefficient_delta_from_frame0", "input_pose_to_frame0_difference", "failure", "failure_diagnostics", "restoration_failure", "drive_validation", "validation_scope", "motion_validation", "component_motion_overview", "history_usage", "sampling_performance", "sampling_api_batch", "sampling_api_batch_restored", "time_selection_audit", "requested_drive", "native_motor_snapshot")
+        keys = ("run_id", "model_id", "parent_model_id", "probe_input_scope", "probe_checkpoint_id", "study", "solver_status", "calculate_returned_success", "physics_validation_status", "result_validity_scope", "sampling_status", "restoration_status", "result_validity", "duration_s", "output_fps", "frames", "components", "motion_detected", "maximum_translation_from_frame0_m", "maximum_component_origin_translation_from_frame0_m", "translation_metric_definition", "maximum_rotation_coefficient_delta_from_frame0", "input_pose_to_frame0_difference", "failure", "failure_diagnostics", "restoration_failure", "drive_validation", "validation_scope", "motion_validation", "component_motion_overview", "history_usage", "solve_performance", "solve_performance_artifact", "registered_native_motor_before_calculate", "drive_validation_status", "sampling_performance", "sampling_api_batch", "sampling_api_batch_restored", "time_selection_audit", "requested_drive", "native_motor_snapshot")
         info = self._csv_info(data, poses) if poses.is_file() else {}
         if require_verified: self._require_verified(data, info)
         from sw_mcp.replay_images import ReplayImages
@@ -129,7 +129,9 @@ class Artifacts:
 
     @staticmethod
     def history_usage(run_id):
-        return {'scope': 'recorded_run_inputs_offline_artifact', 'default_summary_requires_verified_complete_sampling_and_restoration': True,
+        return {'schema_version': 1, 'scope': 'recorded_run_inputs_offline_artifact', 'default_summary_requires_verified_complete_sampling_and_restoration': True,
+                'default_verified_summary': {'tool':'get_motion_summary','arguments':{'run_id':run_id},'requires_verified_complete_sampling_and_restoration':True},
+                'quarantine_artifact_query': {'tool':'get_run_artifacts','arguments':{'run_id':run_id},'requires_verified_result':False,'claim':'diagnostic_read_does_not_assert_motion_pass'},
                 'offline_export_option': 'allow_unverified_history_required_only_for_inconclusive_runs',
                 'artifact_query': {'tool': 'get_run_artifacts', 'arguments': {'run_id': run_id}},
                 'current_model_validity': 'not_checked_offline', 'warning': 'offline history does not prove current CAD validity'}

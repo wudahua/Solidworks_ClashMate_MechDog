@@ -22,6 +22,8 @@ def refuse(code, message, diagnostics=None, next_action=None):
         error['next_action']['options_status'] = 'explicit_user_selection_required'
     elif error['next_action'].get('tool'):
         error['next_action']['options_status'] = 'tool_identified_arguments_require_user_input'
+    elif code in {'INVALID_ARGUMENT','UNKNOWN_ARGUMENT'}:
+        error['next_action']['options_status'] = 'user_parameter_correction_required'
     return packed({'ok': False, 'error': error}, True)
 
 

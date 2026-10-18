@@ -24,7 +24,17 @@ CONTROLS = {"next_cursor", "cursor", "face_offset", "job_id", "checkpoint_id", "
 EVIDENCE = {'Axis', 'AxisLocal', 'PointLocal', 'axis_global', 'reference_point_global_m', 'review_items'}
 EVIDENCE_CONTAINERS = {'requested_drive', 'native_motor_snapshot', 'parameters', 'direction_reference', 'geometry'}
 EVIDENCE_KINDS = ('requested_drive', 'native_motor_snapshot', 'artifacts', 'time_selection_audit',
-                  'sampling_performance', 'sampling_api_batch', 'drive_validation', 'review_items')
+                  'sampling_performance', 'sampling_api_batch', 'drive_validation', 'review_items', 'solve_performance')
+EVIDENCE_ALIASES = {'registered_native_motor_before_calculate': 'native_motor_snapshot',
+                    'registered_drive_native_reference_observation': 'native_motor_snapshot'}
+# Removal order is explicit: performance decoration before conclusions/warnings.
+EVIDENCE_DROP_PRIORITY = ('sampling_api_batch','sampling_performance','solve_performance',
+                          'time_selection_audit','artifacts','requested_drive','review_items')
+CONCLUSION_FIELDS = {'status','kind','requested','observed_signed','unit','absolute_magnitude_error',
+                     'magnitude_tolerance','axis_change_deg','direction_verified','applicability_reason',
+                     'native_motor_parameters_match','persistent_reference_error','persistent_reference_error_name',
+                     'persistent_reference_resolved','identity_fallback_used','identity_source','inventory_complete',
+                     'study_membership','native_feature_id','native_feature_name','component_id'}
 
 
 def artifact_query(job_id, digest, pointer):
@@ -46,19 +56,21 @@ def evidence_projection(job, digest):
             if key == 'late_response':
                 continue
             pointer = path + '/' + key.replace('~', '~0').replace('/', '~1')
-            if key in EVIDENCE_KINDS and key not in found:
-                found[key] = (pointer, child)
+            kind = EVIDENCE_ALIASES.get(key, key)
+            if kind in EVIDENCE_KINDS and kind not in found:
+                found[kind] = (pointer, child)
             if isinstance(child, dict):
                 visit(child, pointer, depth + 1)
     for key in ('result', 'error'):
         visit(job.get(key), '/' + key)
     rows = {}
     identity = {key: job.get('result', {}).get(key) for key in
-                ('study', 'model_id', 'run_id', 'frames', 'components', 'result_validity', 'duration_s', 'output_fps')
+                ('study', 'model_id', 'run_id', 'frames', 'components', 'result_validity', 'duration_s', 'output_fps',
+                 'drive_validation_status','physics_validation_status','verification_status','verification_passed','assertion')
                 if isinstance(job.get('result'), dict) and key in job['result']
                 and not isinstance(job['result'][key], (dict, list)) and len(encoded(job['result'][key])) <= 160}
     if identity:
-        rows['result_identity'] = {'value': identity}
+        rows['result_identity'] = {'path':'/result', 'read':artifact_query(job['job_id'],digest,'/result'), 'value':identity}
     for kind in EVIDENCE_KINDS:
         if kind not in found:
             continue
@@ -81,7 +93,7 @@ def evidence_projection(job, digest):
                 for k, v in node.items():
                     if k in EVIDENCE and isinstance(v, list) and len(v) == 3 and all(type(n) in (int, float) and math.isfinite(n) for n in v):
                         projected[k] = v
-                    elif k in {'component_id', 'entity_id', 'study', 'type', 'speed', 'speed_rpm', 'speed_mm_s', 'name'} and isinstance(v, (str, int, float, bool)) and len(encoded(v)) <= 160:
+                    elif k in ({'component_id', 'entity_id', 'study', 'type', 'speed', 'speed_rpm', 'speed_mm_s', 'name'} | CONCLUSION_FIELDS) and (v is None or isinstance(v, (str, int, float, bool))) and len(encoded(v)) <= 160 and (type(v) is not float or math.isfinite(v)):
                         projected[k] = v
                     elif isinstance(v, dict):
                         nested = identity(v, depth + 1)
@@ -94,12 +106,30 @@ def evidence_projection(job, digest):
                 row['value_is_partial'] = True
         rows[kind] = row
     # Preserve typed reads before inline values; reserve their actual wire size.
-    for kind in reversed(EVIDENCE_KINDS):
+    for kind in EVIDENCE_DROP_PRIORITY:
         if wire_size(rows) <= 6500:
             break
         if kind in rows:
             rows[kind].pop('value', None)
             rows[kind].pop('value_is_partial', None)
+    # Critical conclusions and identity degradation flags are a separate small
+    # semantic projection, not axes. Keep them even if other inline values go.
+    for kind in ('drive_validation','native_motor_snapshot'):
+        if kind in found and isinstance(found[kind][1],dict):
+            decision={k:v for k,v in found[kind][1].items() if k in CONCLUSION_FIELDS and
+                      (v is None or isinstance(v,(str,int,float,bool))) and len(encoded(v))<=160 and
+                      (type(v) is not float or math.isfinite(v))}
+            priority=('status','persistent_reference_resolved','identity_fallback_used','persistent_reference_error',
+                      'persistent_reference_error_name','identity_source','inventory_complete','direction_verified',
+                      'kind','unit','requested','observed_signed','magnitude_tolerance','axis_change_deg')
+            if wire_size(decision)>2000:
+                small={}
+                for key in priority:
+                    if key in decision and wire_size({**small,key:decision[key]})<=2000:small[key]=decision[key]
+                decision=small
+                rows[kind]['conclusion_is_partial']=True
+            if decision:
+                rows[kind]['conclusion']=decision
     return rows
 
 
@@ -244,9 +274,16 @@ def bound(root: Path, job: dict):
     result['summary_omitted_path_count'] = len(omitted)
     result['summary_omitted_paths'] = omitted[:16]
     result['summary_omitted_paths_truncated'] = len(omitted) > 16
+    result['summary_omitted_paths_limit'] = 16
+    result['summary_omitted_paths_limit_scope'] = 'fixed_display_limit_then_wire_budget'
     if wire_size(result) > BUDGET:
         result['summary_omitted_paths'] = ['/']
         result['summary_omitted_paths_truncated'] = True
+    result['response_wire_bytes'] = 0
+    for _ in range(5):
+        actual = wire_size(result)
+        if result['response_wire_bytes'] == actual: break
+        result['response_wire_bytes'] = actual
     assert wire_size(result) <= BUDGET
     return result
 
