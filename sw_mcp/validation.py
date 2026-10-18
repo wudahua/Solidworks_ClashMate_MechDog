@@ -29,9 +29,10 @@ def refuse(code, message, diagnostics=None, next_action=None):
 
 class InputRefusal(ToolError):
     """Expected input error; direct callers retain ToolError compatibility."""
-    def __init__(self, code, message):
+    def __init__(self, code, message, diagnostics=None):
         super().__init__(message)
         self.code = code
+        self.diagnostics = diagnostics or {}
 
 
 class StrictMCPServer(MCPServer):
@@ -86,4 +87,4 @@ class StrictMCPServer(MCPServer):
             cause = error
             while cause is not None and not isinstance(cause, InputRefusal):
                 cause = cause.__cause__
-            return refuse(cause.code if cause else 'INVALID_ARGUMENT', str(cause) if cause else '参数未通过工具校验；请核对 tools/list 的声明。', {'tool': name, 'accepted_keys': accepted})
+            return refuse(cause.code if cause else 'INVALID_ARGUMENT', str(cause) if cause else '参数未通过工具校验；请核对 tools/list 的声明。', {'tool': name, 'accepted_keys': accepted, **(cause.diagnostics if cause else {})})

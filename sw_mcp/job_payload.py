@@ -280,8 +280,8 @@ def bound(root: Path, job: dict):
         result['evidence'] = evidence
     omitted = omitted_paths(job, result)
     result['summary_omitted_path_count'] = len(omitted)
-    result['summary_omitted_paths'] = omitted[:16]
-    result['summary_omitted_paths_truncated'] = len(omitted) > 16
+    result['summary_omitted_paths'] = []
+    result['summary_omitted_paths_truncated'] = bool(omitted)
     result['summary_omitted_paths_limit'] = 16
     result['summary_omitted_paths_limit_scope'] = 'fixed_display_limit_then_wire_budget'
     prefixes={}
@@ -291,14 +291,38 @@ def bound(root: Path, job: dict):
     result['summary_omitted_prefix_counts']={key:prefixes[key] for key in sorted(prefixes)[:8]}
     result['summary_omitted_prefix_counts_scope']='omitted_pointer_count_by_top_level_prefix_not_leaf_field_count'
     result['summary_omitted_prefix_counts_truncated']=len(prefixes)>8
-    if wire_size(result) > BUDGET:
-        result['summary_omitted_paths'] = ['/']
-        result['summary_omitted_paths_truncated'] = True
-    result['response_wire_bytes'] = 0
-    for _ in range(5):
-        actual = wire_size(result)
-        if result['response_wire_bytes'] == actual: break
-        result['response_wire_bytes'] = actual
+    result['summary_omitted_prefix_counts_limit']=8
+    def stamp():
+        # Fit the actual envelope including its own decimal byte counter.
+        result['response_wire_bytes'] = 0
+        for _ in range(8):
+            actual = wire_size(result)
+            if result['response_wire_bytes'] == actual: return actual
+            result['response_wire_bytes'] = actual
+        raise AssertionError('wire counter did not converge')
+    stamp()
+    for pointer in omitted:
+        if len(result['summary_omitted_paths']) >= 16: break
+        result['summary_omitted_paths'].append(pointer)
+        result['summary_omitted_paths_truncated'] = len(result['summary_omitted_paths']) < len(omitted)
+        if stamp() > BUDGET:
+            result['summary_omitted_paths'].pop()
+            result['summary_omitted_paths_truncated'] = True
+            stamp()
+    # Refill short review warnings if the full wire envelope has spare room.
+    # The evidence sub-budget is a reserve, not a reason to hide a small warning.
+    row = result.get('evidence', {}).get('review_items')
+    if row is not None and 'value' not in row:
+        node = job
+        try:
+            for token in row['path'][1:].split('/'):
+                node = node[token.replace('~1', '/').replace('~0', '~')]
+        except (KeyError, TypeError): node = None
+        value = _summary(node)
+        if node is not None and wire_size(value) <= 1600:
+            row['value'] = value
+            if stamp() > BUDGET: row.pop('value')
+    stamp()
     assert wire_size(result) <= BUDGET
     return result
 

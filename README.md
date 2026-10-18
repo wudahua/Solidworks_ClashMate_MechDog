@@ -2,9 +2,9 @@
 
 SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.3-alpha.1`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.3-alpha.2`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.3-alpha.1.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.3-alpha.2.md)。
 
 本版本保留另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
 
@@ -37,7 +37,14 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 
 
 
-## v0.4.3-alpha.1 本轮修订
+## v0.4.3-alpha.2 本轮修订
+
+- 升级器新增 `-AsciiJson` / `--ascii-json`，便于旧代码页父进程捕获 JSON；默认原始输出仍为无 BOM UTF-8。提前失败保留 `dry_run`、`target_directory`。
+- 摘要按实际线缆字节保留能容纳的完整省略路径，不使用“/”占位；明确前缀计数上限，空间允许时回填短告警。
+- `get_job` 条件参数缺失返回具体字段；配合准入增加九段单调时钟计时，标明它们属于准入总时长，不能重复相加。
+- 现场配合耗时仍可能很长。本轮不承诺跨电脑提速，也不以冗余嫌疑跳过检查点证明。
+
+## v0.4.3-alpha.1 历史修订
 
 - 原生字节锁统一保留Win32 33，与旧版锁互通；两入口的占用与访问拒绝证据同构。
 - 升级脚本原始stdout使用无BOM UTF-8，补齐包装器失败状态。调用者自行重定向文件时须另选其编码。
@@ -101,7 +108,7 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 若 PowerShell 执行策略阻止外层脚本，可直接使用基础 Python，不修改系统策略：
 
 ```powershell
-C:\Python312\python.exe scripts/upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.3-alpha.1_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
+C:\Python312\python.exe scripts/upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.3-alpha.2_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
 ```
 
 DryRun通过后使用同样参数去掉 `--dry-run`。`--python` 必须指基础Python；安装目录优先显式参数、`SW_INSTALL_DIR`，否则读取运行进程模块路径及供应商/COM注册表并验证Interop DLL；多个有效安装须显式选择，不自动选版本。发现结果传递给编译器。无法发现时才回落标准目录，缺失仍拒绝。
@@ -212,7 +219,7 @@ DryRun通过后使用同样参数去掉 `--dry-run`。`--python` 必须指基础
 先停用旧安装目录的MCP服务，保留SolidWorks打开；从新包目录调用：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.3-alpha.1_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.3-alpha.2_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
 # PythonPath填写基础Python；非默认SolidWorks安装请同时指定-SolidWorksInstallDir。
 # 预检通过后移除-DryRun；未来网络及编译仍可能失败，保留自动回滚。
 ```
@@ -220,11 +227,34 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage
 也可从新包目录直接使用等价的 Python 入口（参数与预检相同）：
 
 ```powershell
-& 'C:\Python312\python.exe' .\scripts\upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.3-alpha.1_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
+& 'C:\Python312\python.exe' .\scripts\upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.3-alpha.2_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
 # 预检通过后移除 --dry-run；非默认 SW 目录另传 --solidworks-install-dir。
 ```
 
 PowerShell 5.1 包装器不再访问 `ProcessStartInfo.EnvironmentVariables`，只在创建 Python 子进程时临时设置 UTF-8 并还原调用者环境。若创建失败，返回 `UPGRADE_WRAPPER_START_FAILED`、`python_started=false`，此时未开始备份或替换；不要把“没有回执”单独当成未执行证明。Python 已启动但调用者中断时，应先核对阶段回执及恢复日志，不能盲目重跑。回执新增 `schema_version=2`；旧无 `stage` 回执按旧版证据解释，不能一律认定失败。`-DryRun` 不生成提交回执。
+
+父 PowerShell 5.1 调用另一个 `powershell.exe` 或 Python 时，会先按父进程的 `[Console]::OutputEncoding` 解码原生 stdout；随后 `$()`、`Out-String`、`ConvertFrom-Json` 无法纠正已经解错的中文。子脚本设置 UTF-8 不能改变父进程。机器读取 JSON 推荐使用 ASCII 转义，解析后中文完全还原：
+
+```powershell
+$json = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage $zip -TargetDir $target -PythonPath $python -DryRun -AsciiJson
+$upgradeExitCode = $LASTEXITCODE
+$result = ($json | Out-String) | ConvertFrom-Json
+# Python 等价入口另加 --ascii-json；去掉 DryRun 前先核对预检结果。
+```
+
+也可以在**父进程**调用原生命令前设置 `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)`，调用后按需要还原原值。JSON 只读 stdout；不要把可能包含安装日志的 stderr 合入 JSON 再解析。`>` / `Out-File` 的文件编码是另一层，须显式选择。`-AsciiJson` 仅转义 JSON 字符，不改错误码、退出码、事务行为或 stderr。包装器在 Python 启动前失败时，`target_directory` 保留所传路径；Python 结果提供绝对路径。
+
+`next_action.options_status` 当前返回值及含义如下；客户端应容忍未来新增值，并继续读取 `instruction`、`options` 和恢复状态。
+
+| 值 | 含义 |
+| --- | --- |
+| `no_safe_parameter_change_inferred_from_error_code` | 仅凭错误码无法推导安全参数 |
+| `manual_service_disconnect_required_no_parameter_change` | 需手动断开占用服务 |
+| `manual_constraint_review_required_no_safe_geometry_inferred` | 需设计者复核约束，未推断替代几何 |
+| `explicit_user_selection_required` | 需明确选择给出的参数方案 |
+| `tool_identified_arguments_require_user_input` | 已指明工具，参数仍需用户提供 |
+| `user_parameter_correction_required` | 需更正参数 |
+| `explicit_diagnostic_read_choice_not_verification` | 可选择诊断读取路径，不表示运动验证通过 |
 
 检查套件明确分类每个 `*_checks.py`：离线入口、unittest 调用、手动离线或原生 CAD。新增未分类脚本会失败；原生验收脚本不会因为文件名相似而被 CI 自动运行。`upgrade_powershell_checks` 同时由 unittest 与独立离线入口执行，统计包含这处重叠。
 

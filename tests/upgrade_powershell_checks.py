@@ -17,7 +17,7 @@ def check():
         root = Path(directory) / "space ' quote"
         (root / 'scripts').mkdir(parents=True)
         shutil.copyfile(ROOT / 'upgrade.ps1', root / 'upgrade.ps1')
-        (root / 'scripts/upgrade.py').write_text('import json,sys,os\nsys.stderr.write("[notice] informational stderr\\n")\nprint(json.dumps({"ok":True,"args":sys.argv[1:],"message":"参数原样保留","encoding":os.environ.get("PYTHONIOENCODING")},ensure_ascii=False))\nraise SystemExit(37 if "--dry-run" in sys.argv else 0)\n', encoding='utf-8', newline='\n')
+        (root / 'scripts/upgrade.py').write_text('import json,sys,os\nsys.stderr.write("" if os.environ.get("FAKE_NO_NOTICE") else "[notice] informational stderr\\n")\nprint(json.dumps({"ok":True,"args":sys.argv[1:],"message":"参数原样保留","encoding":os.environ.get("PYTHONIOENCODING")},ensure_ascii=False))\nraise SystemExit(37 if "--dry-run" in sys.argv else 0)\n', encoding='utf-8', newline='\n')
         def quote(value): return "'" + str(value).replace("'", "''") + "'"
         powershell = shutil.which('powershell.exe')
         if not powershell:
@@ -68,6 +68,26 @@ def check():
                 assert value['failure_stage']=='start_python' and value['rollback_attempted'] is False
             else:assert value['message']=='参数原样保留'
             rows.append({'raw_bytes_utf8':True,'forced_parent_codepage':936,'start_failure':start_failure})
+        # A separate PS parent decodes native stdout BEFORE Out-String. Child
+        # OutputEncoding cannot fix the parent's CP936 decoder. Exercise both
+        # supported remedies and retain the negative control as evidence.
+        for mode, start_failure in (('legacy_negative_control',False),('parent_utf8',False),('ascii_json',False),('ascii_json',True)):
+            captured=root/(mode+str(start_failure)+'.json')
+            executable=root/'missing-python.exe' if start_failure else sys.executable
+            command=("[Console]::OutputEncoding=[Text.Encoding]::GetEncoding("+('65001' if mode=='parent_utf8' else '936')+
+                     "); $value = & "+quote(powershell)+" -NoProfile -ExecutionPolicy Bypass -File "+quote(root/'upgrade.ps1')+
+                     ' -SourcePackage '+quote(root/'package.zip')+' -TargetDir '+quote(root/'target')+' -PythonPath '+quote(executable)+
+                     (' -AsciiJson' if mode=='ascii_json' else '')+' 2>&1 | Out-String; $code=$LASTEXITCODE; [IO.File]::WriteAllText('+quote(captured)+', $value); exit $code')
+            raw=subprocess.run([powershell,'-NoProfile','-ExecutionPolicy','Bypass','-Command',command],env={**clean_env,'FAKE_NO_NOTICE':'1'},capture_output=True,timeout=30)
+            assert raw.returncode==(1 if start_failure else 0),raw.stdout+raw.stderr
+            value=json.loads(captured.read_text(encoding='utf-8-sig'))
+            if start_failure:
+                assert value['dry_run'] is False and value['target_directory']==str(root/'target')
+                assert value['code']=='UPGRADE_WRAPPER_START_FAILED'
+            elif mode=='legacy_negative_control':assert value['message']!='参数原样保留'
+            else:assert value['message']=='参数原样保留'
+            if mode=='ascii_json':assert captured.read_text(encoding='utf-8-sig').isascii()
+            rows.append({'native_child_capture':True,'mode':mode,'start_failure':start_failure,'expected_text_preserved':mode!='legacy_negative_control'})
     assert 'EnvironmentVariables[' not in (ROOT/'upgrade.ps1').read_text(encoding='utf-8')
     return {'all_passed': True, 'checks': len(rows), 'cases': rows, 'powershell': powershell, 'runtime': runtime,
             'wrapper_sha256': hashlib.sha256((ROOT/'upgrade.ps1').read_bytes()).hexdigest(),
