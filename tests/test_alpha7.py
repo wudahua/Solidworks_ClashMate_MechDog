@@ -9,7 +9,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from scripts.install_preflight import preflight
-from scripts.upgrade import upgrade
+from scripts.upgrade import upgrade, UpgradeFailure
 import test_release_feedback as release_fixtures
 
 
@@ -21,7 +21,7 @@ class UpgradePreflightTests(unittest.TestCase):
         self.write_zip()
         selected = dict(prefix='venv', base_prefix='base', base_executable='base-python', bits=64, version=[3, 12, 0])
         with patch('scripts.install_preflight.identity', return_value=selected), patch('scripts.upgrade.idle_installation') as lease:
-            with self.assertRaisesRegex(ValueError, 'must select the base Python'):
+            with self.assertRaisesRegex(UpgradeFailure, 'must select the base Python'):
                 upgrade(self.package, self.target, sys.executable, dry_run=True)
             lease.assert_not_called()
         self.assertEqual((self.target/'motion_server.py').read_bytes(), b'old source')
@@ -51,7 +51,7 @@ class UpgradePreflightTests(unittest.TestCase):
         self.write_zip()
         for dry in (True, False):
             with patch('scripts.upgrade.preflight', side_effect=ValueError('ENVIRONMENT_UNAVAILABLE')), patch('scripts.upgrade.idle_installation') as lease:
-                with self.assertRaisesRegex(ValueError, 'ENVIRONMENT_UNAVAILABLE'):
+                with self.assertRaisesRegex(UpgradeFailure, 'ENVIRONMENT_UNAVAILABLE'):
                     upgrade(self.package, self.target, sys.executable, dry_run=dry)
                 lease.assert_not_called()
         self.assertFalse((self.target/'upgrade-backups').exists())

@@ -1,5 +1,6 @@
 """Check entry point classification; native CAD is always an explicit workflow."""
 ENTRIES = {
+  "v043a0_policy_checks": {"mode": "offline_suite"},
   "alpha5_evidence_checks": {"mode": "offline_suite"},
   "session_connection_checks": {"mode": "offline_suite"},
   "axis_convention_checks": {"mode": "offline_suite"},

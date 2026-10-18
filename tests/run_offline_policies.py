@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SUITES = (
     'alpha5_evidence_checks', 'session_connection_checks', 'axis_convention_checks',
     'installation_powershell_checks', 'alpha8_policy_checks', 'alpha9_policy_checks',
-    'study_history_v04', 'upgrade_powershell_checks', 'v042_policy_checks', 'v042a1_policy_checks',
+    'study_history_v04', 'upgrade_powershell_checks', 'v043a0_policy_checks', 'v042_policy_checks', 'v042a1_policy_checks',
     'v042a2_policy_checks', 'v042a3_policy_checks', 'v042a5_policy_checks', 'v042a7_policy_checks', 'v042a8_policy_checks',
 )
 
