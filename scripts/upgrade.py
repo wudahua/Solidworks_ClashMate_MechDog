@@ -100,7 +100,7 @@ def upgrade(package,target,python,solidworks_dir='',dry_run=False,install=True):
         if install:preflight(target,python,solidworks_dir)
         journal=target/'runs/executor-state.json';before=journal.read_bytes() if journal.exists() else None
         backup=target/'upgrade-backups'/uuid.uuid4().hex;backup.mkdir(parents=True)
-        status={**plan,'backup_directory':str(backup),'committed':False,'rollback_verified':False,'stage':'backing_up'}
+        status={**plan,'schema_version':2,'backup_directory':str(backup),'committed':False,'rollback_verified':False,'stage':'backing_up'}
         def receipt(stage):
             status['stage']=stage
             temporary=backup/'receipt.tmp'
