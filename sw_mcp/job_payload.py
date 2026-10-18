@@ -29,7 +29,7 @@ EVIDENCE_ALIASES = {'registered_native_motor_before_calculate': 'native_motor_sn
                     'registered_drive_native_reference_observation': 'native_motor_snapshot'}
 # Removal order is explicit: performance decoration before conclusions/warnings.
 EVIDENCE_DROP_PRIORITY = ('sampling_api_batch','sampling_performance','solve_performance',
-                          'time_selection_audit','artifacts','requested_drive','review_items')
+                          'time_selection_audit','review_items')
 CONCLUSION_FIELDS = {'status','kind','requested','observed_signed','unit','absolute_magnitude_error',
                      'magnitude_tolerance','axis_change_deg','direction_verified','applicability_reason',
                      'native_motor_parameters_match','persistent_reference_error','persistent_reference_error_name',
@@ -93,7 +93,8 @@ def evidence_projection(job, digest):
                 for k, v in node.items():
                     if k in EVIDENCE and isinstance(v, list) and len(v) == 3 and all(type(n) in (int, float) and math.isfinite(n) for n in v):
                         projected[k] = v
-                    elif k in ({'component_id', 'entity_id', 'study', 'type', 'speed', 'speed_rpm', 'speed_mm_s', 'name'} | CONCLUSION_FIELDS) and (v is None or isinstance(v, (str, int, float, bool))) and len(encoded(v)) <= 160 and (type(v) is not float or math.isfinite(v)):
+                    elif k in ({'component_id', 'entity_id', 'study', 'type', 'speed', 'speed_rpm', 'speed_mm_s', 'name',
+                                'ComponentId','EntityId','Study','Kind','Speed','Reverse','ReferenceComponentId','MeasurementVersion'} | CONCLUSION_FIELDS) and (v is None or isinstance(v, (str, int, float, bool))) and len(encoded(v)) <= 160 and (type(v) is not float or math.isfinite(v)):
                         projected[k] = v
                     elif isinstance(v, dict):
                         nested = identity(v, depth + 1)
@@ -105,13 +106,6 @@ def evidence_projection(job, digest):
                 row['value'] = small
                 row['value_is_partial'] = True
         rows[kind] = row
-    # Preserve typed reads before inline values; reserve their actual wire size.
-    for kind in EVIDENCE_DROP_PRIORITY:
-        if wire_size(rows) <= 6500:
-            break
-        if kind in rows:
-            rows[kind].pop('value', None)
-            rows[kind].pop('value_is_partial', None)
     # Critical conclusions and identity degradation flags are a separate small
     # semantic projection, not axes. Keep them even if other inline values go.
     for kind in ('drive_validation','native_motor_snapshot'):
@@ -129,7 +123,21 @@ def evidence_projection(job, digest):
                 decision=small
                 rows[kind]['conclusion_is_partial']=True
             if decision:
+                # One semantic projection, never duplicate its conclusion in value.
+                rows[kind].pop('value',None)
+                rows[kind].pop('value_is_partial',None)
                 rows[kind]['conclusion']=decision
+    if 'artifacts' in found and isinstance(found['artifacts'][1],dict):
+        brief={k:v for k,v in found['artifacts'][1].items() if k in
+               {'run_id','manifest_path','time_axis_file','solve_performance_file','solve_performance_sha256'}
+               and (v is None or isinstance(v,str)) and len(encoded(v))<=700}
+        if brief and wire_size(brief)<=2200 and 'value' not in rows['artifacts']:
+            rows['artifacts']['value']=brief;rows['artifacts']['value_is_partial']=True
+    # Trim decoration after forming conclusions. Mechanical input identity survives.
+    for kind in EVIDENCE_DROP_PRIORITY:
+        if wire_size(rows) <= 7500:break
+        if kind in rows:
+            rows[kind].pop('value',None);rows[kind].pop('value_is_partial',None)
     return rows
 
 
@@ -175,7 +183,7 @@ def failure_chain(value, path="", rows=None, seen=None):
                 rows.append({"code": value["code"][:120], "path": path,
                              "path_role": "archived_native_response" if path.startswith('/late_response/') else "canonical_failure",
                              "message": str(value.get("message", ""))[:240],
-                             "stage": value.get("stage", value.get("details", {}).get("stage") if isinstance(value.get("details"), dict) else None)})
+                             "stage": value.get("stage") or (value['diagnostics'].get('stage') if isinstance(value.get('diagnostics'),dict) else None) or (value['details'].get('stage') if isinstance(value.get('details'),dict) else None)})
         for k in ("error", "diagnostics", "details", "original_failure", "failure", "worker", "cause_details", "original_details", "late_response", "response"):
             if k in value and len(rows) < 12:
                 failure_chain(value[k], path + "/" + k, rows, seen)
@@ -276,6 +284,13 @@ def bound(root: Path, job: dict):
     result['summary_omitted_paths_truncated'] = len(omitted) > 16
     result['summary_omitted_paths_limit'] = 16
     result['summary_omitted_paths_limit_scope'] = 'fixed_display_limit_then_wire_budget'
+    prefixes={}
+    for pointer in omitted:
+        prefix='/' + pointer.strip('/').split('/')[0]
+        prefixes[prefix]=prefixes.get(prefix,0)+1
+    result['summary_omitted_prefix_counts']={key:prefixes[key] for key in sorted(prefixes)[:8]}
+    result['summary_omitted_prefix_counts_scope']='omitted_pointer_count_by_top_level_prefix_not_leaf_field_count'
+    result['summary_omitted_prefix_counts_truncated']=len(prefixes)>8
     if wire_size(result) > BUDGET:
         result['summary_omitted_paths'] = ['/']
         result['summary_omitted_paths_truncated'] = True

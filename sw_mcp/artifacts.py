@@ -133,7 +133,7 @@ class Artifacts:
                 'default_verified_summary': {'tool':'get_motion_summary','arguments':{'run_id':run_id},'requires_verified_complete_sampling_and_restoration':True},
                 'quarantine_artifact_query': {'tool':'get_run_artifacts','arguments':{'run_id':run_id},'requires_verified_result':False,'claim':'diagnostic_read_does_not_assert_motion_pass'},
                 'offline_export_option': 'allow_unverified_history_required_only_for_inconclusive_runs',
-                'artifact_query': {'tool': 'get_run_artifacts', 'arguments': {'run_id': run_id}},
+                'artifact_query_deprecated':True,'artifact_query_superseded_by':'quarantine_artifact_query','artifact_query': {'tool': 'get_run_artifacts', 'arguments': {'run_id': run_id}},
                 'current_model_validity': 'not_checked_offline', 'warning': 'offline history does not prove current CAD validity'}
 
     def replay_diagnostics(self, run_id, limit=20, cursor=''):
