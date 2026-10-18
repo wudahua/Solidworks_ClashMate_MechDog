@@ -105,7 +105,7 @@ server.mcp.run()
                             assert data and not data['ok'], name + ': missing structured error'
                             error = data['error']; diag = error['diagnostics']
                             assert error['code'] == 'OUTPUT_GRID_TOO_SPARSE_FOR_NATIVE_ADAPTER'
-                            assert error['code'] in response.content[0].text and '100' in response.content[0].text
+                            assert error['code'] in response.content[0].text and 'next_action.options' in response.content[0].text
                             assert diag['requested_duration_s'] == duration and diag['requested_output_fps'] == 30
                             assert diag['minimum_output_intervals'] == 10 and diag['minimum_output_frames'] == 11
                             assert diag['cad_dispatched'] is False and diag['automatic_duration_or_fps_change'] is False
