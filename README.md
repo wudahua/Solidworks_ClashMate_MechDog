@@ -2,13 +2,13 @@
 
 SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.2-alpha.9`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.3-alpha.0`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.2-alpha.9.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.3-alpha.0.md)。
 
 本版本保留另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
 
-本版修复部分 PowerShell 5.1 环境中的升级启动失败、回滚根因被迟到回声覆盖、大响应二次裁剪丢失驱动证据与工件查询，并统一历史读取指引。默认历史只读不证明当前CAD适用性；CAD回放和写入仍严格校验输入。慢现场与偶发RPC断连尚未根治，详见本版发布说明。完整恢复证明继续保留。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
+本版区分锁文件共享冲突与访问拒绝，升级失败返回可判断的事务及回滚状态；大响应保留驱动校验结论和马达身份降级证据，求解增加全流程阶段计时。默认历史只读不证明当前CAD适用性；CAD回放和写入仍严格校验输入。慢现场与偶发RPC断连尚未根治，详见本版发布说明。完整恢复证明继续保留。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
 
 - `apply_mate`、`create_motion_study`、`convert_motion_study`、`create_model_checkpoint` 和 `reset_study_time` 默认返回 `job_id`；用 `get_job` 轮询，确认 `succeeded` 后使用 `result`。`wait_for_completion=True` 保留同步方式，显式重算归零仍返回任务。默认归零任务不会自动获得计算许可，须明确 `allow_recalculate=True`。
 - 上述写操作执行器等待预算为 600 秒；这不是完成时间保证，也不能替代 MCP 客户端自身的等待限制。超时后保留原任务状态，用 `get_job` 查看 `late_response`，或用 `get_recovery_state(request_id=...)` 读取最终原始响应；无响应仍保持未知，不重复写入。`idle` 只说明请求已结束，配合是否应用看原响应与原生参数。
@@ -37,7 +37,15 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 
 
 
-## v0.4.2-alpha.9 本轮修订
+## v0.4.3-alpha.0 本轮修订
+
+- Windows 原生共享/锁冲突与访问失败分别诊断；`errno=13` 不单独证明占用。关闭占用者后可显式重试，无需删除锁或改权限。
+- 升级结果新增 `upgrade_result_schema_version=1`，合法CLI参数进入升级器后的失败使用对象型 `error`，包含 `code/message/stage/diagnostics/next_action`。`rollback_status=verified/incomplete/unknown/not_required` 与 `receipt_path` 明确区分状态；回滚不完整时不启动 MCP，不自动重试。旧脚本须从 `error.message` 读取说明。`schema_version=2` 保留回执格式含义。
+- 求解返回 `solve_performance` 和哈希绑定工件，记录打开/快照/预检/原生计算/时间轴/采样/CSV/恢复等顺序阶段。它覆盖 `RunUserStudy` 子调用，不包含执行器启动、外层通信与最终计时工件发布；不把阶段计时当作已证明的机械根因或加速承诺。
+- 大响应的 `evidence.drive_validation.conclusion` 保留判据，`evidence.native_motor_snapshot.conclusion` 明示持久引用解析及名称回退；成功/失败路径均识别。`response_wire_bytes` 是摘要后估算传输字节，`full_response_wire_bytes` 是摘要前；精确读取始终保留。
+- `history_usage.schema_version=1` 区分 `default_verified_summary` 与 `quarantine_artifact_query`；诊断读失败工件不等于验证通过。关联扫描超过80%协作预算时告警，不改变10秒预算或忽略未完成扫描。
+
+## v0.4.2-alpha.9 历史修订
 
 - 升级包装器避开 PS5.1 的环境字典空值问题，创建子进程后还原调用者环境；启动失败明确未开始替换。Python 入口与包装器等价，真实安装仍须停用其他 MCP 服务。
 - 大任务通过 `evidence.<类别>.read` 提供驱动轴线、马达参数、工件和审计子树的精确查询；小型身份可内联，所有压缩阶段保留指针及16KB传输预算。
@@ -85,7 +93,7 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 若 PowerShell 执行策略阻止外层脚本，可直接使用基础 Python，不修改系统策略：
 
 ```powershell
-C:\Python312\python.exe scripts/upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2-alpha.9_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
+C:\Python312\python.exe scripts/upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.3-alpha.0_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
 ```
 
 DryRun通过后使用同样参数去掉 `--dry-run`。`--python` 必须指基础Python；安装目录优先显式参数、`SW_INSTALL_DIR`，否则读取运行进程模块路径及供应商/COM注册表并验证Interop DLL；多个有效安装须显式选择，不自动选版本。发现结果传递给编译器。无法发现时才回落标准目录，缺失仍拒绝。
@@ -196,7 +204,7 @@ DryRun通过后使用同样参数去掉 `--dry-run`。`--python` 必须指基础
 先停用旧安装目录的MCP服务，保留SolidWorks打开；从新包目录调用：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2-alpha.9_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.3-alpha.0_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
 # PythonPath填写基础Python；非默认SolidWorks安装请同时指定-SolidWorksInstallDir。
 # 预检通过后移除-DryRun；未来网络及编译仍可能失败，保留自动回滚。
 ```
@@ -204,7 +212,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage
 也可从新包目录直接使用等价的 Python 入口（参数与预检相同）：
 
 ```powershell
-& 'C:\Python312\python.exe' .\scripts\upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2-alpha.9_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
+& 'C:\Python312\python.exe' .\scripts\upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.3-alpha.0_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
 # 预检通过后移除 --dry-run；非默认 SW 目录另传 --solidworks-install-dir。
 ```
 
