@@ -41,28 +41,37 @@ public partial class Cad {
         public string DocumentPath {get{return expectedPath;}}
         public StudyState[] InitialStudyStates {get{return ownedSnapshot==null?null:ownedSnapshot.InputStudies;}}
         public StudyHistory.Observation HistoryObservation;
-        public Scope(Cad owner,string path,string studyName) {
+        SolvePerformance timing;
+        void Timing(string name){if(timing!=null)timing.Phase(name);}
+        public Scope(Cad owner,string path,string studyName,SolvePerformance measurement=null) {
+            timing=measurement;Timing("scope_read_active_context");
             cad=owner;owner.LastContextRestoration="pending"; previous=(IModelDoc2)owner.Sw.ActiveDoc;
             previousTitle=previous==null?null:previous.GetTitle();previousPath=previous==null?null:previous.GetPathName();targetStudyName=studyName;
             try {
                 owner.LastContextRestoration="pending";
                 Log("SCOPE_OPEN_BEGIN "+path);
+                Timing("scope_open_document");
                 int e=0,w=0; Doc=(IModelDoc2)owner.Sw.OpenDoc6(path,2,1,"",ref e,ref w);
                 if(Doc==null||e!=0) throw new Exception("ASSEMBLY_OPEN_FAILED "+e);
                 Log("SCOPE_OPEN_DONE "+path);
+                Timing("scope_validate_and_activate_document");
                 if(!Doc.GetPathName().Equals(Path.GetFullPath(path),StringComparison.OrdinalIgnoreCase))throw new Exception("ASSEMBLY_OPEN_PATH_MISMATCH");
                 var registered=owner.userModels.Values.FirstOrDefault(m=>m.Path.Equals(path,StringComparison.OrdinalIgnoreCase));
                 if(registered!=null&&!string.IsNullOrEmpty(registered.Configuration)&&Doc.ConfigurationManager.ActiveConfiguration.Name!=registered.Configuration)throw new Exception("MODEL_CONFIGURATION_CHANGED");
                 expectedPath=Doc.GetPathName();expectedConfiguration=Doc.ConfigurationManager.ActiveConfiguration.Name;
                 var current=(IModelDoc2)owner.Sw.ActiveDoc;if(current==null||!string.Equals(current.GetPathName(),expectedPath,StringComparison.OrdinalIgnoreCase))owner.Sw.ActivateDoc3(Doc.GetTitle(),false,0,ref e);
                 Log("SCOPE_ACTIVATE_DONE "+path);
+                Timing("scope_enumerate_initial_studies");
                 var manager=(IMotionStudyManager)Doc.Extension.GetMotionStudyManager();
                 foreach(string name in Names(manager)) { var s=(IMotionStudy)manager.GetMotionStudy(name); if(s.IsActive){originalStudy=name;originalActiveTime=s.GetTime();} }
                 if(studyName!=null) {
+                    Timing("scope_snapshot_capture_and_save");
                     if(registered!=null)ownedSnapshot=new OwnedMotionSnapshot(owner,registered,Doc);
                     // Saving the owned snapshot can invalidate Motion manager/study COM proxies.
                     manager=(IMotionStudyManager)Doc.Extension.GetMotionStudyManager();
+                    Timing("scope_capture_initial_poses");
                     original=Transforms(Doc);
+                    Timing("scope_select_and_activate_study");
                     Study=(IMotionStudy)manager.GetMotionStudy(studyName);
                     if(Study==null) throw new Exception("STUDY_NOT_FOUND");
                     owner.LastOperationRestoration="pending";
@@ -82,6 +91,7 @@ public partial class Cad {
                 throw new Exception("SESSION_CONFLICT: active document or configuration changed");
         }
         public void Dispose() {
+            Timing("scope_restore_snapshot_and_context");
             Exception restoreCause=null;
             try {
                 if(Study!=null&&original!=null) {
