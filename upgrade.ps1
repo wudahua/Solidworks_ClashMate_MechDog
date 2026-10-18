@@ -15,12 +15,30 @@ $start.RedirectStandardOutput = $true
 $start.RedirectStandardError = $true
 $start.StandardOutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $start.StandardErrorEncoding = New-Object System.Text.UTF8Encoding($false)
-$start.EnvironmentVariables['PYTHONIOENCODING'] = 'utf-8'
 function Quote-NativeArgument([string]$value) {
     return '"' + [regex]::Replace([regex]::Replace($value, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
 }
 $start.Arguments = (($arguments | ForEach-Object { Quote-NativeArgument $_ }) -join ' ')
-$process = [System.Diagnostics.Process]::Start($start)
+# PS5.1 may return null on the first EnvironmentVariables getter. Inherit a
+# process-scoped value instead, restoring the caller immediately after Start.
+$previousEncoding = [Environment]::GetEnvironmentVariable('PYTHONIOENCODING', 'Process')
+$pythonStarted = $false
+try {
+    try {
+        [Environment]::SetEnvironmentVariable('PYTHONIOENCODING', 'utf-8', 'Process')
+        $process = [System.Diagnostics.Process]::Start($start)
+        $pythonStarted = $true
+    } finally {
+        [Environment]::SetEnvironmentVariable('PYTHONIOENCODING', $previousEncoding, 'Process')
+    }
+} catch {
+    # Python has not started: no backup/receipt is claimed to exist. Do not
+    # relabel an error from a running Python upgrade as a pre-start failure.
+    $failure = @{ok=$false; code='UPGRADE_WRAPPER_START_FAILED'; stage='start_python'; python_started=$pythonStarted; target_mutation_started=$null; backup_created=$null; message=$_.Exception.Message; next_action='Check PythonPath, or run python scripts/upgrade.py --package PACKAGE --target TARGET --python PYTHON --dry-run from the new package. If Python started, inspect its receipt before any retry.'}
+    if (-not $pythonStarted) { $failure.target_mutation_started = $false; $failure.backup_created = $false }
+    Write-Output ($failure | ConvertTo-Json -Compress)
+    exit 1
+}
 $stdoutTask = $process.StandardOutput.ReadToEndAsync()
 $stderrTask = $process.StandardError.ReadToEndAsync()
 $process.WaitForExit()

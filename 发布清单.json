@@ -1,5 +1,5 @@
 {
-  "version": "0.4.2-alpha.8",
+  "version": "0.4.2-alpha.9",
   "kind": "source_only",
   "text_line_endings": "LF",
   "includes_user_cad": false,
@@ -8,13 +8,13 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 75562,
-      "sha256": "fd70b04b9a78a929b971bdf3c2018ddd835b777ca69bd9f9a2a809d87bd3d04c"
+      "bytes": 77950,
+      "sha256": "56cb500bd3bc03352c840e4f526d78e7c7d2b52af7e75f4afd807277b0b222ea"
     },
     {
-      "path": "发布说明_v0.4.2-alpha.8.md",
-      "bytes": 5699,
-      "sha256": "c59e12941cc246416a8ed0f9021613097d38de4fff43380c23a1bbd6bec2f2c6"
+      "path": "发布说明_v0.4.2-alpha.9.md",
+      "bytes": 5047,
+      "sha256": "fdbe96c0d8d7db23665eb9501401157218f00c4122530b25fbf613160dd7f663"
     },
     {
       "path": "LICENSE",
@@ -48,8 +48,8 @@
     },
     {
       "path": "motion_server.py",
-      "bytes": 32497,
-      "sha256": "34f08bb8744e27fb8d0ea1fb52f938b87cd869cd2e187a4345d6a42eabd4117f"
+      "bytes": 33315,
+      "sha256": "8462327e35755da9c15a676d545aac152848fe82d43d0b2ad56c3037c7be07ab"
     },
     {
       "path": "mcp-config.example.json",
@@ -68,8 +68,8 @@
     },
     {
       "path": "upgrade.ps1",
-      "bytes": 1958,
-      "sha256": "5b1ee20fbed25e78c13f4b0aa69ee6bc6202379710166a223c4cf073dd70a93a"
+      "bytes": 3172,
+      "sha256": "6ab271b392845401627cb7dc0c58d271774bab72d3c06819613b6c0a193ec768"
     },
     {
       "path": "初始化环境.ps1",
@@ -98,8 +98,8 @@
     },
     {
       "path": "executor/BasicMates.cs",
-      "bytes": 42332,
-      "sha256": "75590004cacf905df2ac30c70223ad0287623dc022c04b8a65683e2174291060"
+      "bytes": 42420,
+      "sha256": "6d9970a394661b3398c439515476745d263b4f5c8c10ecce1f9b41d2ef5012f9"
     },
     {
       "path": "executor/Cad.cs",
@@ -423,8 +423,8 @@
     },
     {
       "path": "executor/UserMotion.cs",
-      "bytes": 65571,
-      "sha256": "5d6bbf46dd57a8cf707bba989a116cb2872643cefe32151411e015165333d8b5"
+      "bytes": 65633,
+      "sha256": "b894c9ea8eb6759b71e08f7727c4303d37543b6260e5eedeaec1080a244812ff"
     },
     {
       "path": "executor/VirtualImport.cs",
@@ -448,33 +448,33 @@
     },
     {
       "path": "sw_mcp/artifacts.py",
-      "bytes": 17232,
-      "sha256": "4038211183fce81c481c0e01bfde0c86068d57f7cf703d605f5d4e398014bbda"
+      "bytes": 17990,
+      "sha256": "da91655376f3e6e385b0944cd20bde1553b3659bf633af1310de33e75cf977d6"
     },
     {
       "path": "sw_mcp/bridge.py",
-      "bytes": 39750,
-      "sha256": "d7756e3e245d570b934636579bc4adb01771e3fb167f17914a78bd58fb1dac1b"
+      "bytes": 40060,
+      "sha256": "513fb62c2918e421bc07886e4d09cbb00af6324eb2a18d5453268bba2c8caf7f"
     },
     {
       "path": "sw_mcp/errors.py",
-      "bytes": 1701,
-      "sha256": "6048ae022d27778506cd2a975c02500b7bdda249de6aee6fe8bd64c52149a7c6"
+      "bytes": 2391,
+      "sha256": "54c0f62551b8f95051662121b495fd0821f6002a521f3e89d0268936d5c29ae8"
     },
     {
       "path": "sw_mcp/job_payload.py",
-      "bytes": 12695,
-      "sha256": "221050f5ee096f55705fb90f2840a48a8eeac275403d131b5860a3ba0c146977"
+      "bytes": 17578,
+      "sha256": "59b3e0b8f7ef98e4e9541651b79ed810474ec7094321c374ed6b8df018ee7dc0"
     },
     {
       "path": "sw_mcp/jobs.py",
-      "bytes": 11197,
-      "sha256": "b644d80ba00df7ac05c07e0c3ad7b5094b663c28448ce5f1f31619ba805c0d80"
+      "bytes": 11505,
+      "sha256": "a648b2009e12b37c9ce6140117e56a6f5b68aa2dc03c8a05218f7f44904ce07d"
     },
     {
       "path": "sw_mcp/native_grid.py",
-      "bytes": 3259,
-      "sha256": "11f64e854b463ce31b7c56c7ce2c07b5ac89bcb69e805ebe581a2ca33719abca"
+      "bytes": 3239,
+      "sha256": "e08030876dc7d17cfee2c0ff84bf9d78339329de7993867655c60690103377b8"
     },
     {
       "path": "sw_mcp/replay_diagnostics.py",
@@ -498,8 +498,8 @@
     },
     {
       "path": "sw_mcp/validation.py",
-      "bytes": 5021,
-      "sha256": "e96819a9706eeeb6178aae8d3e6ca0ba4d39f2ea092b3fd900e1bcabf89b688d"
+      "bytes": 5345,
+      "sha256": "f52e74bebca600c075451f41239c152225e296c5470ccd15adc509b5fa7fa93b"
     },
     {
       "path": "scripts/self_check.py",
@@ -518,8 +518,8 @@
     },
     {
       "path": "scripts/build_release.py",
-      "bytes": 7922,
-      "sha256": "96044069ba47ff426d0f0e3fcec8adf91a566c2c136d4a1826b42945ffafa01c"
+      "bytes": 8018,
+      "sha256": "011a4e5dab7e7995d77d6dd888f36f6fdadbdb832ef72fe1372e4b1b5cdce833"
     },
     {
       "path": "scripts/verify_release.py",
@@ -528,8 +528,8 @@
     },
     {
       "path": "scripts/upgrade.py",
-      "bytes": 10387,
-      "sha256": "04cf3fbd5018b01c031db70435afec505cd601bdfe1a1fd803a3aefa2e2b1692"
+      "bytes": 10406,
+      "sha256": "1ad54bb01d1ff709fdd82c57de69ea5c91751c61eccd0511631c4efa3b7653a2"
     },
     {
       "path": "scripts/recover.py",
@@ -758,8 +758,8 @@
     },
     {
       "path": "tests/test_checkpoint_preparation.py",
-      "bytes": 3405,
-      "sha256": "db5c76608628d22397db47e38837dfab486f1b755d36808e1683ab2b73dcac2f"
+      "bytes": 3621,
+      "sha256": "54636051fc04a8f7afbb7b1fbb05feb025db3741636e3e82408d95b2bc2789fb"
     },
     {
       "path": ".github/workflows/release-validation.yml",
@@ -793,8 +793,8 @@
     },
     {
       "path": "tests/run_offline_policies.py",
-      "bytes": 1911,
-      "sha256": "09e3c042200f4b6eb625f75cf2a7b5612c1347e0307bdd3fa8bcfbf7be16116d"
+      "bytes": 2718,
+      "sha256": "4880a97d48c7a64d3ca020c11be411225a85248292acefaa79c0bb2264292a06"
     },
     {
       "path": "tests/test_v042a6.py",
@@ -803,8 +803,18 @@
     },
     {
       "path": "tests/grid_protocol_checks.py",
-      "bytes": 11924,
-      "sha256": "3501f75b89704a391042109edf1c3efd3d8150908d04e3f3c42302b7ec0cd41e"
+      "bytes": 11940,
+      "sha256": "01b6fee36f36309a8ded84e7aa2815bc5bef3f52008f48171bad1553d4aa6a09"
+    },
+    {
+      "path": "tests/test_v042a9.py",
+      "bytes": 10873,
+      "sha256": "dbbdc388ec7579af8387c3ae9e98059fcca26d9a39b8e855f289d4ba9b8c584f"
+    },
+    {
+      "path": "tests/check_entrypoints.py",
+      "bytes": 2428,
+      "sha256": "3523569dab778cb1fde963acb1d8a5ed967f23f08e6512dc26d4639b8b82d9bf"
     },
     {
       "path": "tests/test_v042a8.py",
@@ -823,8 +833,8 @@
     },
     {
       "path": "tests/upgrade_powershell_checks.py",
-      "bytes": 2421,
-      "sha256": "2246a570ce1eea53518692193af36f2eb7a09e8a465fd2e12b47f1627b8166c1"
+      "bytes": 4692,
+      "sha256": "8858acd428270fa2d150f4ef424b2e47527a6dcb6b9b86ba4474a05297f1e546"
     },
     {
       "path": "tests/test_v042a7.py",
