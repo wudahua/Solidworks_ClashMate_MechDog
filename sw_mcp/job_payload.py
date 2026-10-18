@@ -19,21 +19,37 @@ def wire_size(value):
                         "structuredContent": value, "isError": False})) + 512
 
 
-CONTROLS = {"next_cursor", "cursor", "face_offset", "job_id", "checkpoint_id", "plan_id", "model_id", "entity_id", "component_id", "run_id", "response_artifact_id", "next_queries"}
+CONTROLS = {"next_cursor", "cursor", "face_offset", "job_id", "checkpoint_id", "plan_id", "model_id", "entity_id", "component_id", "run_id", "response_artifact_id", "next_queries", "next_action"}
+EVIDENCE = {'Axis', 'AxisLocal', 'PointLocal', 'axis_global', 'reference_point_global_m', 'review_items'}
+EVIDENCE_CONTAINERS = {'requested_drive', 'native_motor_snapshot', 'parameters', 'direction_reference', 'geometry'}
 
 
 def _summary(value, depth=0, key=""):
-    if key in CONTROLS:
+    if key in CONTROLS or key in EVIDENCE:
         return value
     if isinstance(value, dict):
         return {k: _summary(v, depth + 1, k) for k, v in value.items()
                 if k not in {"late_response", "native_diagnostics", "original_failure", "rollback_failure", "stage_timeline"}
-                and (depth < 4 or not isinstance(v, (list, dict)))}
+                and (depth < 4 or not isinstance(v, (list, dict)) or k in CONTROLS or k in EVIDENCE or k in EVIDENCE_CONTAINERS)}
     if isinstance(value, list):
-        return [_summary(v, depth + 1) for v in value[:3]]
+        return [_summary(v, depth + 1) for v in value[:8]]
     if isinstance(value, str) and len(value) > 800:
         return value[:800] + "…[full value in response artifact]"
     return value
+
+
+def omitted_paths(original, summary, path=''):
+    """Pointers into the exact artifact; a parent pointer covers omitted children."""
+    rows = []
+    if isinstance(original, dict) and isinstance(summary, dict):
+        for key, value in original.items():
+            pointer = path + '/' + key.replace('~', '~0').replace('/', '~1')
+            rows.extend([pointer] if key not in summary else omitted_paths(value, summary[key], pointer))
+    elif isinstance(original, list) and isinstance(summary, list):
+        if len(original) > len(summary): rows.append(path)
+        for index, value in enumerate(summary): rows.extend(omitted_paths(original[index], value, path + '/' + str(index)))
+    elif original != summary: rows.append(path)
+    return rows
 
 
 def failure_chain(value, path="", rows=None, seen=None):
@@ -70,6 +86,8 @@ def bound(root: Path, job: dict):
         temporary.replace(target)
     result = _summary(job)
     result.update(response_summarized=True, payload_budget_bytes=BUDGET,
+                  wire_budget_bytes=BUDGET, full_response_wire_bytes=wire_size(job),
+                  payload_budget_scope='estimated_MCP_text_plus_structuredContent_and_512_byte_reserve',
                   full_response_bytes=len(data), full_response_sha256=digest,
                   full_response_read={"tool": "get_job", "arguments": {
                       "job_id": job["job_id"], "response_artifact_id": digest, "offset": 0, "limit": 2000}},
@@ -91,16 +109,20 @@ def bound(root: Path, job: dict):
                 "verification_passed", "verification_status", "verification_scope", "historical_job_read_only",
                 "cad_operation_state", "response_summarized", "payload_budget_bytes", "full_response_bytes",
                 "full_response_sha256", "full_response_read", "summary_omits_details", "failure_chain",
-                "root_cause_code", "root_cause_path", "root_cause_scope", "root_cause_read", "query_controls"}
+                "root_cause_code", "root_cause_path", "root_cause_scope", "root_cause_read", "query_controls",
+                "wire_budget_bytes", "full_response_wire_bytes", "payload_budget_scope"}
         result = {k: v for k, v in result.items() if k in keep or k in {"error", "result", "progress"}}
         for k in ("error", "result", "progress"):
             if isinstance(result.get(k), dict):
                 result[k] = {n: v for n, v in result[k].items() if not isinstance(v, (list, dict))}
+                if k == 'error' and isinstance(job[k].get('next_action'), dict):
+                    result[k]['next_action'] = {'automatic_retry': False, 'options': [], 'instruction': '先读取完整失败信封与恢复状态，不自动重试。',
+                        'error_read': {**result['full_response_read'], 'arguments': {**result['full_response_read']['arguments'], 'response_json_pointer': '/error'}}}
     if wire_size(result) > BUDGET:
         for key in ("result", "error", "progress"):
             if isinstance(result.get(key), dict):
                 keep = {"code", "message", "restoration_status", "stage", "assertion", "verification_status",
-                        "model_id", "run_id", "checkpoint_id", "plan_id", "original_error", "write_committed", "rollback_verified"}
+                        "model_id", "run_id", "checkpoint_id", "plan_id", "original_error", "write_committed", "rollback_verified", "next_action"}
                 result[key] = {k: v for k, v in result[key].items() if k in keep or k in CONTROLS}
     # An indivisible control token must either survive byte-for-byte or be explicitly
     # unavailable with a direct artifact query, never a callable-looking placeholder.
@@ -111,7 +133,27 @@ def bound(root: Path, job: dict):
         result.pop("progress", None)
         for key in ("result", "error"):
             if isinstance(result.get(key), dict):
-                result[key] = {k: v for k, v in result[key].items() if k in {"code", "restoration_status"}}
+                result[key] = {k: v for k, v in result[key].items() if k in {"code", "restoration_status", "next_action"}}
+    if isinstance(job.get('error'), dict) and isinstance(job['error'].get('next_action'), dict):
+        original_error = job['error']
+        error_read = {'tool': 'get_job', 'arguments': {'job_id': job['job_id'], 'response_artifact_id': digest, 'response_json_pointer': '/error', 'limit': 2000}}
+        contract = {key: original_error.get(key) for key in ('code', 'message', 'assertion', 'restoration_status', 'document_context_restoration_status')}
+        contract['message'] = str(contract['message'] or '')[:800]
+        contract['next_action'] = {'automatic_retry': False, 'instruction': '先读取完整失败诊断并核对 get_recovery_state，不自动重试。', 'options': [], 'error_read': error_read}
+        contract['diagnostics'] = {key: original_error.get('diagnostics', {}).get(key) for key in ('cad_dispatched', 'job_created')}
+        contract['diagnostics']['full_error_read'] = error_read
+        current = result.get('error', {})
+        # Preserve useful diagnostics when they fit; contract fields never vanish
+        # merely because a deeper native error required compaction.
+        result['error'] = {**contract, **current}
+        if wire_size(result) > BUDGET: result['error'] = contract
+    omitted = omitted_paths(job, result)
+    result['summary_omitted_path_count'] = len(omitted)
+    result['summary_omitted_paths'] = omitted[:16]
+    result['summary_omitted_paths_truncated'] = len(omitted) > 16
+    if wire_size(result) > BUDGET:
+        result['summary_omitted_paths'] = ['/']
+        result['summary_omitted_paths_truncated'] = True
     assert wire_size(result) <= BUDGET
     return result
 
