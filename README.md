@@ -2,13 +2,13 @@
 
 SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.2-alpha.7`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.2-alpha.8`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.2-alpha.7.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.2-alpha.8.md)。
 
 本版本保留另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
 
-本版修复未知参数静默回退与最小帧率建议冲突，统一预校验错误，补充缓存量级告警、采集热点汇总和进程退出码语义。慢现场与偶发 RPC 断连尚未根治，详见本版发布说明。完整恢复证明与当前输入严格校验继续保留。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
+本版收紧原始参数类型和枚举校验，统一异步失败指引，修复verify后默认历史摘要/曲线不可用，并加强诊断摘要与升级回执。默认历史只读不证明当前CAD适用性；CAD回放和写入仍严格校验输入。慢现场与偶发RPC断连尚未根治，详见本版发布说明。完整恢复证明继续保留。升级需重新编译执行器，并按下面的异步任务约定调用；旧版本发布包保留。
 
 - `apply_mate`、`create_motion_study`、`convert_motion_study`、`create_model_checkpoint` 和 `reset_study_time` 默认返回 `job_id`；用 `get_job` 轮询，确认 `succeeded` 后使用 `result`。`wait_for_completion=True` 保留同步方式，显式重算归零仍返回任务。默认归零任务不会自动获得计算许可，须明确 `allow_recalculate=True`。
 - 上述写操作执行器等待预算为 600 秒；这不是完成时间保证，也不能替代 MCP 客户端自身的等待限制。超时后保留原任务状态，用 `get_job` 查看 `late_response`，或用 `get_recovery_state(request_id=...)` 读取最终原始响应；无响应仍保持未知，不重复写入。`idle` 只说明请求已结束，配合是否应用看原响应与原生参数。
@@ -27,7 +27,7 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 - `verify_motion_preservation` 的 `job.status=succeeded` 表示执行完成；是否通过看 `verification_status` 或 `assertion`。失败也保留最低行程、单位、参考系和未执行原因。独立验证返回试算前检查点；指定已应用配合方案时返回配合前检查点。
 - 几何查询容忍已解析空零件，支持实体体和曲面体的平面/圆柱面，报告排除、异常及截断。固定支座可用于配合参考，但不作为驱动目标。`suggested_motor` 是兼容旧客户端的几何类型别名，不证明驱动相容；优先使用 `compatible_geometry_motor_types`。
 - 两种几何查询的 `limit` 都是条数上限，还受 16000 UTF-8 字节预算限制。`detail_level="compact"` 减少冗余字段；改变筛选、分组或详情后重新查询第一页。诊断最多展示 20 个组件，另返回完整计数；需详情时按组件查询。
-- `export_motion_curve(..., allow_unverified_history=True)` 显式离线导出完整、哈希与原生时间轴已核验的历史采样，保留失败/恢复未知状态及警示。默认导出仍要求当前输入匹配且结果通过验证；CAD 回放继续严格校验输入、全部组件姿态和恢复，不开放未验证回放。
+- `export_motion_curve(..., allow_unverified_history=True)` 显式离线导出完整、哈希与原生时间轴已核验的历史采样，保留失败/恢复未知状态及警示。默认摘要和曲线只读通过验证的历史采样，明确不核对当前模型；CAD 回放继续严格校验输入、全部组件姿态和恢复，不开放未验证回放。
 - 原生求解器消息列表接口尚未完成校准，返回 `solver_messages_status=unavailable_api_not_proven`；时间轴诊断不能被解释为过约束等特定原因的证明。
 - `python scripts/local_storage.py --output runs/storage.json` 只生成存储清单，不删除数据。清理须显式指定同一个 run ID 两次；默认保留 7 天，最新算例结果、活动/未知任务、恢复未确认数据、检查点和状态快照受保护。扫描不完整或服务运行时拒绝清理。
 
@@ -37,15 +37,14 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 
 
 
-## v0.4.2-alpha.7 本轮修订
+## v0.4.2-alpha.8 本轮修订
 
-- 24 个工具的 schema 与运行入口均拒绝未知参数（`UNKNOWN_ARGUMENT`），返回接受的参数键，不再静默使用默认值。`preflight_motion` 的时长/帧率键是 `probe_duration_s` / `probe_output_fps`；诊断 `example` 和 `next_action.options` 均为 `{tool, arguments}`，只把 `arguments` 传给对应工具，不能把观测字段当参数。
-- 预校验拒绝统一结构化，含错误码、未派发/未建任务、`assertion=not_applicable`、`restoration_status=not_required` 和不自动重试的指引。四个运动工具的未对齐网格返回 `OUTPUT_GRID_NOT_FRAME_ALIGNED`。此拒绝不等于 CAD 故障或需要恢复。
-- `minimum_fps_at_requested_duration` 考虑帧对齐，无解为 null，对应布尔为 false；`minimum_fps_interval_only` 只是忽略对齐的理论下界。例如 0.09 秒在5–120fps内无解，需显式选调整时长的选项；0.14秒的最小合法帧率为100。
-- 缓存差异增加数值容差倍数和 `severity`，1000倍起给 `high_warning` 与高量级告警。该分级只服务诊断，不证明机械精度或给写入放行。被替代缓存不用于后续配合位姿预算，重开实况与检查点仍逐次严格核验。
-- `sampling_performance` 汇总逐帧选时与组件读取阶段；完整分解在 `time_selection_audit.path` 对应工件。本机 alpha.6/alpha.7 同模型121帧均约31–32毫秒/帧，未复现另一机器1秒/帧。暂无跨机性能修复结论，请按新版热点定位，不以跳过逐帧校验换取速度。
-- 几何/配合扫描原已独立计时；配合扫描明确 `budget_shared_with_candidate_geometry=false`，截断仍按续查契约处理。预览已有同组件对约束时提示较高复核风险，不将其自动判作过定义。
-- 探针 `worker_exit_code` 属于托管 helper；`native_exit_code` 属于自建 SolidWorks。两者不保证同号。保留原始观测，操作成功与清理核验分开，RPC失败不自动重连或重试。
+- 按 `tools/list` 同一份 schema 严格验证原始参数，再进入 SDK。拒绝布尔充当数值、数字字符串、非法枚举、缺失必填项及显式 null；不自动转换或派发。`INVALID_ARGUMENT` 提供 `field/expected_type/received_type/constraint`，枚举附 `accepted_values`；不输出 SDK 内部错误串。省略可选参数仍使用声明默认值；JSON 的整数值 `30.0` 与 `30` 均符合 integer，`30.5` 不符合。
+- 异步失败、超时、执行器失联与同步 CAD 失败提供对象型 `error.next_action`，不自动重试。已建任务标为 true，派发证据不足用 null，绝不误报 false；原有诊断原样保留，字符串型旧指引另提供 `next_action_code`。超时不代表 CAD 已停止。
+- 采样循环使用官方 `ISldWorks.CommandInProgress` 批量调用模式并恢复原值；保留每帧全部组件、名称、压缩状态、变换和原生时钟核验。审计区分配置重试上限与实际尝试次数，性能效果以对应实测为准。
+- 默认摘要/曲线改为离线读取已验证的完整历史，明确 `current_model_validity=not_checked_offline`，不再因 verify 自身重存副本而拒读。失败或未验证的历史仍须显式选项。当前CAD回放和写入继续严格核对输入；不改绑旧结果。重开设置、时钟、全姿态及停止状态已匹配时减少恢复中的重复写操作，其他情况仍走原严格恢复链路。
+- 大响应同时显示原始 JSON 字节与估算 MCP wire 字节/预算，摘要附缺省内容的 JSON Pointer；失败指引保留。小型未解析配合引用清单不再固定截为3条，分类区分不支持类型与原生引用不可读；仍不把后者直接判为 CAD 引用丢失。
+- `upgrade.ps1` 隔离子进程 stderr，安装 pip 关闭版本通知；升级从备份开始写分阶段原子回执。中断回执不是成功证明，只有 `stage=completed` 且 `committed=true` 才表示完成。
 
 ## v0.4.2-alpha.6 历史修订
 
@@ -78,7 +77,7 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 若 PowerShell 执行策略阻止外层脚本，可直接使用基础 Python，不修改系统策略：
 
 ```powershell
-C:\Python312\python.exe scripts/upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2-alpha.7_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
+C:\Python312\python.exe scripts/upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2-alpha.8_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
 ```
 
 DryRun通过后使用同样参数去掉 `--dry-run`。`--python` 必须指基础Python；安装目录优先显式参数、`SW_INSTALL_DIR`，否则读取运行进程模块路径及供应商/COM注册表并验证Interop DLL；多个有效安装须显式选择，不自动选版本。发现结果传递给编译器。无法发现时才回落标准目录，缺失仍拒绝。
@@ -90,7 +89,7 @@ DryRun通过后使用同样参数去掉 `--dry-run`。`--python` 必须指基础
 
 - 新副本归零在重复选择0时刻并保存后确认姿态稳定，再重开验证全部组件；错误包含底层阶段、设置和姿态差异。高帧率配合阻塞指引现在包含显式检查点→新副本路径。
 - 所有新job的`verification_passed`采用三值。仅`verify_motion_preservation`的显式要求可为true/false，其余任务为null、`verification_status=not_requested`；执行成功、数据完整和机械要求通过是不同结论。
-- `get_job`默认最多16000 UTF-8字节；若`response_summarized=true`，按`full_response_read`用`response_artifact_id/offset/limit`离线分页获取SHA256绑定的完整响应。历史任务使用完整32位job_id和同一安装目录，未知操作不自动续跑。
+- `get_job`默认以16000字节估算MCP传输预算（文本与structuredContent两份内容及512字节余量），`full_response_bytes`另表示单份JSON字节，`full_response_wire_bytes/wire_budget_bytes`提供同口径对比；若`response_summarized=true`，按`full_response_read`用`response_artifact_id/offset/limit`离线分页获取SHA256绑定的完整响应。历史任务使用完整32位job_id和同一安装目录，未知操作不自动续跑。
 - 候选几何和配合关联各有独立10秒协作扫描预算；整条查询仍包括文档打开、组件清单和分页一致性验证，原生单次调用不能取消。几何未扫描完时按`geometry_scan.next_queries`选择`component_id`与`face_offset`继续，编辑后从0重查。`next_cursor`只分页本次已观察集合，不代表完整装配。关联不完整时匹配数为null，已观察下界单列，不能推断自由轴。
 - 配合参考compact保留面积，圆柱面带半径和原生面索引，独立面ID不合并。ID来自该模型原生持久引用哈希，复制/外部化/拓扑变化后重新查询。
 - apply减少健康检查的重复面几何遍历；全部原生错误、参考/参数、姿态、文件和独立恢复证明仍保留。后探测参考核验独立计时，原模型观察增加逐项计时。特征错误1按swFeatureError_e解释为未知错误，不等同于AddMate的成功1。
@@ -189,7 +188,7 @@ DryRun通过后使用同样参数去掉 `--dry-run`。`--python` 必须指基础
 先停用旧安装目录的MCP服务，保留SolidWorks打开；从新包目录调用：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2-alpha.7_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.2-alpha.8_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
 # PythonPath填写基础Python；非默认SolidWorks安装请同时指定-SolidWorksInstallDir。
 # 预检通过后移除-DryRun；未来网络及编译仍可能失败，保留自动回滚。
 ```
@@ -306,7 +305,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1 -SolidWorksProce
 4. 调用 `inspect_model`、`preflight_motion`、`list_motion_studies`。
 5. 已有 Motion Analysis：直接选算例，并查看 `last_run` 及其输入匹配状态。已有动画/Basic Motion：明确请求 `convert_motion_study`。没有驱动：调用 `list_drive_candidates`，由用户选择组件、参考实体、速度与方向，再 `create_motion_study`。转换和创建默认返回 job_id；等待 get_job 状态为 succeeded 后读取 result，其中包含实际时长、帧率和算例状态。**预检通过或驱动创建成功不保证驱动与配合相容，也不保证求解成功。** 旋转驱动与现有约束不相容时可能只有初始结果，需核对约束和设计意图；直线驱动只可在适用机构中作为对照，不能通用替代旋转驱动。
 6. 调用 `run_motion_study`，用 `get_job` 查询。成功结果包含 run_id、时间轴验证和驱动验证范围。复用已有算例时不声称已独立证明物理结果。
-7. 调用 `export_motion_curve` 或 `replay_motion_frame`。默认 CAD 回放和默认曲线导出要求当前会话模型输入匹配；冻结输入模式见上方新入口。重启后可通过 get_run_artifacts、read_run_poses 或显式历史导出读取保存数据；历史记录不证明当前 CAD 状态。
+7. 调用 `export_motion_curve` 或 `replay_motion_frame`。默认摘要和曲线离线读取已验证完整历史，不因 verify 后当前副本重存而失效，也不证明当前CAD适用性。默认CAD回放仍要求当前会话输入匹配；冻结输入模式见上方新入口。失败任务诊断使用 get_run_artifacts、read_run_poses 或显式历史选项。
 
 结果描述的是导入时的副本。之后修改源文件会显示源哈希不一致，副本仍可独立求解和恢复；要模拟新设计，请重新导入。导入过程本身出现源哈希变化则拒绝完成导入。
 
