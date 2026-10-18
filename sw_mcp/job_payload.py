@@ -20,11 +20,11 @@ def wire_size(value):
                         "structuredContent": value, "isError": False})) + 512
 
 
-CONTROLS = {"next_cursor", "cursor", "face_offset", "job_id", "checkpoint_id", "plan_id", "model_id", "entity_id", "component_id", "run_id", "response_artifact_id", "next_queries", "next_action"}
+CONTROLS = {"next_cursor", "cursor", "face_offset", "job_id", "checkpoint_id", "plan_id", "model_id", "entity_id", "component_id", "run_id", "response_artifact_id", "next_queries", "next_action", "mate_context_next_query"}
 EVIDENCE = {'Axis', 'AxisLocal', 'PointLocal', 'axis_global', 'reference_point_global_m', 'review_items'}
 EVIDENCE_CONTAINERS = {'requested_drive', 'native_motor_snapshot', 'parameters', 'direction_reference', 'geometry'}
 EVIDENCE_KINDS = ('requested_drive', 'native_motor_snapshot', 'artifacts', 'time_selection_audit',
-                  'sampling_performance', 'sampling_api_batch', 'drive_validation', 'review_items', 'solve_performance')
+                  'sampling_performance', 'sampling_api_batch', 'drive_validation', 'review_items', 'solve_performance', 'component_name_resolution')
 EVIDENCE_ALIASES = {'registered_native_motor_before_calculate': 'native_motor_snapshot',
                     'registered_drive_native_reference_observation': 'native_motor_snapshot'}
 # Removal order is explicit: performance decoration before conclusions/warnings.
@@ -81,6 +81,9 @@ def evidence_projection(job, digest):
             pointer, value = ('/error', job['error']) if pointer.startswith('/error/') else ('/result', job['result'])
         row = {'path': pointer, 'read': artifact_query(job['job_id'], digest, pointer)}
         inline = _summary(value)
+        if kind == 'component_name_resolution':
+            rows[kind] = row
+            continue
         if wire_size(inline) <= 1600:
             row['value'] = inline
         elif isinstance(value, dict):
@@ -212,7 +215,7 @@ def bound(root: Path, job: dict):
                   summary_omits_details=True)
     query = job.get("result", {})
     if isinstance(query, dict) and "next_cursor" in query:
-        result["query_controls"] = {k: query[k] for k in ("next_cursor", "geometry_scan", "geometry_complete", "scope_geometry_complete", "model_geometry_complete", "query_scope", "model_scan_state", "client_queue_contract", "total_scope", "warning_codes", "query_completion_status", "client_next_action", "absence_of_kind_proven") if k in query}
+        result["query_controls"] = {k: query[k] for k in ("next_cursor", "geometry_scan", "geometry_complete", "scope_geometry_complete", "model_geometry_complete", "query_scope", "model_scan_state", "client_queue_contract", "total_scope", "warning_codes", "query_completion_status", "client_next_action", "absence_of_kind_proven", "mate_context_complete", "mate_context_scope", "mate_context_warning", "mate_context_next_query") if k in query}
     chain = failure_chain(job)
     if chain:
         canonical = [row for row in chain if row['path'].startswith('/error')]
@@ -281,6 +284,7 @@ def bound(root: Path, job: dict):
     omitted = omitted_paths(job, result)
     result['summary_omitted_path_count'] = len(omitted)
     result['summary_omitted_paths'] = []
+    result['summary_omitted_paths_shown'] = 0
     result['summary_omitted_paths_truncated'] = bool(omitted)
     result['summary_omitted_paths_limit'] = 16
     result['summary_omitted_paths_limit_scope'] = 'fixed_display_limit_then_wire_budget'
@@ -301,16 +305,8 @@ def bound(root: Path, job: dict):
             result['response_wire_bytes'] = actual
         raise AssertionError('wire counter did not converge')
     stamp()
-    for pointer in omitted:
-        if len(result['summary_omitted_paths']) >= 16: break
-        result['summary_omitted_paths'].append(pointer)
-        result['summary_omitted_paths_truncated'] = len(result['summary_omitted_paths']) < len(omitted)
-        if stamp() > BUDGET:
-            result['summary_omitted_paths'].pop()
-            result['summary_omitted_paths_truncated'] = True
-            stamp()
-    # Refill short review warnings if the full wire envelope has spare room.
-    # The evidence sub-budget is a reserve, not a reason to hide a small warning.
+    # Short review warnings precede omission-list decoration. All exact reads,
+    # critical conclusions and drive identity have already been reserved.
     row = result.get('evidence', {}).get('review_items')
     if row is not None and 'value' not in row:
         node = job
@@ -322,6 +318,16 @@ def bound(root: Path, job: dict):
         if node is not None and wire_size(value) <= 1600:
             row['value'] = value
             if stamp() > BUDGET: row.pop('value')
+    for pointer in omitted:
+        if len(result['summary_omitted_paths']) >= 16: break
+        result['summary_omitted_paths'].append(pointer)
+        result['summary_omitted_paths_shown'] = len(result['summary_omitted_paths'])
+        result['summary_omitted_paths_truncated'] = len(result['summary_omitted_paths']) < len(omitted)
+        if stamp() > BUDGET:
+            result['summary_omitted_paths'].pop()
+            result['summary_omitted_paths_shown'] = len(result['summary_omitted_paths'])
+            result['summary_omitted_paths_truncated'] = True
+            stamp()
     stamp()
     assert wire_size(result) <= BUDGET
     return result
