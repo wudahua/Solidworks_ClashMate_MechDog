@@ -139,13 +139,36 @@ def upgrade(package,target,python,solidworks_dir='',dry_run=False,install=True):
             'installation_preflight':'UPGRADE_PREFLIGHT_FAILED'}.get(state['stage'],'UPGRADE_FAILED')
         if isinstance(error,ValueError) and re.match(r'^[A-Z][A-Z0-9_]+:',str(error)):
             code=str(error).split(':',1)[0]
-        raise UpgradeFailure(code,str(error),state,getattr(error,'diagnostics',{'error_type':type(error).__name__,'errno':getattr(error,'errno',None),'winerror':getattr(error,'winerror',None)})) from error
+        raise UpgradeFailure(code,str(error),state,{**state.get('path_resolution', {}), **getattr(error,'diagnostics',{'error_type':type(error).__name__,'errno':getattr(error,'errno',None),'winerror':getattr(error,'winerror',None)})}) from error
+
+
+def installation_target(target, state):
+    supplied = Path(target).absolute()
+    resolved = supplied.resolve()
+    diagnostics = {'provided_directory': str(supplied), 'resolved_directory': str(resolved),
+                   'aliasing_kind': 'none', 'automatic_retry': False}
+    state['path_resolution'] = diagnostics
+    # Check the supplied spelling and EVERY ancestor before normalization. An
+    # 8.3 name denotes the same directory; a junction can redirect future writes.
+    for ancestor in (supplied, *supplied.parents):
+        if ancestor.is_symlink() or getattr(ancestor, 'is_junction', lambda: False)() or (
+                ancestor.exists() and getattr(ancestor.stat(follow_symlinks=False), 'st_file_attributes', 0) & 0x400):
+            diagnostics.update(aliasing_kind='reparse_point', reparse_directory=str(ancestor))
+            raise UpgradeFailure('UPGRADE_TARGET_INVALID', '目标路径含链接或联接点，拒绝升级；请核对解析后的真实安装目录并显式重新预检。', diagnostics=diagnostics)
+    if not supplied.is_dir():
+        raise UpgradeFailure('UPGRADE_TARGET_MISSING', '目标安装目录不存在；请核对 TargetDir。', diagnostics=diagnostics)
+    if resolved != supplied:
+        if not resolved.is_dir() or not supplied.samefile(resolved):
+            diagnostics['aliasing_kind'] = 'unverified_alias'
+            raise UpgradeFailure('UPGRADE_TARGET_INVALID', 'Aliased installation root refused；无法证明输入路径与解析后目录为同一目录，请人工核对。', diagnostics=diagnostics)
+        diagnostics['aliasing_kind'] = 'same_directory_spelling'
+    diagnostics['canonical_directory_used'] = True
+    state['target_directory'] = str(resolved)
+    return resolved
 
 
 def _upgrade(package,target,python,solidworks_dir,dry_run,install,state):
-    target=Path(target).absolute()
-    if not target.is_dir():raise UpgradeFailure('UPGRADE_TARGET_MISSING','目标安装目录不存在；请核对 TargetDir。')
-    if target.resolve()!=target:raise ValueError('Aliased installation root refused')
+    target=installation_target(target,state)
     if not (target/'motion_server.py').is_file() or not (target/'executor').is_dir():raise UpgradeFailure('UPGRADE_TARGET_NOT_INSTALLATION','所选目录不是可识别的 MCP 安装目录。')
     reject_links(target,target)
     # Check every destination and its ancestors before changing any source file.
