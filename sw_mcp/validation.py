@@ -22,7 +22,13 @@ def refuse(code, message, diagnostics=None, next_action=None):
         error['next_action']['options_status'] = 'explicit_user_selection_required'
     elif error['next_action'].get('tool'):
         error['next_action']['options_status'] = 'tool_identified_arguments_require_user_input'
-    elif code != 'UNKNOWN_TOOL':
+    elif code == 'CONFIRMATION_REQUIRED':
+        error['next_action'].update(options_status='explicit_human_confirmation_required',
+                                   instruction='必须由用户明确确认具体配合方案；不得自行将 confirmed 改为 true，也不自动重试。')
+    elif code in {'INVALID_ARGUMENT', 'UNKNOWN_ARGUMENT', 'INVALID_MATE_CONTEXT_BUDGET',
+                  'LIMIT_OUT_OF_RANGE', 'INVALID_FACE_OFFSET', 'ASSEMBLY_FILE_UNAVAILABLE',
+                  'DURATION_OR_FPS_OUT_OF_RANGE', 'SPEED_OUT_OF_RANGE', 'MINIMUM_TRAVEL_OUT_OF_RANGE',
+                  'CHECKPOINT_ID_MISUSED', 'INVALID_MATE_PLAN_ID'}:
         error['next_action']['options_status'] = 'user_parameter_correction_required'
     return packed({'ok': False, 'error': error}, True)
 
