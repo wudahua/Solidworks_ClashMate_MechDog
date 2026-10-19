@@ -22,7 +22,7 @@ def refuse(code, message, diagnostics=None, next_action=None):
         error['next_action']['options_status'] = 'explicit_user_selection_required'
     elif error['next_action'].get('tool'):
         error['next_action']['options_status'] = 'tool_identified_arguments_require_user_input'
-    elif code in {'INVALID_ARGUMENT','UNKNOWN_ARGUMENT'}:
+    elif code != 'UNKNOWN_TOOL':
         error['next_action']['options_status'] = 'user_parameter_correction_required'
     return packed({'ok': False, 'error': error}, True)
 
@@ -40,6 +40,12 @@ class StrictMCPServer(MCPServer):
         tools = await super().list_tools()
         for tool in tools:
             tool.input_schema = {**tool.input_schema, 'additionalProperties': False}
+            if tool.name in {'list_mate_references', 'list_drive_candidates'}:
+                properties = {k: dict(v) for k, v in tool.input_schema['properties'].items()}
+                for field, bounds in {'mate_context_budget_s': {'minimum': 1, 'maximum': 30},
+                                      'limit': {'minimum': 1, 'maximum': 50}, 'face_offset': {'minimum': 0}}.items():
+                    properties[field].update(bounds)
+                tool.input_schema['properties'] = properties
         return tools
 
     async def call_tool(self, name, arguments, context=None):
@@ -77,7 +83,12 @@ class StrictMCPServer(MCPServer):
             if 'enum' in schema: diag['accepted_values'] = schema['enum']
             if 'const' in schema: diag['accepted_values'] = [schema['const']]
             label = ', '.join(diag['missing_keys']) if issue.validator == 'required' else field
-            return refuse('INVALID_ARGUMENT', '参数不符合工具声明：' + label + '；请按字段类型、必填项和允许值填写。', diag)
+            code = 'INVALID_ARGUMENT'
+            if name in {'list_mate_references', 'list_drive_candidates'} and issue.validator in {'minimum', 'maximum'}:
+                code = {'mate_context_budget_s': 'INVALID_MATE_CONTEXT_BUDGET', 'face_offset': 'INVALID_FACE_OFFSET',
+                        'limit': 'LIMIT_OUT_OF_RANGE'}.get(field, code)
+                diag.update({k: schema[k] for k in ('minimum', 'maximum') if k in schema})
+            return refuse(code, '参数不符合工具声明：' + label + '；请按字段类型、必填项和允许值填写。', diag)
         try:
             return await super().call_tool(name, arguments, context)
         except UnexpectedToolError:

@@ -24,7 +24,7 @@ CONTROLS = {"next_cursor", "cursor", "face_offset", "job_id", "checkpoint_id", "
 EVIDENCE = {'Axis', 'AxisLocal', 'PointLocal', 'axis_global', 'reference_point_global_m', 'review_items'}
 EVIDENCE_CONTAINERS = {'requested_drive', 'native_motor_snapshot', 'parameters', 'direction_reference', 'geometry'}
 EVIDENCE_KINDS = ('requested_drive', 'native_motor_snapshot', 'artifacts', 'time_selection_audit',
-                  'sampling_performance', 'sampling_api_batch', 'drive_validation', 'review_items', 'solve_performance', 'component_name_resolution')
+                  'sampling_performance', 'sampling_api_batch', 'drive_validation', 'review_items', 'solve_performance', 'component_name_resolution', 'baseline_candidate')
 EVIDENCE_ALIASES = {'registered_native_motor_before_calculate': 'native_motor_snapshot',
                     'registered_drive_native_reference_observation': 'native_motor_snapshot'}
 # Removal order is explicit: performance decoration before conclusions/warnings.
@@ -215,7 +215,7 @@ def bound(root: Path, job: dict):
                   summary_omits_details=True)
     query = job.get("result", {})
     if isinstance(query, dict) and "next_cursor" in query:
-        result["query_controls"] = {k: query[k] for k in ("next_cursor", "geometry_scan", "geometry_complete", "scope_geometry_complete", "model_geometry_complete", "query_scope", "model_scan_state", "client_queue_contract", "total_scope", "warning_codes", "query_completion_status", "client_next_action", "absence_of_kind_proven", "mate_context_complete", "mate_context_scope", "mate_context_warning", "mate_context_next_query") if k in query}
+        result["query_controls"] = {k: query[k] for k in ("next_cursor", "geometry_scan", "geometry_complete", "scope_geometry_complete", "model_geometry_complete", "query_scope", "model_scan_state", "client_queue_contract", "total_scope", "warning_codes", "query_completion_status", "client_next_action", "absence_of_kind_proven", "mate_context_complete", "mate_context_scope", "mate_context_warning", "mate_context_next_query", "pagination_snapshot") if k in query}
     chain = failure_chain(job)
     if chain:
         canonical = [row for row in chain if row['path'].startswith('/error')]
@@ -281,21 +281,24 @@ def bound(root: Path, job: dict):
         if wire_size(result) > compact_budget: result['error'] = contract
     if evidence:
         result['evidence'] = evidence
-    omitted = omitted_paths(job, result)
-    result['summary_omitted_path_count'] = len(omitted)
-    result['summary_omitted_paths'] = []
-    result['summary_omitted_paths_shown'] = 0
-    result['summary_omitted_paths_truncated'] = bool(omitted)
-    result['summary_omitted_paths_limit'] = 16
-    result['summary_omitted_paths_limit_scope'] = 'fixed_display_limit_then_wire_budget'
-    prefixes={}
-    for pointer in omitted:
-        prefix='/' + pointer.strip('/').split('/')[0]
-        prefixes[prefix]=prefixes.get(prefix,0)+1
-    result['summary_omitted_prefix_counts']={key:prefixes[key] for key in sorted(prefixes)[:8]}
-    result['summary_omitted_prefix_counts_scope']='omitted_pointer_count_by_top_level_prefix_not_leaf_field_count'
-    result['summary_omitted_prefix_counts_truncated']=len(prefixes)>8
-    result['summary_omitted_prefix_counts_limit']=8
+    def refresh_omissions():
+        omitted = omitted_paths(job, result)
+        result['summary_omitted_path_count'] = len(omitted)
+        result['summary_omitted_paths'] = []
+        result['summary_omitted_paths_shown'] = 0
+        result['summary_omitted_paths_truncated'] = bool(omitted)
+        result['summary_omitted_paths_limit'] = 16
+        result['summary_omitted_paths_limit_scope'] = 'fixed_display_limit_then_wire_budget'
+        prefixes={}
+        for pointer in omitted:
+            prefix='/' + pointer.strip('/').split('/')[0]
+            prefixes[prefix]=prefixes.get(prefix,0)+1
+        result['summary_omitted_prefix_counts']={key:prefixes[key] for key in sorted(prefixes)[:8]}
+        result['summary_omitted_prefix_counts_scope']='omitted_pointer_count_by_top_level_prefix_not_leaf_field_count'
+        result['summary_omitted_prefix_counts_truncated']=len(prefixes)>8
+        result['summary_omitted_prefix_counts_limit']=8
+        return omitted
+    omitted = refresh_omissions()
     def stamp():
         # Fit the actual envelope including its own decimal byte counter.
         result['response_wire_bytes'] = 0
@@ -305,19 +308,42 @@ def bound(root: Path, job: dict):
             result['response_wire_bytes'] = actual
         raise AssertionError('wire counter did not converge')
     stamp()
-    # Short review warnings precede omission-list decoration. All exact reads,
-    # critical conclusions and drive identity have already been reserved.
-    row = result.get('evidence', {}).get('review_items')
-    if row is not None and 'value' not in row:
+    # Reserve small actionable warnings AND timing before display decoration.
+    # Reclaim duplicated progress/failure summaries when a few bytes would hide
+    # an otherwise short warning. All exact reads and root-cause identity survive.
+    for kind in ('review_items', 'solve_performance'):
+        row = result.get('evidence', {}).get(kind)
+        if row is None or 'value' in row:
+            continue
         node = job
         try:
             for token in row['path'][1:].split('/'):
                 node = node[token.replace('~1', '/').replace('~0', '~')]
-        except (KeyError, TypeError): node = None
+        except (KeyError, TypeError):
+            node = None
         value = _summary(node)
-        if node is not None and wire_size(value) <= 1600:
-            row['value'] = value
-            if stamp() > BUDGET: row.pop('value')
+        if node is None or wire_size(value) > 1600:
+            continue
+        row['value'] = value
+        for decoration in ('progress', 'failure_chain'):
+            if stamp() <= BUDGET - 256:
+                break
+            result.pop(decoration, None)
+        if stamp() > BUDGET - 256:
+            error = result.get('error')
+            if isinstance(error, dict):
+                diagnostics = error.get('diagnostics')
+                action = error.get('next_action', {})
+                if isinstance(diagnostics, dict) and diagnostics.get('full_error_read') == action.get('error_read'):
+                    diagnostics.pop('full_error_read', None)
+                if len(str(error.get('message', ''))) > 96:
+                    error['message'] = error['message'][:96]
+                    error['message_truncated'] = True
+        if stamp() > BUDGET:
+            row.pop('value')
+            stamp()
+    omitted = refresh_omissions()
+    stamp()
     for pointer in omitted:
         if len(result['summary_omitted_paths']) >= 16: break
         result['summary_omitted_paths'].append(pointer)
