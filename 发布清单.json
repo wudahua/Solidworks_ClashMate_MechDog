@@ -1,5 +1,5 @@
 {
-  "version": "0.4.3-alpha.4",
+  "version": "0.4.3-alpha.5",
   "kind": "source_only",
   "text_line_endings": "LF",
   "includes_user_cad": false,
@@ -8,13 +8,13 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 85194,
-      "sha256": "45deefb6bcf355b956aa7cc038797e7ad9b61d6e1a3b7521028f1d66a1edeb8d"
+      "bytes": 85720,
+      "sha256": "df423b6874132168f1577957724cf0ef1596d9db85990951c3e3e94ed2eac1a6"
     },
     {
-      "path": "发布说明_v0.4.3-alpha.4.md",
-      "bytes": 3115,
-      "sha256": "b60ca99eb2ccd814a8f5d770aa835d49bdcba73fc2f20cb9879d4cd8cfe4478c"
+      "path": "发布说明_v0.4.3-alpha.5.md",
+      "bytes": 3963,
+      "sha256": "a7c5e07e3d4cfa2b244a51a893fcee7562d210117a851d559dc2c2d2b5151398"
     },
     {
       "path": "LICENSE",
@@ -48,8 +48,8 @@
     },
     {
       "path": "motion_server.py",
-      "bytes": 34962,
-      "sha256": "fa308567315690545d5a8e817908eb499391d9318b5efcefa66e877ed8f03eea"
+      "bytes": 34995,
+      "sha256": "6baf6b625b2e4da7410a27355d911a2f0e98b9d08f24581877c16c684c20925c"
     },
     {
       "path": "mcp-config.example.json",
@@ -98,8 +98,8 @@
     },
     {
       "path": "executor/BasicMates.cs",
-      "bytes": 45279,
-      "sha256": "dd984ce40e5edf1a9fa206c611120466495e9afa0e4ffa7793b81a126f365dd6"
+      "bytes": 45317,
+      "sha256": "e3f3bbd3fe543052ad8e1c8e225a70dc7821cddffc409692a279af96548f23d6"
     },
     {
       "path": "executor/Cad.cs",
@@ -128,8 +128,8 @@
     },
     {
       "path": "executor/CheckpointPreflight.cs",
-      "bytes": 17565,
-      "sha256": "29bef05ccd65106411329cb2ad899ba348148c801ef5ad8e257e0eb1a4903711"
+      "bytes": 18610,
+      "sha256": "4e7ee5105645dd5f30edc5a4085e16ac89e20ab18cfcf4c2e03b6ef7daf72508"
     },
     {
       "path": "executor/ClockFeedback.cs",
@@ -148,8 +148,8 @@
     },
     {
       "path": "executor/DriveCandidates.cs",
-      "bytes": 10077,
-      "sha256": "bf7b9f6403c0957ecf586371d117050b0952756b1e9b039bcca13b1492d3d57c"
+      "bytes": 10115,
+      "sha256": "2134a682391a573d8eece0cb6b5f67b8bfcdad53519721f3a981c9a83697e898"
     },
     {
       "path": "executor/Examples.cs",
@@ -168,13 +168,18 @@
     },
     {
       "path": "executor/GeometryEnumeration.cs",
-      "bytes": 2808,
-      "sha256": "df21c6c9ad498ea8c6a853b98e8544f73c7e1ac1bd5414d95b38000675f3e5f0"
+      "bytes": 2551,
+      "sha256": "9ec6476a939577fd2642b272e5ad543a207c3e955915c2f5e8f686a5b199ba2d"
+    },
+    {
+      "path": "executor/GeometryPageBudget.cs",
+      "bytes": 1592,
+      "sha256": "0bc5b59e102107e3cb3cebc4f2462773d8621f8e7ba90f63fdfe1aa38552d89c"
     },
     {
       "path": "executor/GeometryPageSnapshots.cs",
-      "bytes": 6452,
-      "sha256": "6f4f7b1383dbfe7566a187c2fdc03e6f7af6f282694013fc468c39de83514a5d"
+      "bytes": 6663,
+      "sha256": "35af2701b26df5513562452729216a5a147878cf81694896b553fccf4b2a7573"
     },
     {
       "path": "executor/GeometryQueryScope.cs",
@@ -213,8 +218,8 @@
     },
     {
       "path": "executor/MateContextBudgetPolicy.cs",
-      "bytes": 1685,
-      "sha256": "9a8d87d0aec4a0f699b67cc243425795912b5071b865fb333ac204dca890ab6c"
+      "bytes": 3283,
+      "sha256": "f887747186114daa184a1d525262acbdb6aa71cfafbc9580cfc1f4d7bedcb43e"
     },
     {
       "path": "executor/MateExecutionEvidence.cs",
@@ -278,8 +283,8 @@
     },
     {
       "path": "executor/NativeCommandBatch.cs",
-      "bytes": 1126,
-      "sha256": "24c9e50eb214c4c5b104b40cd0b8b703d5c5f758c36fd248434f8061757fedbf"
+      "bytes": 2843,
+      "sha256": "01b50bf6fce5eb8af961bdb0fde205bbab79089e94cd35946f02e5a598e83686"
     },
     {
       "path": "executor/NativeMotorEvidence.cs",
@@ -433,8 +438,8 @@
     },
     {
       "path": "executor/TimeAxis.cs",
-      "bytes": 4493,
-      "sha256": "eaf124272ab1b54124028a311cff2f13d2bc49b274996b044c0100adddb0c37c"
+      "bytes": 4973,
+      "sha256": "484469663b804bf27d47b636c81eeb65ddf7f0555be41b5646c1464cc4e140c6"
     },
     {
       "path": "executor/UserMeasurement.cs",
@@ -443,8 +448,8 @@
     },
     {
       "path": "executor/UserMotion.cs",
-      "bytes": 68797,
-      "sha256": "f9d57f4c766a420357a4e1eb96d62f9978723a6bfd2327d7a39f29f612db5162"
+      "bytes": 70202,
+      "sha256": "a8c3a1426589b1fe52354d0e3657f6d56a29d9d1d4498e4e8f02b4f64887fcde"
     },
     {
       "path": "executor/VirtualImport.cs",
@@ -468,8 +473,8 @@
     },
     {
       "path": "sw_mcp/artifacts.py",
-      "bytes": 18581,
-      "sha256": "ffd63cd444592efb8b8f736ec15d19fb56fd75077eb0bd105eb9632e884ad651"
+      "bytes": 19264,
+      "sha256": "b607146b45244611b74f197cda917419f5a4a21111eb7a206c7f8ed1bc2eee82"
     },
     {
       "path": "sw_mcp/bridge.py",
@@ -483,8 +488,8 @@
     },
     {
       "path": "sw_mcp/job_payload.py",
-      "bytes": 24605,
-      "sha256": "5bd6a4d83b50c3fe24934e204a41add87beb58764245e82d5a6469d8b660c0ee"
+      "bytes": 29326,
+      "sha256": "6abf18cad3c0ae0a12cecef8fd9e868b7a3ecda2b3ed43dad2ce3ad98b50c429"
     },
     {
       "path": "sw_mcp/jobs.py",
@@ -518,8 +523,8 @@
     },
     {
       "path": "sw_mcp/validation.py",
-      "bytes": 6572,
-      "sha256": "ad84b459c33474df6887b2997c6a7f97157ac325b686507ef616914e8c1fbc89"
+      "bytes": 7184,
+      "sha256": "f2dea83a3d56a19d37b0800b209d1b8d5b06c08b5dacb20699e41c6d215be5c8"
     },
     {
       "path": "scripts/self_check.py",
@@ -538,8 +543,8 @@
     },
     {
       "path": "scripts/build_release.py",
-      "bytes": 8375,
-      "sha256": "65e57fb8e8ede42e64c873f8434d1ed67564c6eb6afe23eb10874f01e0d9a520"
+      "bytes": 8447,
+      "sha256": "8690a8c41366629ea57b025be5becc946f4e3316bada12d22128eb104c11b644"
     },
     {
       "path": "scripts/verify_release.py",
@@ -880,6 +885,16 @@
       "path": "tests/test_v042a9.py",
       "bytes": 10873,
       "sha256": "dbbdc388ec7579af8387c3ae9e98059fcca26d9a39b8e855f289d4ba9b8c584f"
+    },
+    {
+      "path": "tests/test_v043a5.py",
+      "bytes": 12470,
+      "sha256": "ff37ce2765bf2dca1ab491f0a599857cdd114038882b02b044b518664c620b48"
+    },
+    {
+      "path": "tests/v043a5_observation_native.py",
+      "bytes": 5161,
+      "sha256": "2f8421e9bfcba2bed158b94222ddac53f8aa8612771f0eef62ecc2cae7d9036c"
     },
     {
       "path": "tests/check_entrypoints.py",

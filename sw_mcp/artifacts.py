@@ -15,6 +15,13 @@ class ArtifactError(ValueError):
         super().__init__(message)
 
 
+class PoseCursorMismatch(ValueError):
+    def __init__(self, differences):
+        self.diagnostics={'reason':'cursor_query_identity_mismatch','mismatched_fields':differences,
+                          'automatic_filter_rewrite':False,'required_action':'restore_original_explicit_filters_or_restart_page_zero'}
+        super().__init__('游标与当前请求的过滤条件或工件身份不一致：'+', '.join(differences)+'；核对原查询字段后重新调用，未自动改写过滤条件。')
+
+
 class Artifacts:
     def __init__(self, root: Path):
         self.root = root.resolve()
@@ -117,7 +124,7 @@ class Artifacts:
 
     def summary(self, run_id, require_verified=False):
         data, manifest, poses = self._load(run_id)
-        keys = ("run_id", "model_id", "parent_model_id", "probe_input_scope", "probe_checkpoint_id", "study", "solver_status", "calculate_returned_success", "physics_validation_status", "result_validity_scope", "sampling_status", "restoration_status", "result_validity", "duration_s", "output_fps", "frames", "components", "motion_detected", "maximum_translation_from_frame0_m", "maximum_component_origin_translation_from_frame0_m", "translation_metric_definition", "maximum_rotation_coefficient_delta_from_frame0", "input_pose_to_frame0_difference", "failure", "failure_diagnostics", "restoration_failure", "drive_validation", "validation_scope", "motion_validation", "component_motion_overview", "history_usage", "solve_performance", "solve_performance_artifact", "registered_native_motor_before_calculate", "drive_validation_status", "sampling_performance", "sampling_api_batch", "sampling_api_batch_restored", "time_selection_audit", "requested_drive", "native_motor_snapshot")
+        keys = ("run_id", "model_id", "parent_model_id", "probe_input_scope", "probe_checkpoint_id", "study", "solver_status", "calculate_returned_success", "physics_validation_status", "result_validity_scope", "sampling_status", "restoration_status", "result_validity", "duration_s", "output_fps", "frames", "components", "motion_detected", "maximum_translation_from_frame0_m", "maximum_component_origin_translation_from_frame0_m", "translation_metric_definition", "maximum_rotation_coefficient_delta_from_frame0", "input_pose_to_frame0_difference", "failure", "failure_diagnostics", "restoration_failure", "drive_validation", "validation_scope", "motion_validation", "component_motion_overview", "history_usage", "solve_performance", "solve_performance_artifact", "registered_native_motor_before_calculate", "drive_validation_status", "sampling_performance", "sampling_api_batch", "sampling_api_batch_restored", "time_selection_audit", "requested_drive", "native_motor_snapshot", "warnings", "component_name_resolution")
         info = self._csv_info(data, poses) if poses.is_file() else {}
         if require_verified: self._require_verified(data, info)
         from sw_mcp.replay_images import ReplayImages
@@ -160,13 +167,14 @@ class Artifacts:
         if cursor:
             try:
                 token = json.loads(base64.b64decode(cursor, validate=True))
-                if any(token.get(k) != v for k, v in identity.items()):
-                    raise ValueError()
+                if not isinstance(token,dict):raise ValueError()
                 offset = token["offset"]
                 if type(offset) is not int or offset < 0:
                     raise ValueError()
             except (ValueError, KeyError, TypeError) as exc:
-                raise ValueError("游标已过期或过滤条件改变，请从第一页读取。") from exc
+                raise ValueError("游标格式或分页位置无效，请从第一页读取。") from exc
+            differences={k:{'cursor_value':token.get(k),'request_value':v} for k,v in identity.items() if token.get(k)!=v}
+            if differences:raise PoseCursorMismatch(differences)
         rows, seen, more = [], 0, False
         with path.open(encoding="utf-8-sig", newline="") as stream:
             for row in csv.DictReader(stream):

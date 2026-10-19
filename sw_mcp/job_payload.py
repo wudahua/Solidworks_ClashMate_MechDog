@@ -215,7 +215,7 @@ def bound(root: Path, job: dict):
                   summary_omits_details=True)
     query = job.get("result", {})
     if isinstance(query, dict) and "next_cursor" in query:
-        result["query_controls"] = {k: query[k] for k in ("next_cursor", "geometry_scan", "geometry_complete", "scope_geometry_complete", "model_geometry_complete", "query_scope", "model_scan_state", "client_queue_contract", "total_scope", "warning_codes", "query_completion_status", "client_next_action", "absence_of_kind_proven", "mate_context_complete", "mate_context_scope", "mate_context_warning", "mate_context_next_query", "pagination_snapshot") if k in query}
+        result["query_controls"] = {k: query[k] for k in ("next_cursor", "geometry_scan", "geometry_complete", "scope_geometry_complete", "model_geometry_complete", "query_scope", "model_scan_state", "client_queue_contract", "total_scope", "warning_codes", "query_completion_status", "client_next_action", "absence_of_kind_proven", "mate_context_complete", "mate_context_scope", "mate_context_warning", "mate_context_next_query", "mate_context_incomplete_reason", "mate_context_incomplete_reasons", "pagination_snapshot", "offset", "returned", "total", "total_semantics", "next_offset", "next_offset_delta", "frozen_pages_complete") if k in query}
     chain = failure_chain(job)
     if chain:
         canonical = [row for row in chain if row['path'].startswith('/error')]
@@ -227,6 +227,12 @@ def bound(root: Path, job: dict):
         result["root_cause_read"] = {"tool": "get_job", "arguments": {
             "job_id": job["job_id"], "response_artifact_id": digest,
             "response_json_pointer": cause["path"], "limit": 2000}}
+    if isinstance(query, dict) and isinstance(query.get('entities'), list) and 'next_cursor' in query:
+        controls=result['query_controls']
+        controls.update(page_data_requires_artifact_read=True, page_read=artifact_query(job['job_id'],digest,'/result'),
+                        page_read_instruction='Read the full original page before advancing its cursor; summary rows are not a complete page.')
+        # Never present a truncated entity array as a complete callable page.
+        if isinstance(result.get('result'),dict):result['result'].pop('entities',None)
     evidence = evidence_projection(job, digest)
     compact_budget = BUDGET - wire_size(evidence) - 700
     if wire_size(result) > compact_budget:
@@ -254,6 +260,8 @@ def bound(root: Path, job: dict):
     if wire_size(result) > compact_budget:
         if "query_controls" in result and wire_size({"query_controls": result["query_controls"]}) > min(7000, compact_budget // 2):
             result["query_controls"] = {"controls_require_artifact_read": True, "tool": "get_job", "arguments": {"job_id": job["job_id"], "response_artifact_id": digest, "response_json_pointer": "/result/next_cursor", "limit": 2000}}
+            if isinstance(query.get('entities'), list):
+                result["query_controls"].update(page_data_requires_artifact_read=True, page_read=artifact_query(job['job_id'],digest,'/result'))
         result.pop("failure_chain", None)
         result.pop("progress", None)
         for key in ("result", "error"):
@@ -306,8 +314,67 @@ def bound(root: Path, job: dict):
             actual = wire_size(result)
             if result['response_wire_bytes'] == actual: return actual
             result['response_wire_bytes'] = actual
-        raise AssertionError('wire counter did not converge')
-    stamp()
+        result.pop('response_wire_bytes', None)
+        result['response_wire_counter_status'] = 'not_emitted_nonconvergence'
+        return wire_size(result)
+    def fit_envelope():
+        # All contract restoration and metadata are charged to the FINAL wire
+        # envelope. User data must never trigger an assertion in offline reads.
+        nonlocal result
+        if stamp() <= BUDGET:
+            return
+        result['summary_degraded'] = True
+        result['summary_requires_artifact_read'] = True
+        for decoration in ('progress', 'failure_chain'):
+            result.pop(decoration, None)
+            if stamp() <= BUDGET:
+                return
+        error = result.get('error')
+        if isinstance(error, dict):
+            action = error.get('next_action', {})
+            diagnostics = error.get('diagnostics')
+            if isinstance(diagnostics, dict) and diagnostics.get('full_error_read') == action.get('error_read'):
+                diagnostics.pop('full_error_read', None)
+            if len(encoded(error.get('message', ''))) > 100:
+                error['message'] = str(error.get('message', '')).encode('utf-8')[:96].decode('utf-8', errors='ignore')
+                error['message_truncated'] = True
+        if stamp() <= BUDGET:
+            return
+        result.pop('result', None)
+        if stamp() <= BUDGET:
+            return
+        for kind in EVIDENCE_DROP_PRIORITY:
+            row = result.get('evidence', {}).get(kind, {})
+            row.pop('value', None)
+            row.pop('value_is_partial', None)
+            if stamp() <= BUDGET:
+                return
+        # If typed evidence alone fills the budget, retain a small truthful
+        # contract and exact SHA-bound root reads. Never emit truncated tokens.
+        original_error = job.get('error')
+        minimal = {key: result[key] for key in ('job_id', 'status', 'operation', 'execution_status',
+                   'verification_status', 'verification_passed', 'response_summarized', 'full_response_bytes', 'full_response_wire_bytes',
+                   'full_response_sha256', 'full_response_read', 'wire_budget_bytes', 'payload_budget_bytes',
+                   'payload_budget_scope') if key in result}
+        minimal.update(summary_degraded=True, summary_requires_artifact_read=True,
+                       summary_omits_details=True, evidence_requires_artifact_read=True)
+        if isinstance(original_error, dict):
+            minimal['error'] = {key: original_error.get(key) for key in
+                               ('code', 'assertion', 'restoration_status', 'document_context_restoration_status')}
+            minimal['error']['code'] = str(minimal['error']['code'])[:120]
+            minimal['error']['message'] = str(original_error.get('message', '')).encode('utf-8')[:96].decode('utf-8', errors='ignore')
+            original_action = original_error.get('next_action') or {}
+            minimal['error']['next_action'] = {'automatic_retry': False, 'options': [],
+                'options_status': str(original_action.get('options_status', 'no_safe_parameter_change_inferred_from_error_code'))[:160],
+                'instruction': '先精确读取完整失败工件与恢复状态；不得自行修改确认参数或重试写入。',
+                'error_read': artifact_query(job['job_id'], digest, '/error'),
+                'recovery_state_query': {'tool': 'get_recovery_state', 'arguments': {}}}
+        if result.get('root_cause_read') and wire_size(result['root_cause_read']) < 2200:
+            minimal.update({key: result[key] for key in ('root_cause_code', 'root_cause_path', 'root_cause_read')})
+        result = minimal
+        refresh_omissions()
+        stamp()
+    fit_envelope()
     # Reserve small actionable warnings AND timing before display decoration.
     # Reclaim duplicated progress/failure summaries when a few bytes would hide
     # an otherwise short warning. All exact reads and root-cause identity survive.
@@ -343,6 +410,8 @@ def bound(root: Path, job: dict):
             row.pop('value')
             stamp()
     omitted = refresh_omissions()
+    fit_envelope()
+    omitted = refresh_omissions()
     stamp()
     for pointer in omitted:
         if len(result['summary_omitted_paths']) >= 16: break
@@ -354,8 +423,9 @@ def bound(root: Path, job: dict):
             result['summary_omitted_paths_shown'] = len(result['summary_omitted_paths'])
             result['summary_omitted_paths_truncated'] = True
             stamp()
+    fit_envelope()
+    # A metadata refresh can change the decimal counter width; charge it too.
     stamp()
-    assert wire_size(result) <= BUDGET
     return result
 
 
