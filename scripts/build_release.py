@@ -8,11 +8,11 @@ from pathlib import Path
 from verify_release import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.3-alpha.3"
+VERSION = "0.4.3-alpha.4"
 
 
 def build(candidate=False):
-    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.3-alpha.3.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
+    sources = [ROOT/name for name in ("README.md", "发布说明_v0.4.3-alpha.4.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
     sources += sorted((ROOT/"executor").glob("*.cs"))
     sources += [ROOT/"executor/build.ps1"]
     sources += sorted((ROOT/"sw_mcp").glob("*.py"))
@@ -29,7 +29,7 @@ def build(candidate=False):
     sources += [ROOT/"tests"/name for name in ("test_v042a5.py", "v042a5_policy_checks.py", "v042a5_short_native.py", "v042a5_query_native.py", "v042a5_reset_native.py", "run_offline_policies.py")]
     sources += [ROOT/"tests/test_v042a6.py", ROOT/"tests/grid_protocol_checks.py"]
     sources += [ROOT/"tests/test_v043a0.py", ROOT/"tests/v043a0_policy_checks.py", ROOT/"tests/v043a0_timing_native.py"]
-    sources += [ROOT/"tests/test_v043a1.py", ROOT/"tests/test_v043a2.py", ROOT/"tests/test_v043a3.py", ROOT/"tests/v043a3_performance_native.py"]
+    sources += [ROOT/"tests/test_v043a1.py", ROOT/"tests/test_v043a2.py", ROOT/"tests/test_v043a3.py", ROOT/"tests/v043a3_performance_native.py", ROOT/"tests/test_v043a4.py", ROOT/"tests/v043a4_pagination_native.py"]
     sources += [ROOT/"tests/test_v042a9.py"]
     sources += [ROOT/"tests/check_entrypoints.py"]
     sources += [ROOT/"tests/test_v042a8.py", ROOT/"tests/v042a8_policy_checks.py", ROOT/"tests/v042a8_performance_native.py", ROOT/"tests/upgrade_powershell_checks.py"]

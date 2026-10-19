@@ -35,8 +35,8 @@ public partial class Cad {
             .OrderBy(d=>d.GetPathName(),StringComparer.OrdinalIgnoreCase)
             .Select(d=>new{path=d.GetPathName(),stamp=d.GetUpdateStamp(),dirty=d.GetSaveFlag(),configuration=d.ConfigurationManager.ActiveConfiguration.Name}).ToArray();
         var observed=new{revision=m.Revision,configuration=doc.ConfigurationManager.ActiveConfiguration.Name,
-            files=m.Files.ToDictionary(p=>p,p=>FileHash(p)),documents=loaded,
-            components=ProbeWorkingState.ComponentIdentity(doc),poses=Transforms(doc),studies=StudyStates(doc)};
+            files=m.Files.OrderBy(p=>p,StringComparer.OrdinalIgnoreCase).ToDictionary(p=>p,p=>FileHash(p)),documents=loaded,
+            components=ProbeWorkingState.ComponentIdentity(doc),poses=Transforms(doc).OrderBy(p=>p.Key,StringComparer.Ordinal).ToDictionary(p=>p.Key,p=>p.Value),studies=StudyStates(doc).OrderBy(s=>s.name,StringComparer.Ordinal).ToArray()};
         if(GeometryQueryTestObserver!=null){if(System.Environment.GetEnvironmentVariable("SW_MCP_FAULT_TESTS")!="1")throw new CadFault("FAULT_TESTS_DISABLED","查询观测仅用于显式测试。");GeometryQueryTestObserver(observed);}
         return StableId("query_",Json.Serialize(observed));
     }
