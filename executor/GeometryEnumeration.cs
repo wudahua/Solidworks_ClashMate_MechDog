@@ -25,12 +25,7 @@ public partial class Cad {
         return new{component_id=cid,instance=c.Name2,reason=reason,diagnostics=fault==null?(object)null:fault.Diagnostics};
     }
     static void BoundGeometryPage(Dictionary<string,object> response,List<Dictionary<string,object>> page,int offset,int total,int requested,Func<int,string> cursor) {
-        response["entities"]=page;response["requested_limit"]=requested;response["payload_budget_bytes"]=16000;
-        response["page_reduction_reason"]=null;
-        while(true){response["returned"]=page.Count;response["next_cursor"]=offset+page.Count<total?cursor(offset+page.Count):null;
-            if(Encoding.UTF8.GetByteCount(Json.Serialize(response))<=16000)break;
-            if(page.Count<=1)throw new CadFault("GEOMETRY_RESPONSE_BUDGET_EXCEEDED","诊断与候选超过响应预算，请按组件筛选。",new{requested_limit=requested,payload_budget_bytes=16000});
-            page.RemoveAt(page.Count-1);response["page_reduction_reason"]="payload_byte_budget";
-        }
+        try{GeometryPageBudget.Apply(response,page,offset,total,requested,cursor,x=>Json.Serialize(x));}
+        catch(InvalidOperationException error){throw new CadFault("GEOMETRY_RESPONSE_BUDGET_EXCEEDED","分页无法在响应预算内安全前进，请按组件或紧凑模式重新查询；未返回自指游标。",new{cause=error.Message,offset=offset,total=total,requested_limit=requested,payload_budget_bytes=16000});}
     }
 }

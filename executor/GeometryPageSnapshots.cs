@@ -47,7 +47,7 @@ public partial class Cad {
         timing.Start("page_selection_and_registration");var page=entities.Skip(offset).Take(limit).ToList();
         response["scan_host_timings"]=response["host_timings"];response.Remove("host_timings");
         response["pagination_snapshot"]=new{id=snapshot,mode="immutable_observed_subset",expires_after_minutes=10,capacity=8,state_guard="saved_files_loaded_document_stamps_configuration_components_all_poses_and_studies",geometry_rescanned=false,scan_timings_scope="original_scan_not_current_page"};
-        response["offset"]=offset;
+        response["offset"]=offset;response["total_semantics"]="frozen_observed_subset_not_model_total";
         timing.Finish();response["page_host_timings"]=timing.Export();response["page_timing_scope"]="page_guard_and_selection_excludes_registration_and_disposal";
         BoundGeometryPage(response,page,offset,entities.Count,limit,next=>GeometryPageCursor(snapshot,next));
         foreach(var row in page)RegisterEntity(m,(string)row["entity_id"],references[(string)row["entity_id"]],(string)row["component_id"],(string)row["kind"]);
@@ -57,6 +57,8 @@ public partial class Cad {
         string snapshot;
         try{snapshot=geometryPages.Put(query,guard,new{response=response,entities=entities,references=references});}
         catch(InvalidOperationException error){throw new CadFault("GEOMETRY_RESPONSE_BUDGET_EXCEEDED","冻结扫描超过内存预算，请显式按组件查询。",new{cause=error.Message,automatic_retry=false});}
+        response["scan_host_timings"]=response["host_timings"];
+        response["total_semantics"]="frozen_observed_subset_not_model_total";
         response["pagination_snapshot"]=new{id=snapshot,mode="immutable_observed_subset",expires_after_minutes=10,capacity=8,state_guard="saved_files_loaded_document_stamps_configuration_components_all_poses_and_studies",geometry_rescanned=true};
         var page=entities.Take(limit).ToList();response["offset"]=0;
         BoundGeometryPage(response,page,0,entities.Count,limit,next=>GeometryPageCursor(snapshot,next));
