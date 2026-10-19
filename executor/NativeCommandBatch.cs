@@ -15,6 +15,8 @@ public sealed class NativeCommandBatch : IDisposable {
     double enterMs,restoreMs,readPreviousMs,enableWriteMs,enableReadbackMs,restoreWriteMs,restoreReadbackMs;
     bool restored;
     public bool Previous {get{return previous;}}
+    public double EnterElapsedMs {get{return enterMs;}}
+    public double RestoreElapsedMs {get{return restoreMs;}}
     public NativeCommandBatch(Func<bool> getter,Action<bool> setter){
         read=getter;write=setter;var step=Stopwatch.StartNew();previous=read();readPreviousMs=step.Elapsed.TotalMilliseconds;
         if(!previous){changed=true;try{step.Restart();write(true);enableWriteMs=step.Elapsed.TotalMilliseconds;step.Restart();bool accepted=read();enableReadbackMs=step.Elapsed.TotalMilliseconds;if(!accepted)throw new InvalidOperationException("COMMAND_BATCH_NOT_ACCEPTED");}catch{Restore();throw;}}

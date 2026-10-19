@@ -34,8 +34,11 @@ server.jobs.submit=record
 server.bridge.request=lambda operation, **params:record(operation,params)
 server.mcp.run()
 ''', encoding='utf-8', newline='\n')
-    journal = ROOT / 'runs/executor-state.json'
-    before = hashlib.sha256(journal.read_bytes()).hexdigest() if journal.exists() else None
+    # The server root is already isolated. Never assert that another live
+    # installation's journal stays idle while a read-only suite is running.
+    journal = folder / 'isolation-sentinel.json'
+    journal.write_text(json.dumps({'owner': 'grid_protocol_test', 'cad_dispatch': False}), encoding='utf-8')
+    before = hashlib.sha256(journal.read_bytes()).hexdigest()
     report = {'all_passed': False, 'cad_connection_used': False, 'dispatch_boundary': 'recording_double', 'responses': []}
     log = folder / 'dispatch.jsonl'
     base = {'model_id': 'none', 'study': 'Grid Diagnostic'}
@@ -157,7 +160,7 @@ server.mcp.run()
         assert not (folder / 'runs/executor-state.json').exists()
         assert not (folder / 'executor').exists()
         assert (hashlib.sha256(journal.read_bytes()).hexdigest() if journal.exists() else None) == before
-        report.update(all_passed=True, primary_journal_unchanged=True, rejected_grid_calls=12, rejected_plan_calls=8, accepted_dispatch_double_calls=16)
+        report.update(all_passed=True, isolated_sentinel_unchanged=True, live_primary_journal_checked=False, rejected_grid_calls=12, rejected_plan_calls=8, accepted_dispatch_double_calls=16)
     finally:
         (folder / 'result.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8', newline='\n')
     return folder, report

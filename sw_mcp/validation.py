@@ -20,6 +20,8 @@ def refuse(code, message, diagnostics=None, next_action=None):
     error['next_action'].update({'instruction': '核对工具声明与参数后显式重新调用；未自动重试。', **(next_action or {})})
     if error['next_action']['options']:
         error['next_action']['options_status'] = 'explicit_user_selection_required'
+    # A named prerequisite tool takes priority over generic parameter correction.
+    # INVALID_MATE_PLAN_ID deliberately uses this branch (preview_mate first).
     elif error['next_action'].get('tool'):
         error['next_action']['options_status'] = 'tool_identified_arguments_require_user_input'
     elif code == 'CONFIRMATION_REQUIRED':
@@ -28,7 +30,9 @@ def refuse(code, message, diagnostics=None, next_action=None):
     elif code in {'INVALID_ARGUMENT', 'UNKNOWN_ARGUMENT', 'INVALID_MATE_CONTEXT_BUDGET',
                   'LIMIT_OUT_OF_RANGE', 'INVALID_FACE_OFFSET', 'ASSEMBLY_FILE_UNAVAILABLE',
                   'DURATION_OR_FPS_OUT_OF_RANGE', 'SPEED_OUT_OF_RANGE', 'MINIMUM_TRAVEL_OUT_OF_RANGE',
-                  'CHECKPOINT_ID_MISUSED', 'INVALID_MATE_PLAN_ID'}:
+                  'CHECKPOINT_ID_MISUSED', 'INVALID_ASSEMBLY_PATH', 'INVALID_ASSEMBLY_TYPE',
+                  'INVALID_MATE_PARAMETERS', 'INVALID_POSE_BUDGET', 'INVALID_RESET_OPTIONS',
+                  'INCOMPATIBLE_REPLAY_OPTIONS', 'INVALID_GEOMETRY_SCAN_BUDGET'}:
         error['next_action']['options_status'] = 'user_parameter_correction_required'
     return packed({'ok': False, 'error': error}, True)
 
@@ -49,6 +53,7 @@ class StrictMCPServer(MCPServer):
             if tool.name in {'list_mate_references', 'list_drive_candidates'}:
                 properties = {k: dict(v) for k, v in tool.input_schema['properties'].items()}
                 for field, bounds in {'mate_context_budget_s': {'minimum': 1, 'maximum': 30},
+                                      'geometry_scan_budget_s': {'minimum': 1, 'maximum': 60},
                                       'limit': {'minimum': 1, 'maximum': 50}, 'face_offset': {'minimum': 0}}.items():
                     properties[field].update(bounds)
                 tool.input_schema['properties'] = properties
@@ -91,7 +96,7 @@ class StrictMCPServer(MCPServer):
             label = ', '.join(diag['missing_keys']) if issue.validator == 'required' else field
             code = 'INVALID_ARGUMENT'
             if name in {'list_mate_references', 'list_drive_candidates'} and issue.validator in {'minimum', 'maximum'}:
-                code = {'mate_context_budget_s': 'INVALID_MATE_CONTEXT_BUDGET', 'face_offset': 'INVALID_FACE_OFFSET',
+                code = {'mate_context_budget_s': 'INVALID_MATE_CONTEXT_BUDGET', 'geometry_scan_budget_s': 'INVALID_GEOMETRY_SCAN_BUDGET', 'face_offset': 'INVALID_FACE_OFFSET',
                         'limit': 'LIMIT_OUT_OF_RANGE'}.get(field, code)
                 diag.update({k: schema[k] for k in ('minimum', 'maximum') if k in schema})
             return refuse(code, '参数不符合工具声明：' + label + '；请按字段类型、必填项和允许值填写。', diag)
