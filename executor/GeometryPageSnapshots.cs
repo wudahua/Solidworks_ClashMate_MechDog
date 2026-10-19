@@ -29,8 +29,8 @@ public sealed class GeometryPageSnapshots {
 
 public partial class Cad {
     readonly GeometryPageSnapshots geometryPages=new GeometryPageSnapshots();
-    string GeometryPageQuery(string tool,UserModel m,string component,string kind,bool compact,int faceOffset,double budget,bool grouped){
-        return Json.Serialize(new{tool=tool,model_id=m.Id,component_id=component??"",kind=kind??"",compact=compact,face_offset=faceOffset,mate_context_budget_s=budget,group_faces=grouped});
+    string GeometryPageQuery(string tool,UserModel m,string component,string kind,bool compact,int faceOffset,double budget,bool grouped,double geometryBudgetS=10){
+        return Json.Serialize(new{tool=tool,model_id=m.Id,component_id=component??"",kind=kind??"",compact=compact,face_offset=faceOffset,mate_context_budget_s=budget,group_faces=grouped,geometry_scan_budget_s=geometryBudgetS});
     }
     static string GeometryPageCursor(string snapshot,int offset){return Convert.ToBase64String(Encoding.UTF8.GetBytes(Json.Serialize(new{snapshot_id=snapshot,offset=offset})));}
     object ContinueGeometryPage(UserModel m,SolidWorks.Interop.sldworks.IModelDoc2 doc,string query,string cursor,int limit,string tool,OperationTiming timing){
@@ -45,7 +45,7 @@ public partial class Cad {
         var references=Json.Deserialize<Dictionary<string,string>>(Json.Serialize(frozen["references"]));
         if(offset>entities.Count)throw new CadFault(tool=="list_mate_references"?"MATE_CURSOR_STALE":"CANDIDATE_CURSOR_STALE","分页位置超出冻结扫描。",new{cause="offset_out_of_range"});
         timing.Start("page_selection_and_registration");var page=entities.Skip(offset).Take(limit).ToList();
-        response["scan_host_timings"]=response["host_timings"];response.Remove("host_timings");
+        response["scan_host_timings"]=response["host_timings"];response["host_timings_alias_scope"]="original_scan_legacy_alias_not_current_page";
         response["pagination_snapshot"]=new{id=snapshot,mode="immutable_observed_subset",expires_after_minutes=10,capacity=8,state_guard="saved_files_loaded_document_stamps_configuration_components_all_poses_and_studies",geometry_rescanned=false,scan_timings_scope="original_scan_not_current_page"};
         response["offset"]=offset;response["total_semantics"]="frozen_observed_subset_not_model_total";
         timing.Finish();response["page_host_timings"]=timing.Export();response["page_timing_scope"]="page_guard_and_selection_excludes_registration_and_disposal";
@@ -57,7 +57,7 @@ public partial class Cad {
         string snapshot;
         try{snapshot=geometryPages.Put(query,guard,new{response=response,entities=entities,references=references});}
         catch(InvalidOperationException error){throw new CadFault("GEOMETRY_RESPONSE_BUDGET_EXCEEDED","冻结扫描超过内存预算，请显式按组件查询。",new{cause=error.Message,automatic_retry=false});}
-        response["scan_host_timings"]=response["host_timings"];
+        response["scan_host_timings"]=response["host_timings"];response["host_timings_alias_scope"]="original_scan_legacy_alias_not_current_page";
         response["total_semantics"]="frozen_observed_subset_not_model_total";
         response["pagination_snapshot"]=new{id=snapshot,mode="immutable_observed_subset",expires_after_minutes=10,capacity=8,state_guard="saved_files_loaded_document_stamps_configuration_components_all_poses_and_studies",geometry_rescanned=true};
         var page=entities.Take(limit).ToList();response["offset"]=0;

@@ -7,7 +7,7 @@ using SolidWorks.Interop.sldworks;
 public partial class Cad {
     internal long GeometryQueryTestBudgetMs=0;
     internal Action<object> GeometryQueryTestObserver=null;
-    GeometryScanBudget NewGeometryBudget(){if(GeometryQueryTestBudgetMs>0&&System.Environment.GetEnvironmentVariable("SW_MCP_FAULT_TESTS")!="1")throw new CadFault("FAULT_TESTS_DISABLED","几何预算注入仅允许显式测试环境。");return new GeometryScanBudget(GeometryQueryTestBudgetMs>0?GeometryQueryTestBudgetMs:10000);}
+    GeometryScanBudget NewGeometryBudget(double seconds=10){if(GeometryQueryTestBudgetMs>0&&System.Environment.GetEnvironmentVariable("SW_MCP_FAULT_TESTS")!="1")throw new CadFault("FAULT_TESTS_DISABLED","几何预算注入仅允许显式测试环境。");return new GeometryScanBudget(GeometryQueryTestBudgetMs>0?GeometryQueryTestBudgetMs:(long)Math.Round(seconds*1000));}
     object[] NativeMateHealth(IModelDoc2 doc) {
         return BasicMateFeatures(doc).GroupBy(f=>f.GetID()).Select(g=>g.First()).Select(f=>{
             bool warning;int error=f.GetErrorCode2(out warning);
