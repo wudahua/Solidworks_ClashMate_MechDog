@@ -82,6 +82,14 @@ def evidence_projection(job, digest):
         row = {'path': pointer, 'read': artifact_query(job['job_id'], digest, pointer)}
         inline = _summary(value)
         if kind == 'component_name_resolution':
+            fields = ('schema_version', 'total_elapsed_ms', 'phase_elapsed_ms', 'phase_gap_ms', 'batch_enter_ms',
+                      'extension_acquisition_ms', 'component_loop_ms', 'batch_restore_ms', 'export_and_assemble_ms', 'other_elapsed_ms')
+            compact = {key: value[key] for key in fields if isinstance(value, dict) and key in value
+                       and type(value[key]) in (int, float) and math.isfinite(value[key])}
+            if compact and len(encoded(compact)) <= 600:
+                row.update(value=compact, value_is_partial=True, value_scope='timing_scalars_only_full_rows_via_read')
+            else:
+                row['value_omitted_reason']='no_compact_timing_scalars_within_inline_budget'
             rows[kind] = row
             continue
         if wire_size(inline) <= 1600:
@@ -212,7 +220,7 @@ def bound(root: Path, job: dict):
                   full_response_bytes=len(data), full_response_sha256=digest,
                   full_response_read={"tool": "get_job", "arguments": {
                       "job_id": job["job_id"], "response_artifact_id": digest, "offset": 0, "limit": 2000}},
-                  summary_omits_details=True)
+                  summary_omits_details=True, summary_degraded=True, summary_requires_artifact_read=True)
     query = job.get("result", {})
     if isinstance(query, dict) and "next_cursor" in query:
         result["query_controls"] = {k: query[k] for k in ("next_cursor", "geometry_scan", "geometry_complete", "scope_geometry_complete", "model_geometry_complete", "query_scope", "model_scan_state", "client_queue_contract", "total_scope", "warning_codes", "query_completion_status", "client_next_action", "absence_of_kind_proven", "mate_context_complete", "mate_context_scope", "mate_context_warning", "mate_context_next_query", "mate_context_incomplete_reason", "mate_context_incomplete_reasons", "pagination_snapshot", "offset", "returned", "total", "total_semantics", "next_offset", "next_offset_delta", "frozen_pages_complete") if k in query}
@@ -241,7 +249,7 @@ def bound(root: Path, job: dict):
                 "cad_operation_state", "response_summarized", "payload_budget_bytes", "full_response_bytes",
                 "full_response_sha256", "full_response_read", "summary_omits_details", "failure_chain",
                 "root_cause_code", "root_cause_path", "root_cause_scope", "root_cause_read", "query_controls",
-                "wire_budget_bytes", "full_response_wire_bytes", "payload_budget_scope"}
+                "wire_budget_bytes", "full_response_wire_bytes", "payload_budget_scope", "summary_degraded", "summary_requires_artifact_read"}
         result = {k: v for k, v in result.items() if k in keep or k in {"error", "result", "progress"}}
         for k in ("error", "result", "progress"):
             if isinstance(result.get(k), dict):
@@ -371,6 +379,20 @@ def bound(root: Path, job: dict):
                 'recovery_state_query': {'tool': 'get_recovery_state', 'arguments': {}}}
         if result.get('root_cause_read') and wire_size(result['root_cause_read']) < 2200:
             minimal.update({key: result[key] for key in ('root_cause_code', 'root_cause_path', 'root_cause_read')})
+        # Preserve small actionable evidence even in the minimal fallback.
+        # Each row keeps its exact read; content is charged to the final budget.
+        for kind in ('review_items', 'drive_validation', 'native_motor_snapshot'):
+            row = evidence.get(kind)
+            if not row:
+                continue
+            small = {key: row[key] for key in ('path', 'read') if key in row}
+            if kind == 'review_items' and 'value' in row and len(encoded(row['value'])) <= 600:
+                small['value'] = row['value']
+            elif 'conclusion' in row and len(encoded(row['conclusion'])) <= 600:
+                small['conclusion'] = row['conclusion']
+            minimal.setdefault('evidence', {})[kind] = small
+            if wire_size(minimal) > BUDGET - 2200:
+                minimal['evidence'].pop(kind)
         result = minimal
         refresh_omissions()
         stamp()
