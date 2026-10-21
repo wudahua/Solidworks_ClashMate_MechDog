@@ -1,5 +1,5 @@
 {
-  "version": "0.4.3-alpha.6",
+  "version": "0.4.3-alpha.7",
   "kind": "source_only",
   "text_line_endings": "LF",
   "includes_user_cad": false,
@@ -8,13 +8,13 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 85951,
-      "sha256": "6cf0faf5d6bb5964eb34a3fb7c9ba27e2d216d85ea9dbd1a8cd8e30eb7d47726"
+      "bytes": 90423,
+      "sha256": "4862d1b1583c3a4a6d7cacaec058edc1b809bfd6dbbefaddf7749b5f66438fc0"
     },
     {
-      "path": "发布说明_v0.4.3-alpha.6.md",
-      "bytes": 5638,
-      "sha256": "9aa4804415fd7766747e67e91bb502e513aabb1811eedb53b8505354cd7bfd13"
+      "path": "发布说明_v0.4.3-alpha.7.md",
+      "bytes": 4206,
+      "sha256": "cbbfe513b00ee4b4576c38f7566c282c7e1de0e0e1cbd53569b1a8e4afc2ff37"
     },
     {
       "path": "LICENSE",
@@ -49,7 +49,7 @@
     {
       "path": "motion_server.py",
       "bytes": 35949,
-      "sha256": "1c43bcdf7f2a2f04fa603d95828094c60743c91680c185bb7c7bcf5dac3a7b7d"
+      "sha256": "c5e5b08dd8ffbf2cb76ee8ba301ea89a62c9488d40ee7b3d90a7bb040abe6a84"
     },
     {
       "path": "mcp-config.example.json",
@@ -449,7 +449,7 @@
     {
       "path": "executor/UserMotion.cs",
       "bytes": 74322,
-      "sha256": "39c2277d980a3b11e225e266bf8266cb686c5451caec56805651564c0bea1ea4"
+      "sha256": "ee6fb3cd976cef2caa7eb3c6f6884f25836942b7368da13483eafa8c1808b764"
     },
     {
       "path": "executor/VirtualImport.cs",
@@ -544,7 +544,7 @@
     {
       "path": "scripts/build_release.py",
       "bytes": 8535,
-      "sha256": "39ba222df6a14d5a0911139c27d3a8eb86a5a69536672631bfa8972e0b48656d"
+      "sha256": "cd4fc65883aff0a28195e298d6678eb42483b5ffe721f2ef2c6e112664b8a14a"
     },
     {
       "path": "scripts/verify_release.py",

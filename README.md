@@ -2,9 +2,9 @@
 
 SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://github.com/wudahua/Solidworks_ClashMate_MechDog) · [试用版下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases)
 
-`v0.4.3-alpha.6`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
+`v0.4.3-alpha.7`基础配合助手与运动验证试用版：让 AI 在本机 SolidWorks 中导入隔离副本，按用户选择创建基础配合，复用或创建 Motion Analysis 算例，再验证所声明的运动、导出曲线和回放截图。
 
-**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.3-alpha.6.md)。
+**本版本公开的是运动仿真工具，暂不提供通用静态或动态干涉检查。** 修复范围及验收边界见 [发布说明](发布说明_v0.4.3-alpha.7.md)。
 
 本版本保留另一台电脑安装反馈修复与 MCP 名称统一：增加严格 PID 校验的 COM 回退、英文安装入口、可选下载源、虚拟环境身份校验及启动诊断。
 
@@ -37,7 +37,41 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 
 
 
-## v0.4.3-alpha.6 本轮修订
+## 三模型验收（2026-10-21）
+
+本次发布 **v0.4.3-alpha.7**，更新版本身份、验收说明和源码包。下表来自 **v0.4.3-alpha.6 原发布源码**的既有验收；alpha.7 除版本元数据外沿用相同产品实现，没有新增运动求解修复，也没有重新进行 CAD 实测。这里的“官方原源码”指本项目已发布源码在测试机本地编译，不是 SOLIDWORKS 官方认证。
+
+| 固定模型 | 已核对的跨机结果 | 驱动与验证范围 |
+| --- | --- | --- |
+| 曲柄滑块 | v1.0.7 批次，5/5 轮通过（3 冷＋2 暖） | Part6，30 rpm、4 s、30 fps，最低运动量 720°；独立运动验证、历史读取、轨迹比较、恢复和正常退出 |
+| 多连杆双曲柄滑块 | 同一 v1.0.7 批次，5/5 轮通过（3 冷＋2 暖） | 指定实例 2-1，10 rpm、0.4 s、30 fps，最低运动量 20°；另核对每轮 5 s 不完整结果的拒绝与安全恢复 |
+| 球形库利斯 | 独立 v1.0.18 官方原源码对照，3/3 轮通过（1 冷＋2 暖） | polea，30 rpm、2 s、30 fps，最低运动量 360°；仅认证该驱动及全组件轨迹重复性，不认证完整机构传动设计 |
+
+这些是**分批、固定模型和固定测试卡的结果**，不能拼成一次新的“15 轮全部通过”。v1.0.7 原批次仍为 10 通过、1 失败、4 未执行：球形库利斯首次导入在外部化后的保存阶段未取得完成证明。此前本机五轮/模型的记录含显式续测与迟到清理核验，属于另一个历史批次。
+
+球形库利斯 v1.0.18 使用原执行器和原关闭助手源码，无源码替代或新增逐调用记录器。三轮各执行新驱动创建、求解、独立验证和恢复；六份轨迹合计 2196 行，七项批内比较通过（平移容差 1e-7 m、旋转容差 1e-6 rad）。最终七个副本文件与归零种子 SHA256 一致，新增登记驱动为空；原生进程与关闭助手实际退出码均为 0，没有强制结束进程。前两轮保留实例复用，清理通过在第三轮退出后确认。
+
+已独立核对证据 ZIP 的文件集合、字节、SHA256、CRC 及对应轨迹。两模型 v1.0.7 的源码身份依据原运行校验回执，未重新逐项重哈希外机全部源码字节。球形对照还核对了 216 项原发布文件及 75 份 C# 编译来源。v1.0.17 带观测代码的诊断结果另存，未替代官方原源码对照。以上均是既有证据审计，本次整理没有重新运行 CAD。
+
+仍需按以下范围使用：
+
+- 旧有 600 s 超时、保存/关闭停滞与异常退出本轮未复现，根因仍未确定，不能宣称已经修复。超时后按恢复状态和原始响应判断，不自动重复写入。
+- 持久引用可能出现 Invalid 后按原生名称＋ID 回退；保留相应告警，不能视为跨会话身份永久有效的证明。
+- 边缘/草图段新增配合、自动理解机构意图、任意装配自动补齐配合和通用静态/动态干涉检查仍不在公开支持范围。三张测试卡也没有认证接触物理精度、任意机构或全部跨版本环境。
+- 采样与工具调用耗时受机器、模型和原生调用影响。当前没有冻结跨机性能门槛；单次对照通过不构成固定耗时或整体稳定性保证。
+- 跨机对照采用已注明的等价 Python 入口；外机 PowerShell `-File` 启动路径受环境限制，未计为通过。
+
+试用时先在隔离副本上选择有效配合的机构，人工确认组件、轴线、转速、时长、帧率和最低运动量，再运行并显式独立验证；最后检查恢复和退出证据。新增配合应使用单独的测试卡，本表不证明任意补配合方案可用。
+
+alpha.7 的版本元数据和文档使发布清单哈希变化。旧验收工具包严格绑定 alpha.6 原发布清单，应使用其原冻结源码；不要在 alpha.7 目录运行旧工具包并绕过哈希校验。alpha.7 单独提供源码 ZIP 和同名 SHA256 边车，旧标签与旧资产保留。
+
+## v0.4.3-alpha.7 本轮发布
+
+- 公开三模型的分批验收范围、恢复和退出结论，保留失败及未执行的分母；私有原始证据另行归档。
+- 将 MCP 协议、环境查询、构建器及安装示例的版本身份统一为 alpha.7；运动、配合和恢复实现沿用 alpha.6。
+- 完成新源码包的字节校验、编译、升级预演和离线发布检查。旧保存/退出故障仍为已知风险，未扩大机构或环境认证范围。
+
+## v0.4.3-alpha.6 历史修订
 
 - 补齐6个参数拒绝码的分类，人工确认仍独立处理；错误码与指引经过真实工具入口核对，新增 InputRefusal 码须明确登记测试预期。
 - 摘要有省略即标记 summary_degraded/summary_requires_artifact_read，最小封套也优先保留短复核清单和驱动结论。名称解析证据可内联紧凑计时，完整组件行仍从SHA绑定工件读取。
@@ -126,7 +160,7 @@ SolidWorks ClashMate MechDog MCP（运动仿真）。[GitHub 项目](https://git
 若 PowerShell 执行策略阻止外层脚本，可直接使用基础 Python，不修改系统策略：
 
 ```powershell
-C:\Python312\python.exe scripts/upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.3-alpha.6_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
+C:\Python312\python.exe scripts/upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.3-alpha.7_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
 ```
 
 DryRun通过后使用同样参数去掉 `--dry-run`。`--python` 必须指基础Python；安装目录优先显式参数、`SW_INSTALL_DIR`，否则读取运行进程模块路径及供应商/COM注册表并验证Interop DLL；多个有效安装须显式选择，不自动选版本。发现结果传递给编译器。无法发现时才回落标准目录，缺失仍拒绝。
@@ -237,7 +271,7 @@ DryRun通过后使用同样参数去掉 `--dry-run`。`--python` 必须指基础
 先停用旧安装目录的MCP服务，保留SolidWorks打开；从新包目录调用：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.3-alpha.6_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.3-alpha.7_source.zip' -TargetDir 'C:\MCP\ClashMateMechDog' -PythonPath 'C:\Python312\python.exe' -DryRun
 # PythonPath填写基础Python；非默认SolidWorks安装请同时指定-SolidWorksInstallDir。
 # 预检通过后移除-DryRun；未来网络及编译仍可能失败，保留自动回滚。
 ```
@@ -245,7 +279,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\upgrade.ps1 -SourcePackage
 也可从新包目录直接使用等价的 Python 入口（参数与预检相同）：
 
 ```powershell
-& 'C:\Python312\python.exe' .\scripts\upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.3-alpha.6_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
+& 'C:\Python312\python.exe' .\scripts\upgrade.py --package 'C:\Downloads\Solidworks_ClashMate_MechDog_v0.4.3-alpha.7_source.zip' --target 'C:\MCP\ClashMateMechDog' --python 'C:\Python312\python.exe' --dry-run
 # 预检通过后移除 --dry-run；非默认 SW 目录另传 --solidworks-install-dir。
 ```
 
