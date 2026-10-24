@@ -12,6 +12,7 @@ from typing import Literal
 
 from sw_mcp.validation import StrictMCPServer, InputRefusal, refuse, packed
 from sw_mcp.errors import operational_error
+from sw_mcp.task_errors import task_failure
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
 from sw_mcp.bridge import Bridge, CadError
@@ -24,21 +25,20 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.9", instructions="日常优先纯AI对话：先get_mechanism_task找回任务，无任务再prepare_mechanism_task，按推荐plan，仅机械歧义或具体写入授权需要用户回答。motion支持旋转/直线，concentric支持受限圆边同轴配合；execute一次，get查询，finish恢复并核对退出再开始第二轮。客户端断连不结束活任务；持有进程丢失只读旧记录，不重建COM或重放令牌。get_mechanism_task(collect_evidence=True)自动读已有诊断，无需用户命令或网页。旧低层会话先finish_motion_session释放本服务执行器才能进入受管任务。以下保留原有工具用法：先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。配合关联mate_context_complete=false时只作几何参考，不推断没有配合；可按mate_context_next_query显式从空cursor重扫，保留原几何待办，改变mate_context_budget_s后重新分页。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求；成功后可核对baseline_candidate的新运行ID用于新预演，旧基线失配时不得自动改绑。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.10", instructions="日常优先纯AI对话：先get_mechanism_task找回任务，无任务再prepare_mechanism_task，按推荐plan，仅机械歧义或具体写入授权需要用户回答。motion支持旋转/直线，concentric支持受限圆边同轴配合；execute一次，get查询，finish恢复并核对退出再开始第二轮。客户端断连不结束活任务；持有进程丢失只读旧记录，不重建COM或重放令牌。get_mechanism_task(collect_evidence=True)自动读已有诊断，无需用户命令或网页。旧低层会话先finish_motion_session释放本服务执行器才能进入受管任务。以下保留原有工具用法：先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。配合关联mate_context_complete=false时只作几何参考，不推断没有配合；可按mate_context_next_query显式从空cursor重扫，保留原几何待办，改变mate_context_budget_s后重新分页。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求；成功后可核对baseline_candidate的新运行ID用于新预演，旧基线失配时不得自动改绑。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 _task_engine=None
 _formal_engine=None
 
 async def dialogue_call(method,*args,**kwargs):
-    if _task_engine is None:return refuse('HOST_CONTEXT_REQUIRED','请通过正式motion_server.py入口运行；任务不在短连接进程内执行。')
+    if _task_engine is None:return packed({'ok':False,'error':task_failure('HOST_CONTEXT_REQUIRED','请通过正式motion_server.py入口运行；任务不在短连接进程内执行。')},True)
     if method in {'plan','execute','finish'} and args[0] not in _task_engine.tasks:
-        return refuse('TASK_NOT_IN_CURRENT_SERVER','没有该任务记录；AI先查询已有任务，不猜测或重建写入。',
-            next_action={'tool':'get_mechanism_task','arguments':{}})
+        return packed({'ok':False,'error':task_failure('TASK_NOT_IN_CURRENT_SERVER','没有该任务记录；AI先查询已有任务，不猜测或重建写入。')},True)
     try:return packed({'ok':True,'result':await asyncio.to_thread(getattr(_task_engine,method),*args,**kwargs)})
     except Exception as error:
         if not hasattr(error,'code'):raise
-        return refuse(error.code,str(error),getattr(error,'diagnostics',None),
-            {'tool':'get_mechanism_task','arguments':{},'instruction':'AI读取已有任务及诊断，不自动重试写入。'})
+        return packed({'ok':False,'error':task_failure(error.code,str(error),getattr(error,'diagnostics',None),
+            task_id=args[0] if method in {'plan','execute','finish','get'} and args else '')},True)
 
 @mcp.tool()
 async def prepare_mechanism_task(assembly_path:str,moving_component_hint:str='',reference_component_hint:str='',
@@ -53,8 +53,11 @@ async def get_mechanism_task(task_id:str='',collect_evidence:bool=False):
     """不传ID找回任务；读取进度、方案及已保存错误。重连接续原活会话，不从JSON重建COM。collect_evidence=True自动打包已有诊断，无需操作者搜日志，不新增CAD求解。"""
     if collect_evidence:
         from sw_mcp.conversation.evidence_bundle import collect
-        if _task_engine is None:return refuse('HOST_CONTEXT_REQUIRED','任务工作目录未初始化。')
-        return packed({'ok':True,'result':await asyncio.to_thread(collect,_task_engine.work,task_id)})
+        if _task_engine is None:return packed({'ok':False,'error':task_failure('HOST_CONTEXT_REQUIRED','任务工作目录未初始化。')},True)
+        try:return packed({'ok':True,'result':await asyncio.to_thread(collect,_task_engine.work,task_id)})
+        except Exception as error:
+            if not hasattr(error,'code'):raise
+            return packed({'ok':False,'error':task_failure(error.code,str(error),getattr(error,'diagnostics',None))},True)
     return await dialogue_call('get',task_id)
 
 @mcp.tool()
@@ -75,11 +78,11 @@ async def finish_mechanism_task(task_id:str,close_unrestored:bool=False,keep_res
 @mcp.tool()
 async def finish_motion_session():
     """AI结束旧版低层工具会话：仅无进行中任务、无未知恢复时释放本owner执行器；保留用户SolidWorks窗口和已保存副本。没有恢复副本，未证明姿态。受管任务须使用finish_mechanism_task。"""
-    if _formal_engine is None:return refuse('HOST_CONTEXT_REQUIRED','未连接正式任务持有进程。')
+    if _formal_engine is None:return packed({'ok':False,'error':task_failure('HOST_CONTEXT_REQUIRED','未连接正式任务持有进程。')},True)
     try:return packed({'ok':True,'result':await asyncio.to_thread(_formal_engine.finish_legacy)})
     except Exception as error:
         if not hasattr(error,'code'):raise
-        return refuse(error.code,str(error),getattr(error,'diagnostics',None))
+        return packed({'ok':False,'error':task_failure(error.code,str(error),getattr(error,'diagnostics',None))},True)
 
 
 def grid_refusal(tool, arguments, duration_key="duration_s", fps_key="output_fps"):
