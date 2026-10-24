@@ -28,7 +28,7 @@ def refuse(code, message, diagnostics=None, next_action=None):
         error['next_action'].update(options_status='explicit_human_confirmation_required',
                                    instruction='必须由用户明确确认具体配合方案；不得自行将 confirmed 改为 true，也不自动重试。')
     elif code in {'INVALID_ARGUMENT', 'UNKNOWN_ARGUMENT', 'INVALID_MATE_CONTEXT_BUDGET',
-                  'LIMIT_OUT_OF_RANGE', 'INVALID_FACE_OFFSET', 'ASSEMBLY_FILE_UNAVAILABLE',
+                  'LIMIT_OUT_OF_RANGE', 'INVALID_FACE_OFFSET', 'INVALID_EDGE_OFFSET', 'ASSEMBLY_FILE_UNAVAILABLE',
                   'DURATION_OR_FPS_OUT_OF_RANGE', 'SPEED_OUT_OF_RANGE', 'MINIMUM_TRAVEL_OUT_OF_RANGE',
                   'CHECKPOINT_ID_MISUSED', 'INVALID_ASSEMBLY_PATH', 'INVALID_ASSEMBLY_TYPE',
                   'INVALID_MATE_PARAMETERS', 'INVALID_POSE_BUDGET', 'INVALID_RESET_OPTIONS',
@@ -101,6 +101,9 @@ class StrictMCPServer(MCPServer):
                 diag.update({k: schema[k] for k in ('minimum', 'maximum') if k in schema})
             return refuse(code, '参数不符合工具声明：' + label + '；请按字段类型、必填项和允许值填写。', diag)
         try:
+            dispatcher=getattr(self,'tool_dispatcher',None)
+            if dispatcher is not None:
+                return await dispatcher(name,arguments)
             return await super().call_tool(name, arguments, context)
         except UnexpectedToolError:
             # Preserve the SDK's redaction for unexpected application failures.

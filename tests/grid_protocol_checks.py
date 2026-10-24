@@ -56,7 +56,7 @@ server.mcp.run()
                     hello = await client.initialize()
                     report['server'] = hello.server_info.model_dump()
                     tools = await client.list_tools()
-                    assert len(tools.tools) == 24
+                    assert len(tools.tools) == 30
                     for tool in tools.tools:
                         assert tool.input_schema['additionalProperties'] is False
                         response = await client.call_tool(tool.name, {'__unexpected_argument': True})

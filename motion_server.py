@@ -6,6 +6,7 @@ import atexit
 import json
 import math
 import re
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -23,7 +24,62 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.7", instructions="先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。配合关联mate_context_complete=false时只作几何参考，不推断没有配合；可按mate_context_next_query显式从空cursor重扫，保留原几何待办，改变mate_context_budget_s后重新分页。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求；成功后可核对baseline_candidate的新运行ID用于新预演，旧基线失配时不得自动改绑。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.8", instructions="日常优先纯AI对话：先get_mechanism_task找回任务，无任务再prepare_mechanism_task，按推荐plan，仅机械歧义或具体写入授权需要用户回答。motion支持旋转/直线，concentric支持受限圆边同轴配合；execute一次，get查询，finish恢复并核对退出再开始第二轮。客户端断连不结束活任务；持有进程丢失只读旧记录，不重建COM或重放令牌。get_mechanism_task(collect_evidence=True)自动读已有诊断，无需用户命令或网页。旧低层会话先finish_motion_session释放本服务执行器才能进入受管任务。以下保留原有工具用法：先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。配合关联mate_context_complete=false时只作几何参考，不推断没有配合；可按mate_context_next_query显式从空cursor重扫，保留原几何待办，改变mate_context_budget_s后重新分页。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求；成功后可核对baseline_candidate的新运行ID用于新预演，旧基线失配时不得自动改绑。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+
+_task_engine=None
+_formal_engine=None
+
+async def dialogue_call(method,*args,**kwargs):
+    if _task_engine is None:return refuse('HOST_CONTEXT_REQUIRED','请通过正式motion_server.py入口运行；任务不在短连接进程内执行。')
+    if method in {'plan','execute','finish'} and args[0] not in _task_engine.tasks:
+        return refuse('TASK_NOT_IN_CURRENT_SERVER','没有该任务记录；AI先查询已有任务，不猜测或重建写入。',
+            next_action={'tool':'get_mechanism_task','arguments':{}})
+    try:return packed({'ok':True,'result':await asyncio.to_thread(getattr(_task_engine,method),*args,**kwargs)})
+    except Exception as error:
+        if not hasattr(error,'code'):raise
+        return refuse(error.code,str(error),getattr(error,'diagnostics',None),
+            {'tool':'get_mechanism_task','arguments':{},'instruction':'AI读取已有任务及诊断，不自动重试写入。'})
+
+@mcp.tool()
+async def prepare_mechanism_task(assembly_path:str,moving_component_hint:str='',reference_component_hint:str='',
+        task_kind:Literal['motion','concentric']='motion',motion:Literal['rotary','linear']='rotary',speed:float=12,
+        duration_s:float=1,output_fps:int=30,reverse_direction:bool=False,minimum_travel:float=0):
+    """AI对话首选：创建专用CAD实例和隔离副本，自动推荐旋转/直线驱动或圆边同轴组合。返回task_id后用get查询。名称线索可留空；有歧义用自然语言澄清，几何不证明意图。motion限5秒601帧，speed单位rpm或mm/s；默认只在副本执行，finish恢复。concentric固定12rpm/1秒30fps同轴约束范围验证，非整机自由度认证。"""
+    return await dialogue_call('prepare',assembly_path,moving_component_hint,reference_component_hint,task_kind,motion,
+                               speed,duration_s,output_fps,reverse_direction,minimum_travel)
+
+@mcp.tool()
+async def get_mechanism_task(task_id:str='',collect_evidence:bool=False):
+    """不传ID找回任务；读取进度、方案及已保存错误。重连接续原活会话，不从JSON重建COM。collect_evidence=True自动打包已有诊断，无需操作者搜日志，不新增CAD求解。"""
+    if collect_evidence:
+        from sw_mcp.conversation.evidence_bundle import collect
+        if _task_engine is None:return refuse('HOST_CONTEXT_REQUIRED','任务工作目录未初始化。')
+        return packed({'ok':True,'result':await asyncio.to_thread(collect,_task_engine.work,task_id)})
+    return await dialogue_call('get',task_id)
+
+@mcp.tool()
+async def plan_mechanism_task(task_id:str,candidate_id:str='',moving_component_hint:str='',reference_component_hint:str='',initial_state:Literal['saved','study_zero']='saved'):
+    """AI解释推荐并形成一次性待确认方案；名称歧义时用自然语言线索复用原副本澄清。用户不必抄ID。旋转/直线需核对轴线及方向；不创建马达或配合。"""
+    return await dialogue_call('plan',task_id,candidate_id,moving_component_hint,reference_component_hint,initial_state)
+
+@mcp.tool()
+async def execute_mechanism_task(task_id:str,plan_token:str,confirmed:bool=False,scope_confirmed:bool=False):
+    """明确授权后一次执行已确认方案。motion创建单一驱动并验证声明运动、导出曲线；concentric采集基线、创建圆边同轴配合并比较约束范围。token只消费一次；失败/断连不重试写入。"""
+    return await dialogue_call('execute',task_id,plan_token,confirmed,scope_confirmed)
+
+@mcp.tool()
+async def finish_mechanism_task(task_id:str,close_unrestored:bool=False,keep_result:bool=False):
+    """默认恢复导入检查点并核对退出；用户明确要求保留成果副本时才keep_result=True，限本次已验证成果，返回装配体路径（含测试算例），源文件不改，不说成已恢复。原owner丢失时close_unrestored=True须明确同意及完整退出/空闲证明，仅关闭失败记录，不冒充恢复成功。"""
+    return await dialogue_call('finish',task_id,close_unrestored,keep_result)
+
+@mcp.tool()
+async def finish_motion_session():
+    """AI结束旧版低层工具会话：仅无进行中任务、无未知恢复时释放本owner执行器；保留用户SolidWorks窗口和已保存副本。没有恢复副本，未证明姿态。受管任务须使用finish_mechanism_task。"""
+    if _formal_engine is None:return refuse('HOST_CONTEXT_REQUIRED','未连接正式任务持有进程。')
+    try:return packed({'ok':True,'result':await asyncio.to_thread(_formal_engine.finish_legacy)})
+    except Exception as error:
+        if not hasattr(error,'code'):raise
+        return refuse(error.code,str(error),getattr(error,'diagnostics',None))
 
 
 def grid_refusal(tool, arguments, duration_key="duration_s", fps_key="output_fps"):
@@ -152,8 +208,8 @@ async def create_motion_study(model_id: str, study: str, component_id: str, enti
 
 
 @mcp.tool()
-async def list_mate_references(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal"] = "", limit: int = 20, cursor: str = "", detail_level: Literal["full", "compact"] = "full", wait_for_completion: bool = True, face_offset: int = 0, mate_context_budget_s: float = 10, geometry_scan_budget_s: float = 10) -> CallToolResult:
-    """几何扫描geometry_scan_budget_s默认10秒、显式可选1–60秒；改变预算须清空cursor，不自动扩大预算。配合关联扫描默认10秒，mate_context_budget_s显式可选1–30秒；mate_context_next_query是从头重扫建议，需明确调用且不能清空几何待办。顶层配合面，包含固定支座；geometry_complete=false时必须按geometry_scan.next_queries保留父查询全部待办，逐组件续查至客户端队列为空，单组件scope_geometry_complete不代表全模型完成并读完各页，缺席不证明没有圆柱面；不支持边缘、顶点或草图段，不自动换成邻面；wait_for_completion=False异步取job_id；空体/异常报告原因，不推断缺失配合。每零件最多128面并报告截断；limit条数上限与16KB预算同时限制。compact提供较短结果，改变详情后重查第一页。"""
+async def list_mate_references(model_id: str, component_id: str = "", kind: Literal["", "cylindrical_axis", "planar_normal", "circular_edge"] = "", limit: int = 20, cursor: str = "", detail_level: Literal["full", "compact"] = "full", wait_for_completion: bool = True, face_offset: int = 0, mate_context_budget_s: float = 10, geometry_scan_budget_s: float = 10, edge_offset: int = 0) -> CallToolResult:
+    """几何扫描geometry_scan_budget_s默认10秒、显式可选1–60秒；改变预算须清空cursor，不自动扩大预算。配合关联扫描默认10秒，mate_context_budget_s显式可选1–30秒；mate_context_next_query是从头重扫建议，需明确调用且不能清空几何待办。顶层配合面，包含固定支座；geometry_complete=false时必须按geometry_scan.next_queries保留父查询全部待办，逐组件续查至客户端队列为空，单组件scope_geometry_complete不代表全模型完成并读完各页，缺席不证明没有圆柱面；circular_edge支持顶层圆形边线用于同轴配合；仍不支持顶点或草图段，不自动换成邻面；wait_for_completion=False异步取job_id；空体/异常报告原因，不推断缺失配合。每零件最多128面并报告截断；limit条数上限与16KB预算同时限制。compact提供较短结果，改变详情后重查第一页。"""
     if not 1 <= limit <= 50:
         raise InputRefusal("LIMIT_OUT_OF_RANGE", "limit 须在1–50。")
     if face_offset < 0 or (face_offset and not component_id):
@@ -162,13 +218,15 @@ async def list_mate_references(model_id: str, component_id: str = "", kind: Lite
         raise InputRefusal("INVALID_MATE_CONTEXT_BUDGET", "mate_context_budget_s 须为1–30秒有限数值。", {"field": "mate_context_budget_s", "minimum": 1, "maximum": 30})
     if not math.isfinite(geometry_scan_budget_s) or not 1 <= geometry_scan_budget_s <= 60:
         raise InputRefusal('INVALID_GEOMETRY_SCAN_BUDGET', 'geometry_scan_budget_s 须为1–60秒有限数值。', {'field':'geometry_scan_budget_s','minimum':1,'maximum':60})
-    params = dict(model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor, geometry_scan_budget_s=geometry_scan_budget_s, detail_level=detail_level, face_offset=face_offset, mate_context_budget_s=mate_context_budget_s)
+    if edge_offset < 0 or (edge_offset and (kind != "circular_edge" or not component_id)):
+        raise InputRefusal("INVALID_EDGE_OFFSET", "非零edge_offset需要circular_edge及component_id。")
+    params = dict(edge_offset=edge_offset, model_id=model_id, component_id=component_id, kind=kind, limit=limit, cursor=cursor, geometry_scan_budget_s=geometry_scan_budget_s, detail_level=detail_level, face_offset=face_offset, mate_context_budget_s=mate_context_budget_s)
     return await call("list_mate_references", **params) if wait_for_completion else enqueue("list_mate_references", params)
 
 
 @mcp.tool()
 async def preview_mate(model_id: str, entity_a: str, entity_b: str, mate_type: Literal["concentric", "coincident", "distance", "parallel", "perpendicular"], alignment: Literal["aligned", "anti_aligned"] = "aligned", distance_mm: float = 0, lock_rotation: bool = False, baseline_run_id: str = "", maximum_translation_mm: float = 1, maximum_rotation_deg: float = 1) -> CallToolResult:
-    """生成描述性配合方案，不移动零件、不保存或试算。同心选圆柱面，其余选平面。可绑定本会话当前模型的已验证运动基线。默认位姿预算1mm/1度，保护已有构型；装配对齐可能需要更大移动，请用户预先明确maximum_translation_mm/maximum_rotation_deg。仅描述预览不预测移动；超预算回滚后需新方案，原生配合成功不等于构型符合意图。方案在状态变化或重连后失效。"""
+    """生成描述性配合方案，不移动零件、不保存或试算。同心选圆柱面或圆形边线，其余选平面。可绑定本会话当前模型的已验证运动基线。默认位姿预算1mm/1度，保护已有构型；装配对齐可能需要更大移动，请用户预先明确maximum_translation_mm/maximum_rotation_deg。仅描述预览不预测移动；超预算回滚后需新方案，原生配合成功不等于构型符合意图。方案在状态变化或重连后失效。"""
     if not math.isfinite(distance_mm) or not 0 <= distance_mm <= 10000 or (mate_type != "distance" and distance_mm != 0) or (lock_rotation and mate_type != "concentric"):
         raise InputRefusal("INVALID_MATE_PARAMETERS", "距离须在0–10000mm且仅用于距离配合；锁旋转仅适用于同心配合。")
     if not math.isfinite(maximum_translation_mm) or not 0 <= maximum_translation_mm <= 10000 or not math.isfinite(maximum_rotation_deg) or not 0 <= maximum_rotation_deg <= 180:
@@ -349,5 +407,10 @@ async def restore_model_checkpoint(model_id: str, checkpoint_id: str, allow_repl
     return await call("restore_model_checkpoint", model_id=model_id, checkpoint_id=checkpoint_id, allow_replacement_session=allow_replacement_session)
 
 
-if __name__ == "__main__":
+def main():
+    from sw_mcp.conversation.frontend import attach
+    attach(mcp,ROOT)
     mcp.run(transport="stdio")
+
+if __name__ == "__main__":
+    main()

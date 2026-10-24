@@ -24,7 +24,7 @@ class FeedbackTests(unittest.TestCase):
                     'DURATION_OR_FPS_OUT_OF_RANGE','CHECKPOINT_ID_MISUSED','LIMIT_OUT_OF_RANGE','INVALID_FACE_OFFSET',
                     'INVALID_MATE_CONTEXT_BUDGET','INVALID_GEOMETRY_SCAN_BUDGET','SPEED_OUT_OF_RANGE',
                     'INVALID_MATE_PARAMETERS','INVALID_POSE_BUDGET','MINIMUM_TRAVEL_OUT_OF_RANGE',
-                    'INCOMPATIBLE_REPLAY_OPTIONS','INVALID_RESET_OPTIONS'}
+                    'INCOMPATIBLE_REPLAY_OPTIONS','INVALID_RESET_OPTIONS','INVALID_EDGE_OFFSET'}
         self.assertEqual(codes,parameters|{'CONFIRMATION_REQUIRED'},'New refusal codes require a deliberate classification')
         for code in parameters:
             with self.subTest(code=code):
