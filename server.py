@@ -1,4 +1,4 @@
-from motion_server import mcp
+from motion_server import main
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    main()
