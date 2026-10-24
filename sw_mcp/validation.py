@@ -7,6 +7,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from mcp.types import CallToolResult, TextContent
 from sw_mcp.errors import operational_error
+from sw_mcp.task_errors import CONFIRMATION_CODES
 
 
 def packed(data, error=False):
@@ -18,15 +19,15 @@ def refuse(code, message, diagnostics=None, next_action=None):
                               {'cad_dispatched': False, 'job_created': False, **(diagnostics or {})}, job_created=False)
     error['assertion'] = 'not_applicable'
     error['next_action'].update({'instruction': '核对工具声明与参数后显式重新调用；未自动重试。', **(next_action or {})})
-    if error['next_action']['options']:
+    if code in CONFIRMATION_CODES:
+        error['next_action'].update(options_status='explicit_human_confirmation_required',
+                                   instruction='必须由用户明确确认具体方案及范围；不得自行将 confirmed 或其他确认字段改为 true，也不自动重试。')
+    elif error['next_action']['options']:
         error['next_action']['options_status'] = 'explicit_user_selection_required'
     # A named prerequisite tool takes priority over generic parameter correction.
     # INVALID_MATE_PLAN_ID deliberately uses this branch (preview_mate first).
     elif error['next_action'].get('tool'):
         error['next_action']['options_status'] = 'tool_identified_arguments_require_user_input'
-    elif code == 'CONFIRMATION_REQUIRED':
-        error['next_action'].update(options_status='explicit_human_confirmation_required',
-                                   instruction='必须由用户明确确认具体配合方案；不得自行将 confirmed 改为 true，也不自动重试。')
     elif code in {'INVALID_ARGUMENT', 'UNKNOWN_ARGUMENT', 'INVALID_MATE_CONTEXT_BUDGET',
                   'LIMIT_OUT_OF_RANGE', 'INVALID_FACE_OFFSET', 'INVALID_EDGE_OFFSET', 'ASSEMBLY_FILE_UNAVAILABLE',
                   'DURATION_OR_FPS_OUT_OF_RANGE', 'SPEED_OUT_OF_RANGE', 'MINIMUM_TRAVEL_OUT_OF_RANGE',
