@@ -29,6 +29,8 @@ def fingerprint():
 
 class OwnerClient:
     def __init__(self, project, work, runtime_base, timeout=12):
+        from .installation_scope import require_live_installation
+        require_live_installation(project,work,runtime_base,HERE)
         self.project = core.no_links(Path(project))
         self.work = core.no_links(Path(work)); self.work.mkdir(parents=True, exist_ok=True)
         self.runtime = Path(runtime_base).absolute(); self.timeout = timeout

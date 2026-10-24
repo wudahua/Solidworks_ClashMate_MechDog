@@ -83,4 +83,10 @@ AI核验官方ZIP与SHA256并解压到独立目录，使用**新包内**`upgrade
 
 `upgrade-backups`是升级器管理的恢复快照，不是完整独立的安装或降级工具。不要从任意备份目录启动旧包装脚本或先覆盖校验器。不同入口、缺失先决条件或租约占用可能先报不同门禁，只有真实入口回执能证明走了哪条路径。
 
+alpha.11起，宿主登记/启动、OwnerClient及owner入口在创建会话前核对路径：精确的`upgrade-backups`路径段或祖先`.clashmate-recovery-snapshot.json`标记返回`HOST_BACKUP_TREE_REFUSED`，属于宿主基础设施问题。AI应回到正式安装，不删除标记绕过保护。查询/注销仍可由可信维护器对旧契约执行。新恢复快照包含`managed-files.zip`、`backup-index.json`和收据；ZIP保留旧受管文件及执行器字节，索引校验成员、长度和SHA256。回滚直接读取经核验的成员写回原位置，不执行/导入备份代码，不解压为独立安装。旧快照原样保留。
+
+维护器`scripts/host_maintenance.py`由AI离线操作，默认只检查，`--retire-idle`才申请条件式退出。调度器枚举是只读的；可操作范围严格限于所选正式安装`upgrade-backups/<快照ID>`下的精确任务，必须核对名称散列、marker、单一action、当前用户SID和路径。运行实例还须核对PID创建身份、同一桌面会话、launch及原始源码指纹证明，通过已有认证IPC查询`status`、确认无活动任务/未完成现场后申请`shutdown_idle`。旧owner再次检查空闲；确认原进程和调度包装器退出后才注销并查询确认。不调用Task.Stop，不强杀、不启动旧宿主/执行器，不批量删除`ClashMate-*`，不触碰正常安装或其他安装任务。维护请求持久记录，结果未知时读取原响应，不重复排队退出。
+
+完整安装模式升级在受管文件写入前执行上述维护，无法核实或存在活动任务则返回`UPGRADE_BACKUP_HOSTS_REQUIRE_REVIEW`，保留原文件与证据。提交后再次核对；此时收尾不确定单独记为`host_cleanup_status=review_required`，不能伪称源码回滚。`retired_host_tasks`、`backup_host_review`记录实际范围。DryRun仅检验任务契约并列出待核对宿主，不请求退出；DryRun通过不保证运行中宿主可以安全退役。源码校验专用的`install=False`模式不检查本机宿主，不能冒充完整升级。宿主存在并不证明执行器或全局互斥锁被占用；须分别读取原归属和租约证据。
+
 开发者由AI执行`unittest discover`、`tests/run_offline_policies.py`、干净包`verify_release.py`、升级预演/真实升级及自己的真实CAD样本。CI运行离线和无CAD宿主契约；Session0不能启动交互宿主时显式跳过，不能称为通过。真实CAD、离线夹具、跨机与真人WorkBuddy结论分别记录。普通用户无需配置专门测试MCP、输入命令或收集散落日志。

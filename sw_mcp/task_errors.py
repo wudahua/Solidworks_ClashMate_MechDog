@@ -133,6 +133,8 @@ def task_failure(code, message, diagnostics=None, *, task_id='', asynchronous=Fa
     action = value['next_action']
     if host:
         status, instruction = next((s, i) for s, i, _ in GROUPS if s.startswith('host_infrastructure_'))
+        if code=='HOST_BACKUP_TREE_REFUSED':
+            instruction='AI停止从升级备份树启动服务，定位原正式安装目录并核对入口；备份只用于恢复。不能通过改参数、重试启动或删除快照标记绕过。'
     else:
         status, instruction = TASK_ACTION_CLASSES.get(code, NATIVE_ACTION_CLASSES.get(code, (None, None)))
     if status:

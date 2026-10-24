@@ -81,14 +81,14 @@ class UpgradeEnvelopeTests(unittest.TestCase):
         self.assertEqual(caught.exception.payload()['error']['code'],'PYTHON_RUNTIME_MISMATCH')
 
     def test_rollback_verified_and_incomplete_are_programmatically_distinct(self):
-        import shutil
-        f=self.fixture;f.write_zip();real_copy=shutil.copy2
-        def blocked_copy(source,destination,*a,**kw):
-            if 'upgrade-backups' in Path(source).parts and Path(destination).name=='motion_server.py':
+        from scripts.upgrade import write_restored_file
+        f=self.fixture;f.write_zip();real_copy=write_restored_file
+        def blocked_copy(destination,data):
+            if Path(destination).name=='motion_server.py':
                 raise PermissionError('controlled rollback file denial')
-            return real_copy(source,destination,*a,**kw)
+            return real_copy(destination,data)
         for incomplete in (False,True):
-            with patch('scripts.upgrade.idle_installation',return_value=nullcontext()), patch('scripts.upgrade.verify',side_effect=RuntimeError('controlled post-copy failure')), patch('scripts.upgrade.shutil.copy2',side_effect=blocked_copy if incomplete else real_copy):
+            with patch('scripts.upgrade.idle_installation',return_value=nullcontext()), patch('scripts.upgrade.verify',side_effect=RuntimeError('controlled post-copy failure')), patch('scripts.upgrade.write_restored_file',side_effect=blocked_copy if incomplete else real_copy):
                 with self.assertRaises(UpgradeFailure) as caught:upgrade(f.package,f.target,sys.executable,install=False)
             value=caught.exception.payload();expected='incomplete' if incomplete else 'verified'
             self.assertEqual(value['rollback_status'],expected)

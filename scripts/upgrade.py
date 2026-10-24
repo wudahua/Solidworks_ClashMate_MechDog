@@ -16,10 +16,12 @@ try:
     from .verify_release import safe_relative, reject_links, validate_manifest, verify, PATH_POLICY_VERSION
     from .install_preflight import preflight
     from .lease_access import open_lease_file, lock_lease_file, lease_diagnostics
+    from .host_maintenance import audit_backup_hosts
 except ImportError:
     from verify_release import safe_relative, reject_links, validate_manifest, verify, PATH_POLICY_VERSION
     from install_preflight import preflight
     from lease_access import open_lease_file, lock_lease_file, lease_diagnostics
+    from host_maintenance import audit_backup_hosts
 
 
 class UpgradeFailure(RuntimeError):
@@ -33,7 +35,7 @@ class UpgradeFailure(RuntimeError):
         instruction = ('源码或二进制回滚未完整核验；不要启动 MCP。保留备份、回执和恢复日志，人工核对后修复安装。'
                        if rollback in {'incomplete', 'unknown'} else
                        '按 receipt_path 核对已验证的源码/二进制回滚；依赖环境不在快照回滚范围，不自动重试。' if rollback == 'verified' else
-                       '核对 code、stage 和诊断后显式处理；未自动停止进程、修改权限或重试升级。')
+                       '核对 code、stage 和诊断后显式处理；未强制结束进程、修改权限或重试升级。')
         if self.code in {'UPGRADE_LEASE_BUSY', 'UPGRADE_EXECUTOR_ACTIVE'}:
             instruction = '停用目标安装目录及其他客户端中的本项目 MCP，等待执行器退出后显式重新预检；不删除锁或恢复日志，不结束不明进程。'
         if self.code == 'UPGRADE_EXECUTOR_ABANDONED':
@@ -41,7 +43,8 @@ class UpgradeFailure(RuntimeError):
         stage = state.get('stage') or self.diagnostics.get('stage')
         return {'ok': False, 'schema_version': 2, 'receipt_schema_version': 2, 'upgrade_result_schema_version': 1, 'code': self.code,
                 **{key: state.get(key) for key in ('stage','failure_stage','python_started','target_mutation_started','backup_created','receipt_path','receipt_stage_persisted','receipt_write_error','committed','rollback_attempted','rollback_verified','rollback_status','recovery_journal_unchanged','installation_state')},
-                'processes_stopped': False, 'automatic_retry': False,
+                'processes_stopped': any(x.get('cooperative_shutdown_requested') for x in state.get('retired_host_tasks',[])), 'automatic_retry': False,
+                'retired_host_tasks':state.get('retired_host_tasks',[]),'backup_host_review':state.get('backup_host_review'),
                 'dry_run': state.get('dry_run'), 'target_directory': state.get('target_directory'),
                 'stage': stage, 'failure_stage': state.get('failure_stage') or stage,
                 'safe_to_start_mcp': False if state.get('target_mutation_started') else None,
@@ -133,7 +136,8 @@ def upgrade(package,target,python,solidworks_dir='',dry_run=False,install=True):
            'mcp_start_admission':'not_evaluated_use_normal_lease_recovery_and_COM_handshake',
            'target_directory':str(Path(target).absolute()), 'dry_run':dry_run,
            'upgrade_entry':str(Path(__file__).resolve()),'path_policy_source':'running_upgrade_entry',
-           'path_policy_version':PATH_POLICY_VERSION,'embedded_validator_executed':False}
+           'path_policy_version':PATH_POLICY_VERSION,'embedded_validator_executed':False,
+           'retired_host_tasks':[],'backup_host_review':None}
     try:return _upgrade(package,target,python,solidworks_dir,dry_run,install,state)
     except Exception as error:
         code=error.code if isinstance(error,UpgradeFailure) else {
@@ -185,6 +189,13 @@ def _upgrade(package,target,python,solidworks_dir,dry_run,install,state):
         solidworks_dir=plan['installation_preflight']['solidworks_install_dir']
     else:
         plan['installation_preflight']={'prerequisites_checked':False,'scope':'source_only_install_false'}
+    if install:
+        state['stage']='checking_backup_hosts' if dry_run else 'retiring_backup_hosts'
+        maintenance=audit_backup_hosts(target,target/'runs/host-maintenance'/uuid.uuid4().hex,apply=not dry_run)
+        state['backup_host_review']=maintenance
+        state['retired_host_tasks']=maintenance['retired_host_tasks']
+        if maintenance['status']!='pass':
+            raise UpgradeFailure('UPGRADE_BACKUP_HOSTS_REQUIRE_REVIEW','旧备份宿主仍活动、身份或原生结果未知，已保留证据；未写入安装源码。',diagnostics={'host_maintenance':maintenance})
     if dry_run:
         state['stage']='checking_installation_lease'
         with idle_installation(target):
@@ -222,9 +233,22 @@ def _upgrade(package,target,python,solidworks_dir,dry_run,install,state):
                 if p.is_file():managed[p.relative_to(target).as_posix()]=p
         for name,p in managed.items():
             reject_links(p,target)
-            if p.exists():
-                if not p.is_file():raise ValueError('Source destination is not a file: '+name)
-                saved=backup/name;saved.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(p,saved);existing.add(name)
+            if p.exists() and not p.is_file():raise ValueError('Source destination is not a file: '+name)
+        # A flat source tree would execute the old generation even if the new
+        # scheduler has a path guard. Store original bytes as data instead.
+        archive=backup/'managed-files.zip';index={}
+        with zipfile.ZipFile(archive,'x',zipfile.ZIP_DEFLATED) as z:
+            for name,p in managed.items():
+                if not p.exists():continue
+                blob=p.read_bytes();z.writestr(name,blob);existing.add(name)
+                index[name]={'bytes':len(blob),'sha256':hashlib.sha256(blob).hexdigest()}
+        marker={'kind':'clashmate_recovery_snapshot','format':'managed-source-zip-v1','executable_installation':False}
+        (backup/'.clashmate-recovery-snapshot.json').write_text(json.dumps(marker),encoding='utf8')
+        (backup/'backup-index.json').write_text(json.dumps(index,ensure_ascii=False,indent=2),encoding='utf8')
+        state.update(backup_format='managed-source-zip-v1',backup_archive=str(archive),
+            backup_archive_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+            backup_index_sha256=hashlib.sha256((backup/'backup-index.json').read_bytes()).hexdigest())
+        read_backup(state)  # Validate every saved byte before modifying the installation.
         receipt('backup_complete')
         try:
             status['target_mutation_started']=True
@@ -249,17 +273,19 @@ def _upgrade(package,target,python,solidworks_dir,dry_run,install,state):
             # Delete only newly introduced managed files, with bounds checked individually.
             status.update(failure_stage=status['stage'],rollback_attempted=True,rollback_status='unknown')
             rollback_errors=[]
+            try:originals=read_backup(state)
+            except Exception as failure:originals={};rollback_errors.append(str(failure))
             for name,p in managed.items():
                 try:
                     reject_links(p,target)
-                    if name in existing:shutil.copy2(backup/name,p)
+                    if name in existing:write_restored_file(p,originals[name])
                     elif p.is_file():p.unlink()
                 except Exception as failure:rollback_errors.append(str(failure))
             for name,p in managed.items():
                 try:
                     reject_links(p,target)
                     if name in existing:
-                        if p.read_bytes()!=(backup/name).read_bytes():raise RuntimeError('Restored bytes mismatch: '+name)
+                        if p.read_bytes()!=originals[name]:raise RuntimeError('Restored bytes mismatch: '+name)
                     elif p.exists():raise RuntimeError('New managed file remains: '+name)
                 except Exception as failure:rollback_errors.append(str(failure))
             try:journal_unchanged=(journal.read_bytes() if journal.exists() else None)==before
@@ -271,7 +297,35 @@ def _upgrade(package,target,python,solidworks_dir,dry_run,install,state):
             receipt('failed_rollback_verified' if not rollback_errors else 'failed_rollback_incomplete')
             raise UpgradeFailure('UPGRADE_FAILED_ROLLBACK_VERIFIED' if not rollback_errors else 'UPGRADE_FAILED_ROLLBACK_INCOMPLETE',
                                  'Upgrade failed; source/binary rollback verified; inspect receipt before retry' if not rollback_errors else 'Upgrade failed; rollback INCOMPLETE. Do not start MCP; preserve backup and receipt for manual repair') from error
+        if install:
+            try:status['post_upgrade_host_review']=audit_backup_hosts(target,target/'runs/host-maintenance'/uuid.uuid4().hex,apply=True)
+            except Exception as error:
+                status['post_upgrade_host_review']={'status':'review_required','retired_host_tasks':[],
+                    'reason':str(error),'automatic_retry':False,'force_termination':False}
+            status['retired_host_tasks']+=status['post_upgrade_host_review']['retired_host_tasks']
+            status['host_cleanup_status']=status['post_upgrade_host_review']['status']
+        else:status['host_cleanup_status']='not_requested_source_only_install_false'
         receipt('completed');return status
+
+
+def read_backup(state):
+    """Read-only byte verification; never extracts or executes snapshot files."""
+    archive=Path(state['backup_archive']);index_path=archive.parent/'backup-index.json'
+    reject_links(archive,archive.parent);reject_links(index_path,archive.parent)
+    if hashlib.sha256(archive.read_bytes()).hexdigest()!=state['backup_archive_sha256'] or hashlib.sha256(index_path.read_bytes()).hexdigest()!=state['backup_index_sha256']:
+        raise ValueError('Recovery snapshot checksum mismatch')
+    index=json.loads(index_path.read_text(encoding='utf8'));result={}
+    with zipfile.ZipFile(archive) as z:
+        if z.testzip() is not None or len(z.namelist())!=len(index) or set(z.namelist())!=set(index):raise ValueError('Recovery snapshot member mismatch')
+        for name,row in index.items():
+            safe_relative(name);blob=z.read(name)
+            if len(blob)!=row['bytes'] or hashlib.sha256(blob).hexdigest()!=row['sha256']:raise ValueError('Recovery snapshot byte mismatch: '+name)
+            result[name]=blob
+    return result
+
+
+def write_restored_file(path,data):
+    path.write_bytes(data)
 
 def main():
     # CLI wire contract is independent of Windows console code page or caller env.
