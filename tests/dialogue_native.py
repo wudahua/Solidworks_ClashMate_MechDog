@@ -1,0 +1,120 @@
+"""Local real-CAD dialogue acceptance. Own instances/copies only; no human-client claim."""
+import argparse,json,sys,time,traceback,uuid
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from dialogue_client import Client
+from sw_mcp.conversation import core
+from sw_mcp.conversation.owner_transport import OwnerClient,source_manifest
+from sw_mcp.conversation.host_scheduler import spec_for,control
+from sw_mcp.conversation.process_identity import same_process
+
+ROOT=Path(__file__).resolve().parents[1]
+
+
+def main(case,keep_last=False):
+    folder=ROOT/'runs/dialogue-native'/uuid.uuid4().hex[:8];folder.mkdir(parents=True)
+    work=folder/'work';runtime=ROOT/'runs/cr'
+    pump=Path(core.read(ROOT/'圆边配合交付_v0.2/prepared-input.json')['assembly'])
+    guide=ROOT/'测试用例/方槽直线导轨/滑轨.SLDASM'
+    source=guide if case=='linear' else pump
+    before=core.fixture_hashes(source)
+    inputs={str(p):core.fixture_hashes(p) for p in ([pump,guide] if case=='chain' else [source])}
+    cases=['rotary','linear','concentric','concentric'] if case=='chain' else [case,case]
+    result={'status':'running','case':case,'rounds':[],'local_real_CAD':True,'human_WorkBuddy_tested':False,
+        'confirmation_source':'existing_authorized_development_cards','source':str(source),
+        'work':str(work),'runtime':str(runtime),'sources_sha256':source_manifest(),'source_hashes':before,'keep_last':keep_last}
+    core.write(ROOT/'runs/当前正式对话验收.json',{'directory':str(folder),'case':case,'status':'running'})
+    c=None;tid=None
+    try:
+        c=Client(ROOT,work,runtime,folder/'mcp1')
+        assert len(c.rpc('tools/list',{})['tools'])==30
+        for round_no,mode in enumerate(cases,1):
+            source=guide if mode=='linear' else pump
+            print('ROUND',mode,round_no,flush=True)
+            args={'assembly_path':str(source),'moving_component_hint':'滑块2-1' if mode=='linear' else '长轴',
+                'reference_component_hint':'导轨-1' if mode=='linear' else 'GB_Spur_gear_S14A75H50L12.0N-2',
+                'task_kind':'concentric' if mode=='concentric' else 'motion','motion':'linear' if mode=='linear' else 'rotary',
+                'speed':1 if mode=='linear' else 12,'duration_s':2 if mode=='linear' else 1,'output_fps':30,
+                'reverse_direction':mode!='concentric' and round_no==2}
+            tid=c.tool('prepare_mechanism_task',**args)['task_id'];state=c.wait(tid)
+            assert state['phase']=='proposal_ready',state
+            if mode=='concentric':chosen=state['proposals'][0]
+            else:
+                matches=[r for r in state['proposals'] if abs(r['axis_global'][2])>1-1e-8]
+                assert len(matches)==1,{'different_native_axes_require_mechanical_selection':matches,'all':state['proposals']}
+                chosen=matches[0]
+            plan=c.tool('plan_mechanism_task',task_id=tid,candidate_id=chosen['candidate_id'])
+            if plan.get('needs_initial_state_selection'):
+                core.write(folder/f'round-{round_no}-initial-state-choice.json',plan)
+                c.tool('plan_mechanism_task',task_id=tid,candidate_id=chosen['candidate_id'],initial_state='study_zero')
+            planned=c.wait(tid);assert planned['phase']=='awaiting_confirmation',planned
+            core.write(folder/f'round-{round_no}-plan.json',planned)
+            if round_no==1:
+                assert c.close();c=Client(ROOT,work,runtime,folder/'mcp2')
+                resumed=c.tool('get_mechanism_task',task_id=tid)
+                assert resumed['server_instance_id']==planned['server_instance_id']
+                assert resumed['plan_token']==planned['plan_token']
+                assert resumed['connection_check']['journal_idle'] is True
+                result['frontend_reconnected_with_live_native_handles']=True
+                result['owner_instance_id']=planned['server_instance_id']
+            assert planned['server_instance_id']==result['owner_instance_id']
+            c.tool('execute_mechanism_task',task_id=tid,plan_token=planned['plan_token'],confirmed=True,scope_confirmed=True)
+            verified=c.wait(tid);assert verified['phase']=='verified' and verified['verification']['declared_scope_passed'],verified
+            run=verified['verification'].get('run_id',verified['verification'].get('after_run_id'))
+            history=c.tool('get_motion_summary',run_id=run)
+            assert history.get('run_id')==run,history
+            result.setdefault('managed_history_reads',[]).append({'run_id':run,'read_via_public_tool':True})
+            try:
+                c.tool('execute_mechanism_task',task_id=tid,plan_token=planned['plan_token'],confirmed=True,scope_confirmed=True)
+                raise AssertionError('duplicate execution accepted')
+            except core.StopBatch as error:assert error.code=='TASK_ALREADY_EXECUTED',error
+            if case=='chain' and round_no==1:
+                recovery=c.tool('get_recovery_state')
+                assert recovery['solidworks_pid']==planned['connection_check']['CAD_pid'] if 'connection_check' in planned else recovery.get('solidworks_pid')
+                restored=c.tool('restore_model_checkpoint',model_id=verified['model_id'],checkpoint_id=core.read(Path(verified['directory'])/'session/导入.json')['checkpoint']['checkpoint_id'])
+                assert restored['restoration_status']=='restored'
+                result['explicit_same_session_checkpoint_recovery']=True
+            keep=keep_last and round_no==len(cases)
+            c.tool('finish_mechanism_task',task_id=tid,keep_result=keep);closed=c.wait(tid)
+            assert closed['closed'],closed
+            if keep:
+                assert closed['finish']['restoration_status']=='not_requested_result_preserved',closed
+                assert Path(closed['finish']['result_assembly_path']).is_file()
+                assert closed['finish']['session']['committed_copy_preserved'] is True
+            else:assert closed['finish']['restoration']['restoration_status']=='restored',closed
+            assert closed['finish']['native_exit']['normal_zero_exit'] is True,closed
+            assert closed['finish']['executor_exit']['executor_exit_code']==0,closed
+            assert closed['finish']['source_files_unchanged'] is True
+            result['rounds'].append(closed);tid=None
+            core.write(folder/'result.json',result)
+        assert all(core.fixture_hashes(Path(p))==hashes for p,hashes in inputs.items())
+        result['evidence']=c.tool('get_mechanism_task',collect_evidence=True)
+        assert c.close();c=None
+        result['owner_idle_shutdown']=OwnerClient(ROOT,work,runtime).call('shutdown_idle')
+        identity=core.read(work/'owner.json')['identity'];deadline=time.monotonic()+15
+        while same_process(identity)['status']=='same' and time.monotonic()<deadline:time.sleep(.1)
+        assert same_process(identity)['status']!='same'
+        spec=spec_for(work)
+        for _ in range(20):
+            if not control(spec,'query').get('running_instances'):break
+            time.sleep(.2)
+        result['host_test_registration_removed']=control(spec,'unregister')
+        result.update(status='pass',source_files_unchanged=True,two_rounds_same_owner=True)
+    except Exception as error:
+        result.update(status='failed',error=str(error),traceback=traceback.format_exc(),active_task=tid)
+        if c and tid:
+            try:
+                state=c.tool('get_mechanism_task',task_id=tid);result['last_task']=state
+                if not state.get('busy') and not state.get('closed') and not state.get('error',{}).get('native_unknown'):
+                    c.tool('finish_mechanism_task',task_id=tid);result['failure_cleanup']=c.wait(tid)
+            except Exception as cleanup:result['cleanup_error']=str(cleanup)
+        raise
+    finally:
+        if c:c.close()
+        core.write(folder/'result.json',result)
+        core.write(ROOT/'runs/当前正式对话验收.json',{'directory':str(folder),'case':case,'status':result['status']})
+        print(json.dumps({'case':case,'status':result['status'],'directory':str(folder),'rounds':len(result['rounds'])},ensure_ascii=False),flush=True)
+
+if __name__=='__main__':
+    p=argparse.ArgumentParser();p.add_argument('--case',choices=['rotary','linear','concentric','chain'],required=True);p.add_argument('--keep-last',action='store_true')
+    args=p.parse_args();main(args.case,args.keep_last)
