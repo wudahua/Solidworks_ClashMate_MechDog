@@ -58,6 +58,20 @@ def main(case,keep_last=False):
                 result['frontend_reconnected_with_live_native_handles']=True
                 result['owner_instance_id']=planned['server_instance_id']
             assert planned['server_instance_id']==result['owner_instance_id']
+            # Missing authorization must not consume the token or enqueue a solve.
+            refusals=[]
+            for confirmed,scope_confirmed in [(False,True),(True,False)]:
+                response=c.rpc('tools/call',{'name':'execute_mechanism_task','arguments':{
+                    'task_id':tid,'plan_token':planned['plan_token'],'confirmed':confirmed,'scope_confirmed':scope_confirmed}})['structuredContent']
+                error=response['error']
+                assert response['ok'] is False and error['code']=='CONFIRMATION_REQUIRED',response
+                assert error['next_action']['options_status']=='explicit_human_confirmation_required',response
+                assert error['next_action']['automatic_retry'] is False
+                state=c.tool('get_mechanism_task',task_id=tid)
+                assert state['phase']=='awaiting_confirmation' and not state['busy'] and not state.get('execution_consumed'),state
+                assert state['plan_token']==planned['plan_token']
+                refusals.append(error)
+            core.write(folder/f'round-{round_no}-confirmation-refusals.json',refusals)
             c.tool('execute_mechanism_task',task_id=tid,plan_token=planned['plan_token'],confirmed=True,scope_confirmed=True)
             verified=c.wait(tid);assert verified['phase']=='verified' and verified['verification']['declared_scope_passed'],verified
             run=verified['verification'].get('run_id',verified['verification'].get('after_run_id'))

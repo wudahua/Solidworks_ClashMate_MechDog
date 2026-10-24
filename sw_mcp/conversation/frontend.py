@@ -2,29 +2,14 @@
 import asyncio,os
 from pathlib import Path
 from mcp.types import CallToolResult
-from sw_mcp.validation import refuse,packed
-from sw_mcp.errors import operational_error
+from sw_mcp.validation import packed
+from sw_mcp.task_errors import task_failure
 from .owner_transport import OwnerClient
 from . import core
 
 
 def transport_refusal(error):
-    if error.code.startswith('HOST_') or error.code in {'TASK_OWNER_START_UNCONFIRMED','TASK_OWNER_START_BUSY','TASK_OWNER_IDENTITY_UNKNOWN','TASK_OWNER_BUILD_MISMATCH','TASK_OWNER_LOST','TASK_OWNER_STOP_UNCONFIRMED'}:
-        known_refusal=(error.diagnostics or {}).get('launch_attempted') is False or error.code in {'HOST_TASK_COLLISION','HOST_PRINCIPAL_UNVERIFIABLE'}
-        value=operational_error(error.code,str(error),'not_required' if known_refusal else 'unknown',
-            {**(error.diagnostics or {}),'cad_dispatched':False if known_refusal else None,'job_created':False if known_refusal else None},
-            job_created=False if known_refusal else None)
-        value['next_action']={'automatic_retry':False,'options':[],'options_status':'host_infrastructure_review_required_no_parameter_change',
-            'tool':'get_mechanism_task','arguments':{'collect_evidence':True},
-            'instruction':'AI离线整理已有宿主回执和任务诊断，核对契约失败字段与SID证明；这不是用户参数错误。此调用无需启动宿主，不循环调用普通任务查询、不删除任务或未知记录。'}
-        return packed({'ok':False,'error':value},True)
-    if error.code in {'TASK_OWNER_REQUEST_UNCONFIRMED','OWNER_OPERATION_OUTCOME_UNCONFIRMED'}:
-        value=operational_error(error.code,str(error),'unknown',
-            {**(error.diagnostics or {}),'cad_dispatched':None,'job_created':None},job_created=None)
-        value['next_action'].update(tool='get_mechanism_task',arguments={},instruction='AI读取既有任务、宿主受理/响应及诊断，不重新提交写入。')
-        return packed({'ok':False,'error':value},True)
-    return refuse(error.code,str(error),error.diagnostics,
-        {'tool':'get_mechanism_task','arguments':{},'instruction':'AI读取既有任务和诊断；未知状态不重试写入或重启绕过。'})
+    return packed({'ok':False,'error':task_failure(error.code,str(error),error.diagnostics)},True)
 
 
 def attach(mcp,root):

@@ -106,7 +106,11 @@ $rows | ConvertTo-Json -Depth 10
                ('reset_study_time',{'model_id':'m','study':'s','create_new_model':True},'INVALID_RESET_OPTIONS'),
                ('preflight_motion',{'model_id':'m','checkpoint_id':'cp'},'CHECKPOINT_ID_MISUSED'),
                ('replay_motion_frame',{'run_id':'r','frame':0,'saved_image_only':True,'use_input_snapshot':True},'INCOMPATIBLE_REPLAY_OPTIONS'),
-               ('apply_mate',{'plan_id':'p','confirmed':False},'CONFIRMATION_REQUIRED')]
+               ('apply_mate',{'plan_id':'p','confirmed':False},'CONFIRMATION_REQUIRED'),
+               ('prepare_mechanism_task',{'assembly_path':str(p/'missing.SLDASM'),'duration_s':6},'INVALID_MOTION_PARAMETERS'),
+               ('get_mechanism_task',{'task_id':'bad'},'INVALID_TASK_ID'),
+               ('get_mechanism_task',{'task_id':'bad','collect_evidence':True},'INVALID_TASK_ID'),
+               ('execute_mechanism_task',{'task_id':'a'*32,'plan_token':'p'},'TASK_NOT_IN_CURRENT_SERVER')]
         try:
             client=Client(ROOT,work,runtime,p/'stdio1')
             self.assertEqual(len(client.rpc('tools/list',{})['tools']),30)
@@ -116,7 +120,10 @@ $rows | ConvertTo-Json -Depth 10
                 result=client.rpc('tools/call',{'name':name,'arguments':args})['structuredContent']
                 self.assertFalse(result['ok']);self.assertEqual(result['error']['code'],code)
                 self.assertFalse(result['error']['diagnostics']['cad_dispatched'])
-                rows.append({'tool':name,'expected':code,'actual':result['error']['code']})
+                status=result['error']['next_action']['options_status']
+                self.assertEqual(status,{'CONFIRMATION_REQUIRED':'explicit_human_confirmation_required',
+                    'TASK_NOT_IN_CURRENT_SERVER':'task_record_selection_required'}.get(code,'user_parameter_correction_required'))
+                rows.append({'tool':name,'expected':code,'actual':result['error']['code'],'options_status':status})
             self.assertTrue(client.close());client=None
             client=Client(ROOT,work,runtime,p/'stdio2');self.assertIsNone(client.tool('get_mechanism_task')['active_task'])
             self.assertEqual(core.read(work/'owner.json')['identity'],owner['identity'])
