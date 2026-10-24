@@ -29,7 +29,7 @@ public partial class Cad {
         }
     }
     // Pagination guard only. Not a replacement for a mate plan or checkpoint proof.
-    string GeometryQuerySignature(UserModel m,IModelDoc2 doc) {
+    object GeometryQueryObservation(UserModel m,IModelDoc2 doc) {
         var loaded=(Sw.GetDocuments() as object[]??new object[0]).Cast<IModelDoc2>()
             .Where(d=>m.Files.Contains(d.GetPathName(),StringComparer.OrdinalIgnoreCase))
             .OrderBy(d=>d.GetPathName(),StringComparer.OrdinalIgnoreCase)
@@ -38,7 +38,16 @@ public partial class Cad {
             files=m.Files.OrderBy(p=>p,StringComparer.OrdinalIgnoreCase).ToDictionary(p=>p,p=>FileHash(p)),documents=loaded,
             components=ProbeWorkingState.ComponentIdentity(doc),poses=Transforms(doc).OrderBy(p=>p.Key,StringComparer.Ordinal).ToDictionary(p=>p.Key,p=>p.Value),studies=StudyStates(doc).OrderBy(s=>s.name,StringComparer.Ordinal).ToArray()};
         if(GeometryQueryTestObserver!=null){if(System.Environment.GetEnvironmentVariable("SW_MCP_FAULT_TESTS")!="1")throw new CadFault("FAULT_TESTS_DISABLED","查询观测仅用于显式测试。");GeometryQueryTestObserver(observed);}
-        return StableId("query_",Json.Serialize(observed));
+        return observed;
+    }
+    string GeometryQuerySignature(UserModel m,IModelDoc2 doc) {return StableId("query_",Json.Serialize(GeometryQueryObservation(m,doc)));}
+    Dictionary<string,object> CircularQueryState(UserModel m,IModelDoc2 doc) {
+        var observed=GeometryQueryObservation(m,doc);
+        string data=Json.Serialize(observed),signature=StableId("query_",data);
+        string path=Path.Combine(Root,"runs","circular-query-states",signature+".json");
+        if(!File.Exists(path))AtomicMetadata.Write(path,data);
+        else if(File.ReadAllText(path)!=data)throw new CadFault("CIRCULAR_STATE_EVIDENCE_COLLISION","状态证据标识冲突，停止推荐，不覆盖已有记录。");
+        return new Dictionary<string,object>{{"model_revision",m.Revision},{"signature",signature},{"state_evidence",new{path="runs/circular-query-states/"+signature+".json",sha256=FileHash(path)}}};
     }
     object CheckpointProbeWithTiming(UserModel model,string planId,string checkpointId) {
         var timing=new OperationTiming();Dictionary<string,object> result=null;Exception failure=null;Scope scope=null;
