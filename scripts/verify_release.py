@@ -64,7 +64,7 @@ class ReleasePathPolicyError(ValueError):
 
 def allowed_release_path(name):
     path=PurePosixPath(name)
-    root_files={'README.md','LICENSE','.gitignore','.gitattributes','.editorconfig','requirements.txt','requirements.lock.txt','motion_server.py','server.py','mcp-config.example.json','install.ps1','start.ps1','upgrade.ps1','初始化环境.ps1','启动MCP.ps1','生成运动示例.ps1'}
+    root_files={'README.md','CONTRACT.md','LICENSE','.gitignore','.gitattributes','.editorconfig','requirements.txt','requirements.lock.txt','motion_server.py','server.py','mcp-config.example.json','install.ps1','start.ps1','upgrade.ps1','初始化环境.ps1','启动MCP.ps1','生成运动示例.ps1'}
     return ((len(path.parts)==1 and (name in root_files or re.fullmatch(r'发布说明_v[0-9A-Za-z.\-]+\.md',name))) or
             (path.parts[0] in {'executor','sw_mcp','scripts','tests'} and len(path.parts)==2 and path.suffix in {'.cs','.py','.ps1'}) or
             (path.parts[:2]==('.github','workflows') and len(path.parts)==3 and path.suffix in {'.yml','.yaml'}) or
