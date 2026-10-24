@@ -10,7 +10,7 @@ from pathlib import Path
 
 def collect(work,task_id=''):
     from . import core
-    if task_id and not re.fullmatch('[a-f0-9]{32}',task_id):raise core.StopBatch('INVALID_TASK_ID')
+    if task_id and not re.fullmatch('[a-f0-9]{32}',task_id):raise core.StopBatch('INVALID_TASK_ID','task_id须为32位小写十六进制；无ID先不传task_id查询已有任务。')
     work=core.no_links(Path(work));payload={};secrets=[]
     # Read the secrets only to scrub accidental occurrences. Never copy these private envelopes.
     for p in [work/'owner.json',*work.glob('ipc/*/launch.json')]:

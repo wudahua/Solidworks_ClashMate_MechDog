@@ -16,6 +16,7 @@ HERE=Path(__file__).resolve().parent
 
 from . import core,mate_worker,mate_motion,startup_gate
 from .runtime_location import choose_runtime
+from sw_mcp.task_errors import task_failure
 
 SCOPE='one_concentric_mate_keep_rotation_declared_scope_12rpm_1s_30fps'
 
@@ -204,7 +205,7 @@ class TaskEngine:
                             'closed':t['closed'],'session_attached':t['task_id'] in self.sessions,
                             'source':t['source']} for t in self.tasks.values()],
                         'next_action':{'tool':'get_mechanism_task','instruction':'AI从已有任务读取进度和待确认方案，不重复prepare或execute。'}}
-        if not re.fullmatch('[a-f0-9]{32}',task_id):raise core.StopBatch('INVALID_TASK_ID')
+        if not re.fullmatch('[a-f0-9]{32}',task_id):raise core.StopBatch('INVALID_TASK_ID','task_id须为32位小写十六进制；无ID先不传task_id查询已有任务。')
         with self.lock:
             if task_id not in self.tasks:raise core.StopBatch('TASK_NOT_IN_CURRENT_SERVER','没有该任务记录；可不传task_id查询已有任务。')
             t=self.tasks[task_id]
@@ -218,7 +219,7 @@ class TaskEngine:
             if s and not t.get('busy') and not t.get('closed') and getattr(s,'model',None) and hasattr(s,'require_live_idle'):
                 try:value['connection_check']=s.require_live_idle()
                 except core.StopBatch as error:
-                    value.update(connection_status='native_unavailable',connection_error={'code':error.code,'message':str(error)},
+                    value.update(connection_status='native_unavailable',connection_error=task_failure(error.code,str(error),error.diagnostics,task_id=task_id),
                         next_action={'tool':'get_mechanism_task','arguments':{'task_id':task_id},
                                      'instruction':'AI读取已保存归属及原生日志；连接不可用时不execute、不重新prepare。'})
                     if getattr(s,'checkpoint',None):
@@ -255,12 +256,14 @@ class TaskEngine:
                     if getattr(error,'code','')=='COMPONENT_NAME_AMBIGUOUS' and s and not s.unknown and not s.committed:
                         t.update(phase='awaiting_component_selection',model_id=s.model,component_selection=error.diagnostics,
                                  next_action={'tool':'plan_mechanism_task','arguments':{'task_id':t['task_id']},
+                                    'automatic_retry':False,'options_status':'mechanical_selection_required','options':[],
                                     'instruction':'AI用候选名称、固定/浮动角色和位置解释歧义；用户以自然语言选择后传入对应名称线索，复用本次副本，不重复导入。'})
                         core.write(Path(t['directory'])/'名称澄清.json',error.diagnostics)
                         return
-                    t.update(phase='failed',error={'code':getattr(error,'code',type(error).__name__),'message':str(error),
-                        'diagnostics':getattr(error,'diagnostics',None),'native_unknown':bool(s and s.unknown),'retry_write_allowed':False},
-                        next_action={'tool':'get_mechanism_task','arguments':{'task_id':t['task_id']},'instruction':'AI读取已有错误及证据；未知状态不重试写入。'})
+                    failure=task_failure(getattr(error,'code',type(error).__name__),str(error),getattr(error,'diagnostics',None),
+                        task_id=t['task_id'],asynchronous=True)
+                    failure.update(native_unknown=bool(s and s.unknown),retry_write_allowed=False)
+                    t.update(phase='failed',error=failure,next_action=failure['next_action'])
                     core.write(Path(t['directory'])/'失败诊断.json',{'error':t['error'],'traceback':traceback.format_exc()})
             finally:
                 with self.lock:t['busy']=False;self.save(t)
