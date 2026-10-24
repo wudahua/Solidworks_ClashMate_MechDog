@@ -6,9 +6,11 @@ import sys
 import uuid
 from pathlib import Path
 from .task_engine import HERE, core
+from .installation_scope import require_live_installation
 
 
 def spec_for(work, entry=None, python=None, testing=False):
+    require_live_installation(HERE,work,entry or HERE/'owner_entry.py')
     work=core.no_links(Path(work))
     entry=core.no_links(entry or HERE/'owner_entry.py')
     python=core.no_links(python or Path(sys.executable).with_name('pythonw.exe'))
@@ -22,6 +24,8 @@ def spec_for(work, entry=None, python=None, testing=False):
 
 
 def control(spec,mode,generation=None,timeout=25):
+    if mode in {'register','run'}:
+        require_live_installation(HERE,spec['work'],spec['entry'])
     if os.name!='nt':raise core.StopBatch('WINDOWS_REQUIRED')
     folder=core.no_links(Path(spec['work'])/'host-control');folder.mkdir(parents=True,exist_ok=True)
     identifier=uuid.uuid4().hex

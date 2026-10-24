@@ -13,11 +13,14 @@ from scripts.lease_access import open_lease_file, lock_lease_file
 
 
 def serve(work, generation, engine_factory=TaskEngine, idle_s=900):
+    from .installation_scope import require_live_installation
+    require_live_installation(Path(__file__),work)
     work = core.no_links(work)
     if not re.fullmatch('[a-f0-9]{32}', generation):
         raise core.StopBatch('INVALID_OWNER_GENERATION')
     folder = core.no_links(work / 'ipc' / generation)
     launch = core.read(folder / 'launch.json')
+    require_live_installation(launch['project'],launch['runtime'])
     if launch['generation'] != generation or launch['source_fingerprint'] != fingerprint():
         raise core.StopBatch('TASK_OWNER_BUILD_MISMATCH')
     for key,value in launch.get('environment',{}).items():

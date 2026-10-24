@@ -68,7 +68,9 @@ $rows | ConvertTo-Json -Depth 10
             self.assertEqual(e.exception.code,'HOST_TASK_COLLISION')
             self.assertIn('description',e.exception.diagnostics['contract']['failed_checks'])
             core.write(p/'roundtrip.json',{'first':first,'query':query,'again':again,'CAD_calls':0})
-        finally:host_scheduler.control(spec,'unregister')
+        finally:
+            host_scheduler.control(spec,'unregister')
+            self.assertFalse(host_scheduler.control(spec,'query')['registered'])
 
     def test_real_interactive_register_run_query_and_exit_without_CAD(self):
         import ctypes
@@ -87,7 +89,9 @@ $rows | ConvertTo-Json -Depth 10
                 time.sleep(.1)
             self.assertEqual(state['running_instances'],0);self.assertEqual(state['last_task_result'],0)
             core.write(p/'run-result.json',{'run':started,'final_query':state,'proof':proof})
-        finally:host_scheduler.control(spec,'unregister')
+        finally:
+            host_scheduler.control(spec,'unregister')
+            self.assertFalse(host_scheduler.control(spec,'query')['registered'])
 
     def test_real_public_stdio_refusals_and_reconnect_without_CAD(self):
         import ctypes
@@ -141,6 +145,7 @@ $rows | ConvertTo-Json -Depth 10
                     if not host_scheduler.control(spec,'query')['running_instances']:break
                     time.sleep(.1)
                 host_scheduler.control(spec,'unregister')
+                self.assertFalse(host_scheduler.control(spec,'query')['registered'])
 
 class StartupAndDiagnosticsTests(unittest.TestCase):
     def test_definite_pre_RunEx_refusal_does_not_become_30_second_start_wait(self):

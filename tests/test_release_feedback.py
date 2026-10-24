@@ -75,14 +75,15 @@ class ReleaseFeedbackTests(unittest.TestCase):
         def installer(*a,**k):
             p=self.target/'LICENSE';p.write_bytes(p.read_bytes().replace(b'\n',b'\r\n'))
             return subprocess.CompletedProcess(a,0)
-        with patch('scripts.upgrade.preflight',return_value={'solidworks_install_dir':'test-sw'}),patch('scripts.upgrade.idle_installation',return_value=nullcontext()),patch('scripts.upgrade.subprocess.run',side_effect=installer):
+        with patch('scripts.upgrade.preflight',return_value={'solidworks_install_dir':'test-sw'}),patch('scripts.upgrade.idle_installation',return_value=nullcontext()),patch('scripts.upgrade.audit_backup_hosts',return_value={'status':'pass','retired_host_tasks':[]}),patch('scripts.upgrade.subprocess.run',side_effect=installer):
             with self.assertRaisesRegex(RuntimeError,'rollback verified'):upgrade(self.package,self.target,sys.executable)
         self.assertEqual((self.target/'motion_server.py').read_bytes(),b'old source');self.assertEqual((self.target/'executor/bin/SwExecutor.exe').read_bytes(),b'old binary');self.assertEqual(self.journal.read_bytes(),before)
         receipt=json.loads(next((self.target/'upgrade-backups').glob('*/receipt.json')).read_text(encoding='utf-8'));self.assertFalse(receipt['committed']);self.assertTrue(receipt['rollback_verified']);self.assertIn('LINE_ENDING_MISMATCH',receipt['error'])
     def test_official_byte_replacement_backs_up_crlf_and_preserves_state(self):
         files=self.write_zip();crlf=files['LICENSE'].replace(b'\n',b'\r\n');(self.target/'LICENSE').write_bytes(crlf);before=self.journal.read_bytes()
         with patch('scripts.upgrade.idle_installation',return_value=nullcontext()):result=upgrade(self.package,self.target,sys.executable,install=False)
-        self.assertTrue(result['source_integrity_verified']);self.assertEqual((self.target/'LICENSE').read_bytes(),files['LICENSE']);self.assertEqual((Path(result['backup_directory'])/'LICENSE').read_bytes(),crlf);self.assertEqual(self.journal.read_bytes(),before)
+        from scripts.upgrade import read_backup
+        self.assertTrue(result['source_integrity_verified']);self.assertEqual((self.target/'LICENSE').read_bytes(),files['LICENSE']);self.assertEqual(read_backup(result)['LICENSE'],crlf);self.assertEqual(self.journal.read_bytes(),before)
         for d in ('.venv','runs','experiments'):self.assertEqual((self.target/d/'keep.txt').read_bytes(),b'keep')
     def test_reconciliation_wrong_pid_reports_action_without_journal_change(self):
         model='user_'+'a'*32;cp='b'*32;folder=self.target/'experiments/user_assemblies'/('a'*32);(folder/'checkpoints'/cp).mkdir(parents=True)

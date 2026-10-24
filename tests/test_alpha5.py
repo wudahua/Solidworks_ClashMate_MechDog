@@ -56,14 +56,15 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with patch('scripts.upgrade.idle_installation',return_value=nullcontext()):result=upgrade(self.package,self.target,sys.executable,install=False)
         self.assertTrue(result['committed']);self.assertTrue(result['recovery_journal_unchanged']);self.assertEqual((self.target/'runs/executor-state.json').read_bytes(),journal)
         for d in ('.venv','runs','experiments'):self.assertEqual((self.target/d/'keep.txt').read_bytes(),b'USER_DATA_KEEP')
-        self.assertEqual((Path(result['backup_directory'])/'motion_server.py').read_bytes(),b'old source');self.assertEqual((self.target/'motion_server.py').read_bytes(),files['motion_server.py']);self.assertTrue(verify(self.target)['all_passed'])
+        from scripts.upgrade import read_backup
+        self.assertEqual(read_backup(result)['motion_server.py'],b'old source');self.assertEqual((self.target/'motion_server.py').read_bytes(),files['motion_server.py']);self.assertTrue(verify(self.target)['all_passed'])
     def test_failed_compile_restores_old_source_and_binary(self):
         self.write_zip()
         def failing(*a,**kw):
             (self.target/'executor/bin/SwExecutor.exe').write_bytes(b'failed new binary')
             (self.target/'executor/bin/build-manifest.json').write_bytes(b'new manifest')
             raise RuntimeError('controlled compiler failure')
-        with patch('scripts.upgrade.preflight',return_value={'solidworks_install_dir':'test-sw'}),patch('scripts.upgrade.idle_installation',return_value=nullcontext()),patch('scripts.upgrade.subprocess.run',side_effect=failing):
+        with patch('scripts.upgrade.preflight',return_value={'solidworks_install_dir':'test-sw'}),patch('scripts.upgrade.idle_installation',return_value=nullcontext()),patch('scripts.upgrade.audit_backup_hosts',return_value={'status':'pass','retired_host_tasks':[]}),patch('scripts.upgrade.subprocess.run',side_effect=failing):
             with self.assertRaisesRegex(RuntimeError,'rollback verified'):upgrade(self.package,self.target,sys.executable)
         self.assertEqual((self.target/'motion_server.py').read_bytes(),b'old source');self.assertEqual((self.target/'executor/bin/SwExecutor.exe').read_bytes(),b'old binary');self.assertFalse((self.target/'executor/bin/build-manifest.json').exists());self.assertFalse((self.target/'tests/new_case.py').exists())
     def test_dry_run_does_not_change_sources(self):

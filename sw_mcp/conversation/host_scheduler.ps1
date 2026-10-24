@@ -4,8 +4,18 @@ $utf8=New-Object Text.UTF8Encoding($false)
 [Console]::OutputEncoding=$utf8
 $launchAttempted=$false;$launchConfirmed=$false;$contract=$null;$failureCode=$null;$created=$false
 try {
-    . (Join-Path $PSScriptRoot 'host_contract.ps1')
     $spec=[IO.File]::ReadAllText($Request,$utf8) | ConvertFrom-Json
+    if($spec.mode -in @('register','run')) {
+        foreach($value in @($PSScriptRoot,$spec.work,$spec.entry)) {
+            $path=[IO.Path]::GetFullPath([string]$value)
+            if(($path -split '[\\/]') -icontains 'upgrade-backups') {$failureCode='HOST_BACKUP_TREE_REFUSED';throw $failureCode}
+            while($path) {
+                if(Test-Path -LiteralPath (Join-Path $path '.clashmate-recovery-snapshot.json') -PathType Leaf) {$failureCode='HOST_BACKUP_TREE_REFUSED';throw $failureCode}
+                $parent=Split-Path -Parent $path;if($parent -eq $path){break};$path=$parent
+            }
+        }
+    }
+    . (Join-Path $PSScriptRoot 'host_contract.ps1')
     if($spec.name -notmatch '^ClashMate-(Conversation|HostTest)-[a-f0-9]{16}$'){throw 'HOST_TASK_NAME_INVALID'}
     $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $svc=New-Object -ComObject 'Schedule.Service';$svc.Connect()
@@ -43,7 +53,7 @@ try {
         $launchAttempted=$true;$running=$task.RunEx([string]$spec.generation,4,$sessionId,$null);$launchConfirmed=$true
     } elseif($spec.mode -eq 'unregister') {
         if($task) {
-            if($task.GetInstances(0).Count -gt 0){throw 'HOST_TASK_STILL_RUNNING'}
+            if($task.GetInstances(0).Count -gt 0 -or [int]$task.State -in @(2,4)){throw 'HOST_TASK_STILL_RUNNING'}
             $folder.DeleteTask($spec.name,0);$task=$null
         }
     } elseif($spec.mode -ne 'query') {throw 'HOST_MODE_INVALID'}
