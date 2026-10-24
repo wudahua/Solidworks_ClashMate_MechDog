@@ -13,11 +13,11 @@ import zipfile
 from contextlib import contextmanager
 from pathlib import Path
 try:
-    from .verify_release import safe_relative, reject_links, validate_manifest, verify
+    from .verify_release import safe_relative, reject_links, validate_manifest, verify, PATH_POLICY_VERSION
     from .install_preflight import preflight
     from .lease_access import open_lease_file, lock_lease_file, lease_diagnostics
 except ImportError:
-    from verify_release import safe_relative, reject_links, validate_manifest, verify
+    from verify_release import safe_relative, reject_links, validate_manifest, verify, PATH_POLICY_VERSION
     from install_preflight import preflight
     from lease_access import open_lease_file, lock_lease_file, lease_diagnostics
 
@@ -131,7 +131,9 @@ def upgrade(package,target,python,solidworks_dir='',dry_run=False,install=True):
            'recovery_journal_unchanged':None,'receipt_stage_persisted':None,'receipt_write_error':None,
            'safe_to_start_mcp':None,'managed_files_consistent':True,
            'mcp_start_admission':'not_evaluated_use_normal_lease_recovery_and_COM_handshake',
-           'target_directory':str(Path(target).absolute()), 'dry_run':dry_run}
+           'target_directory':str(Path(target).absolute()), 'dry_run':dry_run,
+           'upgrade_entry':str(Path(__file__).resolve()),'path_policy_source':'running_upgrade_entry',
+           'path_policy_version':PATH_POLICY_VERSION,'embedded_validator_executed':False}
     try:return _upgrade(package,target,python,solidworks_dir,dry_run,install,state)
     except Exception as error:
         code=error.code if isinstance(error,UpgradeFailure) else {

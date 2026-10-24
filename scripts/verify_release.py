@@ -55,19 +55,36 @@ def reject_links(path,root):
         if root not in current.parents:raise ValueError('Source outside release root')
         current=current.parent
 
+PATH_POLICY_VERSION='public-source-v2-conversation'
+
+class ReleasePathPolicyError(ValueError):
+    def __init__(self,paths):
+        self.diagnostics={'rejected_paths':paths,'path_policy_version':PATH_POLICY_VERSION,'embedded_validator_executed':False}
+        super().__init__('Non-public or runtime release paths: '+','.join(paths))
+
+def allowed_release_path(name):
+    path=PurePosixPath(name)
+    root_files={'README.md','LICENSE','.gitignore','.gitattributes','.editorconfig','requirements.txt','requirements.lock.txt','motion_server.py','server.py','mcp-config.example.json','install.ps1','start.ps1','upgrade.ps1','初始化环境.ps1','启动MCP.ps1','生成运动示例.ps1'}
+    return ((len(path.parts)==1 and (name in root_files or re.fullmatch(r'发布说明_v[0-9A-Za-z.\-]+\.md',name))) or
+            (path.parts[0] in {'executor','sw_mcp','scripts','tests'} and len(path.parts)==2 and path.suffix in {'.cs','.py','.ps1'}) or
+            (path.parts[:2]==('.github','workflows') and len(path.parts)==3 and path.suffix in {'.yml','.yaml'}) or
+            (path.parts[:2]==('sw_mcp','conversation') and len(path.parts)==3 and path.suffix in {'.py','.ps1','.cs'}))
+
 def validate_manifest(manifest,read):
     if not isinstance(manifest,dict) or not isinstance(manifest.get('files'),list):raise ValueError('Invalid release manifest')
     if any(manifest.get(k,False) is not False for k in ('includes_user_cad','includes_runtime_data','includes_solidworks_binaries')):raise ValueError('Release includes unsupported private/runtime content')
     names=set();folded=set();mismatches=[];line_ending_violations=[]
     policy=manifest.get("text_line_endings")
     if policy not in (None,"LF"):raise ValueError("Unsupported release text line ending policy")
+    rejected=[]
+    for record in manifest['files']:
+        try:name=safe_relative(record['path']).as_posix()
+        except ValueError:
+            rejected.append(record['path']);continue
+        if not allowed_release_path(name):rejected.append(name)
+    if rejected:raise ReleasePathPolicyError(rejected)
     for record in manifest['files']:
         name=safe_relative(record['path']).as_posix()
-        path=PurePosixPath(name)
-        root_files={'README.md','LICENSE','.gitignore','.gitattributes','.editorconfig','requirements.txt','requirements.lock.txt','motion_server.py','server.py','mcp-config.example.json','install.ps1','start.ps1','upgrade.ps1','初始化环境.ps1','启动MCP.ps1','生成运动示例.ps1'}
-        allowed=(len(path.parts)==1 and (name in root_files or re.fullmatch(r'发布说明_v[0-9A-Za-z.\-]+\.md',name))) or (path.parts[0] in {'executor','sw_mcp','scripts','tests'} and len(path.parts)==2 and path.suffix in {'.cs','.py','.ps1'}) or (path.parts[:2]==('.github','workflows') and len(path.parts)==3 and path.suffix in {'.yml','.yaml'})
-        allowed=allowed or (path.parts[:2]==('sw_mcp','conversation') and len(path.parts)==3 and path.suffix in {'.py','.ps1','.cs'})
-        if not allowed:raise ValueError('Non-public or runtime release path: '+name)
         if name=='发布清单.json' or name in names or name.casefold() in folded:raise ValueError('Duplicate or self-referential manifest entry')
         names.add(name);folded.add(name.casefold());data=read(name)
         if policy=="LF" and b"\r" in data:line_ending_violations.append(name)
@@ -96,6 +113,8 @@ def main():
     try:result=verify(args.root)
     except ReleaseSourceMismatch as error:
         print(json.dumps({'all_passed':False,'code':error.code,'message':str(error),'mismatch_count':len(error.mismatches),'mismatches':error.mismatches},ensure_ascii=False,indent=2));return 1
+    except ReleasePathPolicyError as error:
+        print(json.dumps({'all_passed':False,'code':'RELEASE_PATH_POLICY_REJECTED','message':str(error),**error.diagnostics},ensure_ascii=False,indent=2));return 1
     except (ValueError,OSError,KeyError,TypeError) as error:
         print(json.dumps({'all_passed':False,'code':'RELEASE_VALIDATION_FAILED','message':str(error)},ensure_ascii=False,indent=2));return 1
     print(json.dumps(result,ensure_ascii=False,indent=2));return 0
