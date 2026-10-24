@@ -40,8 +40,9 @@ def control(spec,mode,generation=None,timeout=25):
     result=core.read(output)
     if run.returncode or not result.get('ok'):
         message=result.get('message','')
-        code=next((c for c in ['HOST_TASK_COLLISION','HOST_TASK_NOT_REGISTERED','HOST_TASK_STILL_RUNNING'] if c in message),'HOST_CONTROL_FAILED')
-        raise core.StopBatch(code,'Windows当前用户托管操作未完成；已有回执保留。',result)
+        code=result.get('code') or next((c for c in ['HOST_TASK_COLLISION','HOST_PRINCIPAL_UNVERIFIABLE','HOST_TASK_NOT_REGISTERED','HOST_TASK_STILL_RUNNING'] if c in message),'HOST_CONTROL_FAILED')
+        raise core.StopBatch(code,'Windows托管契约或操作未通过；AI读取已有回执和身份核对，不要求用户修改工具参数。',
+                             {**result,'request':str(request),'response':str(output)})
     return result
 
 
@@ -55,8 +56,8 @@ def register_host(work,python=None):
 def start_host(work,generation):
     path=core.no_links(Path(work)/'host-registration.json')
     if not path.is_file():
-        raise core.StopBatch('HOST_SETUP_REQUIRED','请通过首次双击配置建立当前用户托管入口；尚未启动CAD，不回退到客户端子进程。')
+        raise core.StopBatch('HOST_SETUP_REQUIRED','AI先核对并建立当前用户按需宿主登记；尚未启动CAD，不回退到客户端子进程。')
     saved=core.read(path);expected=spec_for(work)
     if saved['spec']!=expected or saved['entry_sha256']!=core.digest(expected['entry']):
-        raise core.StopBatch('HOST_REGISTRATION_STALE','托管入口与当前源码不一致，先完成双击更新，不自动替换活任务。')
+        raise core.StopBatch('HOST_REGISTRATION_STALE','AI核对当前源码和宿主登记，先安全收尾活任务再更新登记，不替换活会话。')
     return control(expected,'run',generation,timeout=10)

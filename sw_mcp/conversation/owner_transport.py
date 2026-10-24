@@ -90,7 +90,7 @@ class OwnerClient:
             starting=self.work/'owner-starting.json'
             if starting.exists():
                 pending=core.read(core.no_links(starting))
-                if pending.get('generation')==retired_generation:
+                if pending.get('launch_rejected_before_RunEx') is True or pending.get('generation')==retired_generation:
                     unconfirmed=False
                 elif 'identity' in pending:
                     unconfirmed=same_process(pending['identity'])['status'] in {'same','unknown'}
@@ -118,7 +118,14 @@ class OwnerClient:
             # An exact registered action is reused; unrelated actions are never overwritten.
             register_host(self.work)
             core.write(self.work/'owner-starting.json',{'generation':generation,'requested_at':time.time(),'launch_mode':'interactive_demand_task'})
-            receipt=start_host(self.work,generation)
+            try:receipt=start_host(self.work,generation)
+            except core.StopBatch as error:
+                if (error.diagnostics or {}).get('launch_attempted') is False:
+                    rejection={'generation':generation,'requested_at':time.time(),'launch_rejected_before_RunEx':True,
+                               'error':{'code':error.code,'diagnostics':error.diagnostics},'retry_started':False}
+                    core.write(folder/'start-rejected.json',rejection)
+                    core.write(starting,rejection)  # Preserve evidence; no deletion, RunEx retry, or unknown-outcome reset.
+                raise
             core.write(folder/'start-broker.json',receipt)
             deadline = time.monotonic() + self.timeout
             while time.monotonic() < deadline:

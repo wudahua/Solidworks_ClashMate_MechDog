@@ -1,5 +1,8 @@
 """Check entry point classification; native CAD is always an explicit workflow."""
 ENTRIES = {
+  "test_v043a9": {"mode": "unittest", "caller": "test_v043a9.py", "scope": "principal fixtures plus real no-CAD register/query and interactive RunEx when session available"},
+  "dialogue_lifecycle": {"mode": "interactive_no_cad", "scope": "developer process-tree and Job fixture; local explicit run, not claimed in offline policy count"},
+  "dialogue_native": {"mode": "native_cad", "scope": "explicit own CAD copies only"},
   "v043a0_policy_checks": {"mode": "offline_suite"},
   "alpha5_evidence_checks": {"mode": "offline_suite"},
   "session_connection_checks": {"mode": "offline_suite"},
