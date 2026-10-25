@@ -28,13 +28,13 @@ def prepare_inputs(path,task_kind='motion',motion='rotary',speed=12,duration_s=1
     lease, task record, executor, COM call or startup-gate mutation belongs here.
     The task handler repeats this check so direct calls cannot bypass admission.
     """
-    if task_kind not in {'motion','concentric','gear_transmission'}:raise core.StopBatch('INVALID_TASK_KIND')
+    if task_kind not in {'motion','concentric','gear_transmission','external_gear_pair'}:raise core.StopBatch('INVALID_TASK_KIND')
     if task_kind=='concentric' and (motion!='rotary' or speed!=12 or duration_s!=1 or output_fps!=30 or reverse_direction is not False or minimum_travel!=0):
         raise core.StopBatch('CONCENTRIC_FIXED_CARD_PARAMETERS','圆边首版固定12rpm、1秒30fps；不静默忽略其他运动参数。')
-    settings=parameters(motion,speed,duration_s,output_fps,reverse_direction,minimum_travel) if task_kind in {'motion','gear_transmission'} else None
-    if task_kind=='gear_transmission' and (motion!='rotary' or speed>60 or duration_s>2 or output_fps not in {30,60} or minimum_travel!=0):
-        raise core.StopBatch('GEAR_PARAMETERS_INVALID','首版泵比例传动限旋转、60rpm、2秒、30/60fps；minimum_travel保留默认0，验证完整目标角度。')
-    if task_kind=='gear_transmission':
+    settings=parameters(motion,speed,duration_s,output_fps,reverse_direction,minimum_travel) if task_kind in {'motion','gear_transmission','external_gear_pair'} else None
+    if task_kind in {'gear_transmission','external_gear_pair'} and (motion!='rotary' or speed>60 or duration_s>2 or output_fps not in {30,60} or minimum_travel!=0):
+        raise core.StopBatch('GEAR_PARAMETERS_INVALID','齿轮比例传动限旋转、60rpm、2秒、30/60fps；minimum_travel保留默认0，验证完整目标角度。')
+    if task_kind in {'gear_transmission','external_gear_pair'}:
         settings.pop('minimum_travel')
         settings.update(requested_minimum_travel=minimum_travel,
                         verification_criterion='full_signed_input_waveform_and_external_ratio_not_minimum_travel',
@@ -117,6 +117,9 @@ def frame_zero(path):
 class MotionSession(ConversationSession):
     task_kind='concentric'
     def rescan(self,hint=''):
+        if self.task_kind=='external_gear_pair':
+            from .external_gear_task import discover
+            return discover(self)
         if self.task_kind=='gear_transmission':
             from .gear_transmission import discover
             return discover(self)
@@ -187,6 +190,14 @@ class MotionTaskEngine(TaskEngine):
         return self._submit(t,'preparing',operation)
 
     def _proposals(self,t,value):
+        if t.get('task_kind')=='external_gear_pair':
+            from .external_gears import public_card
+            source_integrity.bind(t,self.sessions[t['task_id']]);suggestion=value['external_gear_pair']
+            t.update(model_id=self.sessions[t['task_id']].model,phase='proposal_ready',**{**suggestion,'proposals':[public_card(p) for p in suggestion['proposals']]},
+                next_action={'tool':'plan_mechanism_task','arguments':{'task_id':t['task_id']},
+                    'instruction':'AI解释两轴、齿轮、键和固定支承推荐及比例依据；唯一方案自动采用推荐。只在角色或比例无法确定时用自然语言澄清，不让用户填写实体ID。'})
+            if len(suggestion['proposals'])==1:t['next_action']['arguments']['candidate_id']=suggestion['proposals'][0]['candidate_id']
+            return
         if t.get('task_kind')=='gear_transmission':
             source_integrity.bind(t,self.sessions[t['task_id']]);proposal=value['gear_transmission']
             t.update(model_id=self.sessions[t['task_id']].model,phase='proposal_ready',proposals=[{'candidate_id':'candidate-1',**proposal}],
@@ -211,8 +222,15 @@ class MotionTaskEngine(TaskEngine):
             t['next_action']['instruction']='AI优先解释与原生同轴配合轴线一致的候选及其证据；该线索不等于自由度证明，不覆盖用户明确指定方向。确认具体试算方案后才execute。'
         t.pop('component_selection',None)
 
-    def plan(self,task_id,candidate_id='',moving_component_hint='',reference_component_hint='',initial_state='saved',alignment_mode='strict'):
+    def plan(self,task_id,candidate_id='',moving_component_hint='',reference_component_hint='',initial_state='saved',alignment_mode='strict',
+             gear_ratio_numerator=0,gear_ratio_denominator=0,input_shaft_hint='',output_shaft_hint='',input_gear_hint='',output_gear_hint=''):
         t=self.tasks[task_id]
+        if t.get('task_kind')=='external_gear_pair':
+            from .external_gear_task import propose
+            return propose(self,t,candidate_id,initial_state,alignment_mode,moving_component_hint,reference_component_hint,
+                           gear_ratio_numerator,gear_ratio_denominator,{'input_shaft':input_shaft_hint,'output_shaft':output_shaft_hint,'input_gear':input_gear_hint,'output_gear':output_gear_hint})
+        if gear_ratio_numerator or gear_ratio_denominator or input_shaft_hint or output_shaft_hint or input_gear_hint or output_gear_hint:
+            raise core.StopBatch('EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE','两轴比例或角色补充参数只用于external_gear_pair，不静默忽略。')
         if t.get('task_kind')=='gear_transmission':
             from .gear_transmission import propose
             return propose(self,t,candidate_id,initial_state,alignment_mode,moving_component_hint,reference_component_hint)
@@ -252,6 +270,9 @@ class MotionTaskEngine(TaskEngine):
 
     def execute(self,task_id,plan_token,confirmed=False,scope_confirmed=False,alignment_confirmed=False):
         t=self.tasks[task_id]
+        if t.get('task_kind')=='external_gear_pair':
+            from .external_gear_task import execute
+            return execute(self,t,plan_token,confirmed,scope_confirmed,alignment_confirmed)
         if t.get('task_kind')=='gear_transmission':
             from .gear_transmission import execute
             return execute(self,t,plan_token,confirmed,scope_confirmed,alignment_confirmed)
@@ -344,7 +365,7 @@ class MotionTaskEngine(TaskEngine):
         def operation():
             s=self.sessions[task_id]
             restored_result=None
-            if t.get('task_kind') in {'concentric','gear_transmission'}:
+            if t.get('task_kind') in {'concentric','gear_transmission','external_gear_pair'}:
                 if not getattr(s,'result_checkpoint',None):raise core.StopBatch('RESULT_CHECKPOINT_UNAVAILABLE')
                 restored_result=s.call('restore_model_checkpoint',model_id=s.model,checkpoint_id=s.result_checkpoint)
                 if not core.restored_ok(restored_result):s.unknown=True;raise core.StopBatch('RESULT_RESTORE_NOT_VERIFIED')

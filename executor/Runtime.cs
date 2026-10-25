@@ -331,6 +331,10 @@ public partial class Cad {
         string op=(string)request["op"];var p=(Dictionary<string,object>)request["params"];
         activeJobId=p.ContainsKey("job_id")?(string)p["job_id"]:null;activeRequestId=request.ContainsKey("id")?request["id"] as string:null;
         switch(op) {
+            case "_survey_external_gear_pair": return SurveyExternalGearPair((string)p["model_id"]);
+            case "_preview_external_gear_pair": return PreviewExternalGearPair((string)p["model_id"],(string)p["recommendation_json"],Convert.ToDouble(p["numerator"]),Convert.ToDouble(p["denominator"]));
+            case "_apply_external_gear_pair": return ApplyExternalGearPair((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));
+            case "_test_external_gear_rollback": return ApplyExternalGearPair((string)p["plan_id"],true,true);
             case "_preview_gear_transmission": return PreviewGearTransmission((string)p["model_id"]);
             case "_apply_gear_transmission": return ApplyGearTransmission((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));
             case "_test_gear_transmission_rollback": return ApplyGearTransmission((string)p["plan_id"],true,true);

@@ -120,3 +120,14 @@ get_recovery_state.session_admission是离线观察：idle只表示上次请求�
 齿轮任务motion_parameters.requested_minimum_travel保留请求值0；signed_target_travel_deg表达带方向目标。verification_criterion为完整带符号输入波形与外齿轮比例，input_waveform_tolerance_deg=0.1、external_ratio_tolerance_deg=0.0001，不以95%门槛验证。普通motion任务的minimum_travel语义不变。
 
 get_job要求原样32位小写十六进制：格式错为INVALID_JOB_ID，格式有效但本安装记录不存在为JOB_NOT_FOUND，存在但不可核验为JOB_RECORD_INVALID。均不改写标识、不自动重放任务；缺少旧版本原始响应时不声称已定位job_前缀的生成来源。
+
+
+## alpha.17 普通两轴外齿轮推荐与补配合
+
+`prepare_mechanism_task(task_kind="external_gear_pair")`复用正式30工具入口。限旋转60rpm、2秒、30/60fps，minimum_travel=0。读取隔离副本的设计属性、原生圆柱材料轴线、固定支承及既有配合，生成角色、两侧刚性组与传动比建议，不从孔径/齿轮外径推断分度圆。明确齿数、相同零件配置、圆周阵列建议与开发试算权重分别标注来源；后两者不得冒充实测齿数。外齿轮假设、角色、比例和具体修改始终需要方案授权。
+
+`plan_mechanism_task`可用四个`input/output_shaft/gear_hint`消除名称歧义，用户无需提供实体ID；比例参数`gear_ratio_numerator/denominator`同时留0采用推荐，同时正值为显式覆盖。缺少比例保留任务并返回机械澄清，不排队写入。高倍率为避免采样混叠需降低试算转速时，方案明确原请求、建议值与原因，确认后才使用建议值。额外角色/比例选项不得在其他任务中被静默忽略。
+
+本轮要求不超过128个已解析、隔离的顶层零件，两侧组各最多6件，无未归属浮动件；支承必须固定并有同轴圆柱参考。可用齿轮自身轴线作为一体齿轮轴。plan逐项列出新增、复用、同轴旋转锁修改；支承复用可核验的健康同轴及轴向距离/重合；组内已有刚性锁定复用，若只有健康同轴/轴向关系，方案明确列出原特征名称和ID，确认后在当前配置保留压缩，新增一项刚性连接。不以LockRotation属性回读代替实际跟转证明；未知关系拒绝自动改写，不删除原配合。默认恢复会还原原压缩状态，保留成果则原特征以压缩状态一并保存。解除固定只限确认的两侧成员；装配前后0.01mm/1e-6rad预算、非目标固定状态与姿态必须通过。新齿轮关系只加一项，已有匹配比例关系复用；模型、引用或签名变动使旧方案失效。
+
+execute要求confirmed与scope_confirmed，令牌仅消费一次。创建单输入马达，两次独立求解，核对每帧输入目标、输出反向比例、两侧刚性跟转、材料轴线的径向/倾斜/轴向稳定、固定件不动及重复性；输出带符号转角CSV。结果不证明齿形匹配、齿面无穿透、接触力或完整自由度正确。默认finish恢复导入检查点，keep_result仅保留本次验证的副本。原减速器若Toolbox将零件重定向到隔离目录外，仍按外部引用保护拒绝；开发对照不等于原装配已通过。

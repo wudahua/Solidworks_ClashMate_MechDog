@@ -11,6 +11,7 @@ public partial class Cad {
     public object AcceptanceControl(string action,int expectedPid) {
         global::AcceptanceControl.Stage("before_pid_check",null);
         if(Sw.GetProcessID()!=expectedPid)throw new Exception("OWNED_PID_MISMATCH");
+        if(action=="show") { Sw.Visible=true;return new{visible_requested=true,pid=expectedPid,documents_written=false}; }
         global::AcceptanceControl.Stage("connected_identity",new{expected_pid=expectedPid,actual_pid=Sw.GetProcessID(),revision=Sw.RevisionNumber(),
             explicit_COM_release_performed=false,scope="diagnostic_observation_not_an_exit_fix"});
         if(action=="exit")global::AcceptanceControl.Stage("native_module_observation",global::AcceptanceControl.Modules(expectedPid));

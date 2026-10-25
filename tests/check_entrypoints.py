@@ -1,5 +1,8 @@
 """Check entry point classification; native CAD is always an explicit workflow."""
 ENTRIES = {
+  "external_gears_native": {"mode": "native_cad", "scope": "explicit supplied isolated assemblies, controlled rollback, same-owner ratio tasks and saved-result reuse; no physical contact claim"},
+  "test_external_gears": {"mode": "unittest", "caller": "test_external_gears.py", "scope": "evidence-based two-axis roles/ratio and synthetic variable groups, signed ratio and drift counterexamples; no CAD"},
+  "ExternalGearFixture": {"mode": "native_cad", "scope": "development-only explicit own CAD helper, actual part copies and generated references with declared trial weights; not a production entry"},
   "legacy_handoff_native": {"mode": "native_cad", "scope": "explicit clean installed package, own empty CAD legacy reconnect and automatic EOF, two complete pump tasks through one owner; no existing user instance"},
   "test_legacy_handoff": {"mode": "unittest", "caller": "test_legacy_handoff.py", "scope": "retained real EOF child and lease handoff, unknown/busy/foreign counterexamples, exact job IDs and gear criteria; no CAD"},
   "gear_transmission_native": {"mode": "native_cad", "scope": "explicit own pump rollback, two complete gear tasks, reconnect and saved-result reopen; no contact claim"},
