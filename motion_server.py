@@ -25,7 +25,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.15", instructions="日常优先纯AI对话：先get_mechanism_task找回任务，无任务再prepare_mechanism_task，按推荐plan，仅机械歧义或具体写入授权需要用户回答。motion支持旋转/直线，concentric支持受限圆边同轴配合，gear_transmission支持命名泵两轴六动件的完整1∶1反向比例传动；先plan说明解除固定、9项约束及装配位移预算，确认后仅驱动长轴，不做齿面接触；execute一次，get查询，finish恢复并核对退出再开始第二轮。客户端断连不结束活任务；持有进程丢失只读旧记录，不重建COM或重放令牌。get_mechanism_task(collect_evidence=True)自动读已有诊断，无需用户命令或网页。旧低层会话先finish_motion_session释放本服务执行器才能进入受管任务。以下保留原有工具用法：先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。配合关联mate_context_complete=false时只作几何参考，不推断没有配合；可按mate_context_next_query显式从空cursor重扫，保留原几何待办，改变mate_context_budget_s后重新分页。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求；成功后可核对baseline_candidate的新运行ID用于新预演，旧基线失配时不得自动改绑。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.16", instructions="日常优先纯AI对话：先get_mechanism_task找回任务，无任务再prepare_mechanism_task，按推荐plan，仅机械歧义或具体写入授权需要用户回答。motion支持旋转/直线，concentric支持受限圆边同轴配合，gear_transmission支持命名泵两轴六动件的完整1∶1反向比例传动；先plan说明解除固定、9项约束及装配位移预算，确认后仅驱动长轴，不做齿面接触；execute一次，get查询，finish恢复并核对退出再开始第二轮。客户端断连不结束活任务；持有进程丢失只读旧记录，不重建COM或重放令牌。get_mechanism_task(collect_evidence=True)自动读已有诊断，无需用户命令或网页。prepare自动核对并通过EOF交接已证明空闲的本宿主旧执行器，无需先finish_motion_session；忙碌、未知或归属不明仍保留。get_recovery_state的session_admission区分请求空闲与允许重新选实例。以下保留原有工具用法：先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。配合关联mate_context_complete=false时只作几何参考，不推断没有配合；可按mate_context_next_query显式从空cursor重扫，保留原几何待办，改变mate_context_budget_s后重新分页。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求；成功后可核对baseline_candidate的新运行ID用于新预演，旧基线失配时不得自动改绑。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 _task_engine=None
 _formal_engine=None
@@ -288,7 +288,7 @@ async def get_job(job_id: str, response_artifact_id: str = "", offset: int = 0, 
     try:
         return packed(jobs.get(job_id, response_artifact_id, offset, limit, response_json_pointer))
     except ValueError as exc:
-        raise InputRefusal("INVALID_ARGUMENT", str(exc)) from exc
+        raise InputRefusal(getattr(exc,'code','INVALID_ARGUMENT'), str(exc),getattr(exc,'diagnostics',None)) from exc
 
 
 @mcp.tool()
@@ -395,6 +395,7 @@ async def read_run_poses(run_id: str, component_id: str = "", frame_start: int =
 async def get_recovery_state(request_id: str = "") -> CallToolResult:
     """离线读日志/迟到响应。status: idle=请求结束，active=记录执行中，unknown=未确认；不证明CAD姿态。current_request_state为completed/dispatching/unconfirmed。observed_dispatch_state保留旧原值；*_field_consistent核对派生字段，false不自动改日志或解除隔离。state_scope区分本owner执行中、idle和旧/未知请求；cad_request_policy为available/wait_for_current_request/recovery_only。恢复未知须显式恢复检查点。"""
     state = bridge.recovery_state()
+    state['session_admission'] = bridge.session_admission(state)
     if request_id:
         try:
             state["request_result"] = await asyncio.to_thread(bridge.get_request_result, request_id)

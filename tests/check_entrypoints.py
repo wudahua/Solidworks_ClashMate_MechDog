@@ -1,5 +1,7 @@
 """Check entry point classification; native CAD is always an explicit workflow."""
 ENTRIES = {
+  "legacy_handoff_native": {"mode": "native_cad", "scope": "explicit clean installed package, own empty CAD legacy reconnect and automatic EOF, two complete pump tasks through one owner; no existing user instance"},
+  "test_legacy_handoff": {"mode": "unittest", "caller": "test_legacy_handoff.py", "scope": "retained real EOF child and lease handoff, unknown/busy/foreign counterexamples, exact job IDs and gear criteria; no CAD"},
   "gear_transmission_native": {"mode": "native_cad", "scope": "explicit own pump rollback, two complete gear tasks, reconnect and saved-result reopen; no contact claim"},
   "test_gear_transmission": {"mode": "unittest", "caller": "test_gear_transmission.py", "scope": "synthetic full rotor chain and ratio/slip/drift counterexamples plus exactly-once confirmation; no CAD"},
   "small_alignment_native": {"mode": "native_cad", "scope": "explicit own pump copies, separate alignment confirmation and two tasks through one owner"},

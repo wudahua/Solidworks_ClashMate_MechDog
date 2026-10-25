@@ -46,6 +46,9 @@ def operational_error(code, message, restoration_status='unknown', diagnostics=N
         action['options_status'] = 'manual_constraint_review_required_no_safe_geometry_inferred'
     elif code in NATIVE_ACTION_CLASSES:
         action['options_status'],action['instruction']=NATIVE_ACTION_CLASSES[code]
+    elif code in {'INVALID_JOB_ID','JOB_NOT_FOUND','JOB_RECORD_INVALID'}:
+        action.update(options_status='job_identity_and_saved_record_review_required',
+                      instruction='AI原样核对提交工具返回的job_id及原安装目录；格式错误、记录缺失和记录损坏分别处理，不删前缀猜测，不自动重跑原任务。')
     return {'code': code, 'message': message, 'assertion': 'inconclusive',
             'restoration_status': restoration_status,
             'document_context_restoration_status': document_context_restoration_status,

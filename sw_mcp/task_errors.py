@@ -148,6 +148,11 @@ def task_failure(code, message, diagnostics=None, *, task_id='', asynchronous=Fa
         value['message'] = 'task_id须为32位小写十六进制；无任务ID时先不传task_id调用get_mechanism_task。'
     if code == 'LEGACY_SESSION_REQUIRES_FINISH':
         action.update(tool='finish_motion_session', arguments={})
+        if diag.get('running_job_ids'):
+            action.update(tool='get_job',arguments={'job_id':diag['running_job_ids'][0]},
+                          instruction='AI先读取原旧工具任务并等待结束；不在执行中调用finish_motion_session或重复prepare。')
+        elif diag.get('pending_requests'):
+            action.update(tool='get_recovery_state',arguments={},instruction='AI先读取原请求状态；请求未结束时不释放执行器。')
     else:
         action.update(tool='get_mechanism_task', arguments={'collect_evidence': True} if host else {'task_id': task_id} if task_id else {})
     if host:

@@ -69,8 +69,9 @@ class Bridge:
             raise CadError("INVALID_SOLIDWORKS_PID", "填写正整数PID字符串或auto。", "not_required")
         selected = selected.lower()
         with self._lock:
-            if self._ever_dispatched or self._pending or self._quarantined_request or self.recovery_state()["recovery_required"]:
-                raise CadError("STARTUP_SELECTION_NOT_ALLOWED", "本服务已有CAD请求或未知恢复记录，不能重新选择实例；保留原记录并走检查点恢复流程。", "not_required")
+            admission = self.session_admission()
+            if not admission['startup_selection_pre_dispatch_allowed']:
+                raise CadError("STARTUP_SELECTION_NOT_ALLOWED", "当前连接不能重新选择实例；请求空闲与允许换实例是两项独立条件。省略solidworks_pid可读取原连接；prepare会自动交接已核实空闲的本宿主旧执行器。存在未知请求时仍须核对原请求及检查点。", "not_required", admission)
             previous = None
             if self._process is not None:
                 if self._process.poll() is None or not self._startup.done():
@@ -113,6 +114,39 @@ class Bridge:
                 self._reader_thread = None
             self._selected_startup_pid = selected
             return {"selection": selected, "client_config_changed": False}
+
+    def session_admission(self, state=None):
+        """Offline connection facts; idle never grants permission to switch CAD."""
+        state = self.recovery_state() if state is None else state
+        with self._state_lock:
+            pending = len(self._pending)
+            quarantined = self._quarantined_request
+        process = self._process
+        reasons = []
+        if self._ever_dispatched: reasons.append('connection_already_used')
+        if pending: reasons.append('requests_pending')
+        if quarantined: reasons.append('request_quarantined')
+        if state.get('recovery_required'): reasons.append('recovery_required')
+        if state.get('journal_derived_fields_consistent') is False: reasons.append('journal_inconsistent')
+        pre_dispatch_allowed=not reasons
+        if process is not None and not reasons:
+            if process.poll() is None or not self._startup.done():reasons.append('startup_process_not_finished')
+            else:
+                try:hello=self._startup.result() if not self._startup.cancelled() else None
+                except Exception:hello=None
+                allowed={'COM_SESSION_NOT_FOUND','COM_SESSION_UNAVAILABLE','COM_SESSION_ID_MISMATCH','INVALID_SOLIDWORKS_PID','AMBIGUOUS_COM_SESSION','AUTO_SESSION_INVENTORY_UNAVAILABLE','AUTO_SESSION_IDENTITY_CHANGED'}
+                if not isinstance(hello,dict) or hello.get('protocol_version')!=1 or hello.get('ready') is not False or not isinstance(hello.get('error'),dict) or hello['error'].get('code') not in allowed:
+                    reasons.append('startup_outcome_not_correctable')
+        return {'startup_selection_allowed': not reasons, 'startup_selection_pre_dispatch_allowed':pre_dispatch_allowed,
+                'startup_selection_blockers': reasons,
+                'cad_requests_dispatched': self._ever_dispatched, 'pending_requests': pending,
+                'quarantined_request': quarantined, 'retained_executor_pid': process.pid if process is not None else None,
+                'retained_executor_state': ('running' if process.poll() is None else 'exited') if process is not None else 'not_started',
+                'journal_owner_matches': state.get('owner_id') == self._owner_id if state.get('owner_id') else None,
+                'journal_executor_matches': state.get('executor_pid') == process.pid if process is not None and state.get('executor_pid') else None,
+                'last_operation': state.get('operation'), 'last_request_updated_at': state.get('updated_at'),
+                'stale_after_upgrade': None, 'ownership_scope': 'retained_bridge_not_client_conversation',
+                'native_calls': False}
 
     def _acquire_lease(self):
         """OS releases the journal lease if its Python owner crashes."""
