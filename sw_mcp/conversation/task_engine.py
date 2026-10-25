@@ -216,7 +216,15 @@ class TaskEngine:
         with self.lock:
             if task_id not in self.tasks:raise core.StopBatch('TASK_NOT_IN_CURRENT_SERVER','没有该任务记录；可不传task_id查询已有任务。')
             t=self.tasks[task_id]
-            value=json.loads(json.dumps(t,ensure_ascii=False))
+            # Bound only the presentation. Integrity still uses and persists
+            # the complete admission inventory; evidence collection keeps it.
+            workspace=t.get('source_workspace_files')
+            value=json.loads(json.dumps({k:v for k,v in t.items() if k!='source_workspace_files'},ensure_ascii=False))
+            if workspace is not None:
+                value['source_workspace_files']=workspace[:20]
+                value['source_workspace_files_summary']={'total_count':len(workspace),'returned_count':len(value['source_workspace_files']),
+                    'truncated':len(workspace)>20,'full_record_path':str(Path(t['directory'])/'任务状态.json'),
+                    'json_pointer':'/source_workspace_files','scope':'presentation_only_full_inventory_retained_for_integrity_and_evidence'}
             if not t.get('closed') and t.get('server_instance_id')!=self.server_instance_id:
                 value.update(busy=False,connection_status='owner_lost_read_only',persisted_phase=t['phase'],
                     task_owner_available=False,next_action={'tool':'finish_mechanism_task','arguments':{'task_id':task_id,'close_unrestored':False},
@@ -312,8 +320,9 @@ class TaskEngine:
             selection_question=recommendations['selection_question'],next_action={'tool':'plan_mechanism_task','arguments':{'task_id':t['task_id']},
                 'instruction':'AI解释推荐；有机械歧义只问名称或用途，不把几何排序当作设计意图。'})
         t.pop('component_selection',None)
-    def plan(self,task_id,candidate_id='',moving_component_hint='',reference_component_hint=''):
+    def plan(self,task_id,candidate_id='',moving_component_hint='',reference_component_hint='',alignment_mode='strict'):
         t=self.tasks[task_id]
+        if alignment_mode not in {'strict','small_translation'}:raise core.StopBatch('INVALID_ALIGNMENT_MODE')
         self._require_session(task_id)
         if t['phase']=='awaiting_component_selection':
             if not moving_component_hint and not reference_component_hint:
@@ -326,7 +335,10 @@ class TaskEngine:
                 self._proposals(t,s.rescan())
             return self._submit(t,'clarifying_components',clarify)
         if moving_component_hint or reference_component_hint:raise core.StopBatch('COMPONENT_SELECTION_NOT_REQUESTED')
-        if t['phase']!='proposal_ready':raise core.StopBatch('TASK_NOT_READY_FOR_PLAN')
+        if t['phase'] not in {'proposal_ready','alignment_choice_required'}:raise core.StopBatch('TASK_NOT_READY_FOR_PLAN')
+        if t['phase']=='alignment_choice_required' and alignment_mode=='strict' and (not candidate_id or candidate_id==t['alignment_suggestion']['candidate_id']):
+            return {'task_id':task_id,'needs_alignment_scope_selection':True,**t['alignment_suggestion']}
+        if t['phase']=='alignment_choice_required' and not candidate_id:candidate_id=t['alignment_suggestion']['candidate_id']
         if not candidate_id:
             if t['requires_selection'] or len(t['proposals'])!=1:
                 return {'task_id':task_id,'needs_selection':True,'question':t['selection_question'],'proposals':t['proposals']}
@@ -337,13 +349,30 @@ class TaskEngine:
         def operation():
             s=self.sessions[task_id];native=s.preview(index)
             components=s.call('inspect_model',model_id=s.model,detail_level='components')['components']
-            from . import concentric_card
+            from . import concentric_card,small_alignment
             # Eligibility and initial alignment are checked before authorizing a trial solve.
-            card=concentric_card.create(native,components,s.recommendation['reference_state_signature'],False,False)
+            alignment=None
+            if alignment_mode=='small_translation':
+                alignment=small_alignment.proposal(native,components,s.recommendation['reference_state_signature']);card=alignment
+            else:
+                try:card=concentric_card.create(native,components,s.recommendation['reference_state_signature'],False,False)
+                except concentric_card.CardError as error:
+                    if error.code!='CARD_REQUIRES_ALIGNED_INITIAL_AXES_NO_REPOSITIONING':raise
+                    try:suggestion=small_alignment.proposal(native,components,s.recommendation['reference_state_signature'])
+                    except core.StopBatch as alternative:
+                        raise concentric_card.CardError(error.code,{**error.diagnostics,'alternative_unavailable_code':alternative.code})
+                    t.update(phase='alignment_choice_required',strict_card_rejection=task_failure(error.code,str(error),error.diagnostics,task_id=task_id,asynchronous=True),
+                        alignment_suggestion={'candidate_id':candidate_id,'expected_translation_mm':suggestion['expected_translation_mm'],
+                            'expected_translation_world_mm':suggestion['expected_translation_world_mm'],'maximum_translation_mm':small_alignment.LIMIT_MM,
+                            'separate_alignment_confirmation_required':True,'scope':suggestion['scope']},
+                        next_action={'tool':'plan_mechanism_task','arguments':{'task_id':task_id,'candidate_id':candidate_id,'alignment_mode':'small_translation'},
+                            'automatic_retry':False,'instruction':'严格卡片不允许此初始偏差；AI可只读准备单独的小幅平移方案，向用户说明位移和新验证范围，不能自行视为已经授权。'})
+                    return
             core.write(s.folder/'对话待确认测试卡.json',card)
             token=uuid.uuid4().hex
             t.update(phase='awaiting_confirmation',selected_index=index,selected_candidate=candidate_id,plan_token=token,
                 selected_edges=[native['reference_a']['entity_id'],native['reference_b']['entity_id']],
+                alignment_mode=alignment_mode,alignment_proposal=alignment,
                 proposal={'instances':t['proposals'][index]['instances'],'mate_type':'concentric','lock_rotation':False,
                     'test_speed_rpm':12,'duration_s':1,'output_fps':30,'expected_twist_deg':72,
                     'scope':SCOPE,'restore_import_checkpoint_at_finish':True,'original_files_modified':False,
@@ -352,18 +381,33 @@ class TaskEngine:
                     'whole_pump_transmission_certified':False},
                 next_action={'tool':'execute_mechanism_task','arguments':{'task_id':task_id,'plan_token':token},
                     'instruction':'向用户说明零件对、试验参数、同轴约束允许影响和恢复方式；获得明确授权后一次提交。开发验收使用事先批准的测试卡，不能伪称真人确认。'})
+            if alignment:
+                t['proposal'].update(scope=alignment['scope'],alignment=alignment,
+                    retained=['other_components','fixed_states','post_alignment_signed_rotation','post_alignment_axial_displacement'],
+                    allowed_constraint_effect=['bounded_initial_transverse_translation'],pre_alignment_motion_preservation_certified=False)
+                t['next_action']['instruction']='单独说明预计平移矢量、最多0.01mm、不纠正倾斜、对齐后两次独立旋转及恢复方式。只有用户明确同意初态调整和该新范围后，才传alignment_confirmed=true执行；不能拿一般确认代替。'
         return self._submit(t,'planning',operation)
-    def execute(self,task_id,plan_token,confirmed=False,scope_confirmed=False):
+    def execute(self,task_id,plan_token,confirmed=False,scope_confirmed=False,alignment_confirmed=False):
         t=self.tasks[task_id]
         self._require_session(task_id)
         if t.get('busy'):raise core.StopBatch('TASK_BUSY','正在处理，不消耗确认或重复排队。')
         if confirmed is not True or scope_confirmed is not True:raise core.StopBatch('CONFIRMATION_REQUIRED','需要对话中明确同意该方案及同轴约束验证范围。')
+        if t.get('alignment_mode')=='small_translation' and alignment_confirmed is not True:
+            raise core.StopBatch('CONFIRMATION_REQUIRED','小幅对齐改变初始姿态，必须取得单独明确同意。',{'separate_alignment_confirmation_required':True,'constraint_write_dispatched':False})
+        if t.get('alignment_mode','strict')=='strict' and alignment_confirmed is not False:raise core.StopBatch('INVALID_ALIGNMENT_MODE')
         if t.get('plan_token')!=plan_token:raise core.StopBatch('PLAN_TOKEN_MISMATCH')
         if t.get('execution_consumed'):raise core.StopBatch('TASK_ALREADY_EXECUTED','已提交过本方案；AI读取现有结果，不重试写入。')
         if t['phase']!='awaiting_confirmation':raise core.StopBatch('TASK_NOT_READY_FOR_EXECUTION')
-        t['execution_consumed']=True;t['confirmation']={'confirmed':True,'scope_confirmed':True,'plan_token':plan_token,'time':time.time()};self.save(t)
+        t['execution_consumed']=True;t['confirmation']={'confirmed':True,'scope_confirmed':True,'alignment_confirmed':alignment_confirmed,'plan_token':plan_token,'time':time.time()};self.save(t)
         def operation():
             s=self.sessions[task_id]
+            if t.get('alignment_mode')=='small_translation':
+                from . import small_alignment
+                result=small_alignment.execute(s,t['selected_index'],t['alignment_proposal'])
+                t.update(phase='verified',verification=result,
+                    next_action={'tool':'finish_mechanism_task','arguments':{'task_id':task_id},
+                        'instruction':'报告小幅对齐实测、对齐后旋转和重复性；不宣称对齐前运动已保留。恢复导入检查点并核对退出后开始新任务。'})
+                return
             mate_motion.baseline(s,t['selected_index'],True,True)
             if [s.plan['reference_a']['entity_id'],s.plan['reference_b']['entity_id']]!=t['selected_edges']:
                 raise core.StopBatch('CONFIRMED_PAIR_CHANGED','保留已采集基线，未创建配合。')
@@ -381,7 +425,7 @@ class TaskEngine:
         """Retire a pre-execution failed record, never restore/rebind native resources from JSON."""
         if confirmed is not True:raise core.StopBatch('ORPHAN_CLOSE_CONFIRMATION_REQUIRED','原会话已丢失，恢复未验证；须明确同意保留副本并关闭失败记录。')
         if completed_close.has_receipt(t):return self.archive_completed_close(t,confirmed)
-        if t.get('execution_consumed') or t['phase'] not in {'awaiting_confirmation','proposal_ready','awaiting_component_selection','failed'}:
+        if t.get('execution_consumed') or t['phase'] not in {'awaiting_confirmation','proposal_ready','awaiting_component_selection','alignment_choice_required','failed'}:
             raise core.StopBatch('ORPHAN_NATIVE_OUTCOME_UNCONFIRMED','已执行或阶段不明确的旧任务继续保留，未解除写入保护。')
         from .process_identity import same_process
         folder=core.no_links(Path(t['directory'])/'session')

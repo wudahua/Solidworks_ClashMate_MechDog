@@ -41,6 +41,8 @@ prepare/plan/execute/finish可能返回 `{ok:true,result:{task_id,accepted:true,
 
 ## 错误信封与下一步
 
+alpha.14的圆边任务默认`alignment_mode=strict`，严格卡不重定位及原容差不变。初始径向偏差超限但适合受限横移时，任务进入`alignment_choice_required`，保留具体拒绝码与实测值；AI可调用`plan_mechanism_task(alignment_mode="small_translation")`只读规划，说明预计世界位移、0.01mm上限、仅选中件横移及不纠正倾斜。须另取得用户对初态调整的明确同意，才可在execute传`alignment_confirmed=true`；一般confirmed/scope_confirmed不能代替，不确认不消费令牌。此模式仅一个浮动件、其余固定，执行后审核初态调整和对齐后两次独立12rpm/1秒/30fps旋转。`pre_alignment_motion_preservation_certified=false`、`full_trajectory_equivalent=null`不能补记为对齐前轨迹等价。默认finish恢复原导入检查点；未知结果仍保护。普通motion任务不接受小幅对齐参数，严格模式不接受多余的对齐授权。
+
 alpha.13将输入完整性、运动验证和原生收尾分别报告。源文件校验绑定原生导入的冻结依赖，不将工作区CSV/日志/说明当作CAD输入；`finish.source_integrity`及`源文件核对.json`保留变化、缺失、不可读和额外文件。真实源CAD变化仍是`SOURCE_CHANGED`，`closed_source_changed`表示资源已结束而输入完整性失败，不能将`closed=true`当作整体通过，也不能忽略`next_round_allowed=false`；AI先说明变化原因和收尾结论。
 
 `finish`收据按阶段保存，不因之后文件核验错误抹掉。旧失败记录若已有完整的恢复、正常退出、身份和空闲日志证据，可在明确授权后用`close_unrestored=true`只读核对归档；完整既有恢复收据标记其来源，不冒称进行了新的恢复，`previous_task_passed=false`仍保留。若证据不全，恢复继续按未验证报告，不能仅凭PID不存在解除保护。`get`发现已结束收据时不再探测死连接；受管恢复查询拒绝带阻塞任务及阶段。仍存活的旧代码宿主不能热替换，不能编辑任务JSON或强杀来绕过门禁。
@@ -87,9 +89,13 @@ alpha.13将输入完整性、运动验证和原生收尾分别报告。源文件
 
 `get_mechanism_task(collect_evidence=true)`在前端离线整理已有文件，即使宿主启动失败也可调用；无CAD求解、不包含模型与IPC认证密钥。证据可能含文件名、路径，应按实际范围分享。保存失败、恢复未知、原请求结果未知均保留证据。
 
+`get_mechanism_task(task_id=...)`对`source_workspace_files`仅展示前20项，`source_workspace_files_summary`给出总数、实际返回数、truncated及完整任务记录路径/JSON指针；不能将展示清单当作完整输入集合。完整清单仍保存在任务记录并随证据ZIP提供，源文件核验和新增文件判定不使用裁剪后的视图。
+
 ## 安装、升级与开发验收
 
 AI核验官方ZIP与SHA256并解压到独立目录，使用**新包内**`upgrade.ps1`，`TargetDir`指向原安装。包装脚本按`$PSScriptRoot/scripts/upgrade.py`定位自己的Python入口，**不按TargetDir定位入口**。回执的`upgrade_entry`和`path_policy_source=running_upgrade_entry`证明实际升级器。不能从“备份脚本预演通过”推断旧校验器变得前向兼容；应核对实际文件与入口。
+
+升级前AI先读取已有任务并正常收尾；`get_environment`会连接CAD并启动本服务执行器，不能用它充当无副作用的空闲探针。WinError 5保持`UPGRADE_LEASE_ACCESS_FAILED`和原生码，不单凭错误号认定权限不足或占用；先核对同安装已有服务、宿主和恢复记录，仅在无活动受管任务/运行中旧任务、恢复确认空闲时才调用`finish_motion_session`，安全收尾后停用相关客户端并显式预检。仍失败才继续检查属性、ACL或过滤器，不改名/删除锁、不改权限、不强杀或自动重试。`ORPHAN_EXECUTOR_GATE_NOT_IDLE`的条件式收尾提示仅适用于本服务的已知空闲旧执行器，不能据此结束其他客户端或未知进程。
 
 `upgrade-backups`是升级器管理的恢复快照，不是完整独立的安装或降级工具。不要从任意备份目录启动旧包装脚本或先覆盖校验器。不同入口、缺失先决条件或租约占用可能先报不同门禁，只有真实入口回执能证明走了哪条路径。
 

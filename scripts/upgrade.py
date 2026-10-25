@@ -15,12 +15,12 @@ from pathlib import Path
 try:
     from .verify_release import safe_relative, reject_links, validate_manifest, verify, PATH_POLICY_VERSION
     from .install_preflight import preflight
-    from .lease_access import open_lease_file, lock_lease_file, lease_diagnostics
+    from .lease_access import open_lease_file, lock_lease_file, lease_diagnostics, lease_access_instruction
     from .host_maintenance import audit_backup_hosts
 except ImportError:
     from verify_release import safe_relative, reject_links, validate_manifest, verify, PATH_POLICY_VERSION
     from install_preflight import preflight
-    from lease_access import open_lease_file, lock_lease_file, lease_diagnostics
+    from lease_access import open_lease_file, lock_lease_file, lease_diagnostics, lease_access_instruction
     from host_maintenance import audit_backup_hosts
 
 
@@ -40,6 +40,8 @@ class UpgradeFailure(RuntimeError):
             instruction = '停用目标安装目录及其他客户端中的本项目 MCP，等待执行器退出后显式重新预检；不删除锁或恢复日志，不结束不明进程。'
         if self.code == 'UPGRADE_EXECUTOR_ABANDONED':
             instruction = '原生互斥体返回 WAIT_ABANDONED；保留并检查恢复日志，不能视为正常空闲或直接重试升级。'
+        if self.code == 'UPGRADE_LEASE_ACCESS_FAILED':
+            instruction += ' '+lease_access_instruction()
         stage = state.get('stage') or self.diagnostics.get('stage')
         return {'ok': False, 'schema_version': 2, 'receipt_schema_version': 2, 'upgrade_result_schema_version': 1, 'code': self.code,
                 **{key: state.get(key) for key in ('stage','failure_stage','python_started','target_mutation_started','backup_created','receipt_path','receipt_stage_persisted','receipt_write_error','committed','rollback_attempted','rollback_verified','rollback_status','recovery_journal_unchanged','installation_state')},
@@ -100,7 +102,7 @@ def idle_installation(root):
     except OSError as error:
         diagnostics=lease_diagnostics(path,error,'open_lease')
         raise UpgradeFailure('UPGRADE_LEASE_BUSY' if diagnostics['sharing_conflict_proven'] else 'UPGRADE_LEASE_ACCESS_FAILED',
-                             '锁文件存在共享冲突；停用相关服务或检查占用句柄。' if diagnostics['sharing_conflict_proven'] else '无法打开升级锁；权限、属性或过滤器原因尚未区分，不证明服务正在运行。',diagnostics=diagnostics) from error
+                             '锁文件存在共享冲突；停用相关服务或检查占用句柄。' if diagnostics['sharing_conflict_proven'] else '无法打开升级锁；服务句柄拓扑、权限、属性或过滤器原因尚未区分，不证明具体持有者。',diagnostics=diagnostics) from error
     mutex=None;owned=False;locked=False
     kernel=ctypes.WinDLL('kernel32',use_last_error=True)
     kernel.CreateMutexW.argtypes=[ctypes.c_void_p,ctypes.c_int,ctypes.c_wchar_p];kernel.CreateMutexW.restype=ctypes.c_void_p

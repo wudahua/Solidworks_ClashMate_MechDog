@@ -42,9 +42,9 @@ from pathlib import Path
 
 KIT = Path(__file__).resolve().parent
 
-VERSION = '0.4.3-alpha.13'
+VERSION = '0.4.3-alpha.14'
 
-KIT_VERSION = 'formal-dialogue-0.4.3-alpha.13'
+KIT_VERSION = 'formal-dialogue-0.4.3-alpha.14'
 
 ALLOWED = {'get_environment','get_recovery_state','import_assembly','inspect_model',
            'list_motion_studies','preflight_motion','list_drive_candidates','create_motion_study',

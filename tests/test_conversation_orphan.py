@@ -60,6 +60,12 @@ class OrphanCloseTests(unittest.TestCase):
             self.assertEqual(e.exception.code,'ORPHAN_RESOURCE_NOT_CONFIRMED_EXITED')
         self.assertFalse(self.other.get(self.tid)['closed'])
 
+    def test_unexecuted_alignment_choice_can_retire_only_after_original_resources_exit(self):
+        self.other.tasks[self.tid]['phase']='alignment_choice_required'
+        with patch.object(FakeSession,'restore') as restore:
+            result=self.other.finish(self.tid,True);restore.assert_not_called()
+        self.assertTrue(result['closed']);self.assertFalse(result['result']['previous_task_passed'])
+
     def test_pending_or_previously_executed_work_remains_blocked(self):
         self.ownership['in_flight']={'operation':'import_assembly'};core.write(self.folder/'活会话归属.json',self.ownership)
         with self.assertRaises(core.StopBatch):self.other.finish(self.tid,True)

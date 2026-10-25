@@ -188,11 +188,12 @@ class MotionTaskEngine(TaskEngine):
             t['next_action']['instruction']='AI优先解释与原生同轴配合轴线一致的候选及其证据；该线索不等于自由度证明，不覆盖用户明确指定方向。确认具体试算方案后才execute。'
         t.pop('component_selection',None)
 
-    def plan(self,task_id,candidate_id='',moving_component_hint='',reference_component_hint='',initial_state='saved'):
+    def plan(self,task_id,candidate_id='',moving_component_hint='',reference_component_hint='',initial_state='saved',alignment_mode='strict'):
         t=self.tasks[task_id]
         if t.get('task_kind')!='motion' or t['phase']=='awaiting_component_selection':
             if initial_state!='saved':raise core.StopBatch('INITIAL_STATE_SELECTION_NOT_READY')
-            return super().plan(task_id,candidate_id,moving_component_hint,reference_component_hint)
+            return super().plan(task_id,candidate_id,moving_component_hint,reference_component_hint,alignment_mode)
+        if alignment_mode!='strict':raise core.StopBatch('INVALID_ALIGNMENT_MODE')
         self._require_session(task_id)
         if t['phase']!='proposal_ready':raise core.StopBatch('TASK_NOT_READY_FOR_PLAN')
         if moving_component_hint or reference_component_hint:raise core.StopBatch('COMPONENT_SELECTION_NOT_REQUESTED')
@@ -223,9 +224,10 @@ class MotionTaskEngine(TaskEngine):
                     'instruction':'解释组件、参考、带符号轴线、反向开关、速度和行程；用户授权后只执行一次。'})
         return self._submit(t,'planning',operation)
 
-    def execute(self,task_id,plan_token,confirmed=False,scope_confirmed=False):
+    def execute(self,task_id,plan_token,confirmed=False,scope_confirmed=False,alignment_confirmed=False):
         t=self.tasks[task_id]
-        if t.get('task_kind')!='motion':return super().execute(task_id,plan_token,confirmed,scope_confirmed)
+        if t.get('task_kind')!='motion':return super().execute(task_id,plan_token,confirmed,scope_confirmed,alignment_confirmed)
+        if alignment_confirmed is not False:raise core.StopBatch('INVALID_ALIGNMENT_MODE')
         self._require_session(task_id)
         if confirmed is not True or scope_confirmed is not True:raise core.StopBatch('CONFIRMATION_REQUIRED')
         if t.get('execution_consumed'):raise core.StopBatch('TASK_ALREADY_EXECUTED')

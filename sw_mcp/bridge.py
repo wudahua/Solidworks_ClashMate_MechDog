@@ -5,7 +5,7 @@ import json
 import subprocess
 import threading
 import uuid
-from scripts.lease_access import open_lease_file, lock_lease_file, lease_diagnostics
+from scripts.lease_access import open_lease_file, lock_lease_file, lease_diagnostics, lease_access_instruction
 import os
 import time
 import ctypes
@@ -135,7 +135,7 @@ class Bridge:
             busy = diagnostics['sharing_conflict_proven']
             raise CadError("MCP_OWNER_ALREADY_RUNNING" if busy else "MCP_LEASE_UNAVAILABLE",
                            "锁文件存在原生共享冲突；请停用相关安装目录的服务或检查占用句柄后显式重试，持有者身份未证明。" if busy else
-                           "无法打开或初始化服务锁；请核对文件权限、属性或过滤器阻止。现有证据不能证明服务持有或仅是目录权限问题。",
+                           "无法打开或初始化服务锁；"+lease_access_instruction(),
                            "not_required", diagnostics) from exc
         try:
             lock_lease_file(lease)
@@ -144,7 +144,7 @@ class Bridge:
             diagnostics = lease_diagnostics(directory / 'executor-owner.lock', exc, 'lock_lease')
             busy = diagnostics['occupied_proven'] or (os.name != 'nt' and isinstance(exc, BlockingIOError))
             raise CadError("MCP_OWNER_ALREADY_RUNNING" if busy else "MCP_LEASE_UNAVAILABLE",
-                           "服务锁存在原生锁冲突；请停用相关服务后显式重试，持有者身份未证明。" if busy else "获取服务锁失败；现有证据不能证明有其他持有者。",
+                           "服务锁存在原生锁冲突；请停用相关服务后显式重试，持有者身份未证明。" if busy else "获取服务锁失败；"+lease_access_instruction(),
                            "not_required", diagnostics) from exc
         self._lease = lease
 

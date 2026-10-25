@@ -158,7 +158,7 @@ def baseline(session,index,confirmed=False,scope_confirmed=False):
     try:
         binding['mechanical_card']=concentric_card.create(plan,components,session.recommendation['reference_state_signature'],scope_confirmed,False)
     except ValueError as error:
-        if scope_confirmed:raise core.StopBatch('CONCENTRIC_SCOPE_CARD_NOT_ELIGIBLE',str(error))
+        if scope_confirmed:raise core.StopBatch(getattr(error,'code','CONCENTRIC_SCOPE_CARD_NOT_ELIGIBLE'),str(error),getattr(error,'diagnostics',None))
         binding['mechanical_card']=None;binding['scope_card_unavailable_reason']=str(error)
     if binding['mechanical_card']:
         core.write(session.folder/'同轴约束测试卡.json',binding['mechanical_card'])

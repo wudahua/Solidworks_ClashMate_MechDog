@@ -1,5 +1,8 @@
 """Check entry point classification; native CAD is always an explicit workflow."""
 ENTRIES = {
+  "small_alignment_native": {"mode": "native_cad", "scope": "explicit own pump copies, separate alignment confirmation and two tasks through one owner"},
+  "test_small_alignment": {"mode": "unittest", "caller": "test_small_alignment.py", "scope": "strict-card typed errors, bounded lateral alignment and separate confirmation with no CAD in fixtures"},
+  "test_upgrade_guidance": {"mode": "unittest", "caller": "test_upgrade_guidance.py", "scope": "real no-CAD multi-process leases, access ambiguity, conditional cleanup and bounded presentation with intact source inventory"},
   "test_source_close": {"mode": "unittest", "caller": "test_source_close.py", "scope": "frozen CAD dependencies, completed-close receipts and explicit no-CAD failed-record retirement"},
   "test_motion_task_feedback": {"mode": "unittest", "caller": "test_motion_task_feedback.py", "scope": "legacy bridge replacement, original native failure and missing pose evidence; no CAD in fixtures"},
   "test_prepare_admission": {"mode": "unittest", "caller": "test_prepare_admission.py", "scope": "shared read-only prepare validation before real occupied installation lease; valid requests retain lock protection"},
