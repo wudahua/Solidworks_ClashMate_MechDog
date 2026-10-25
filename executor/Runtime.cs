@@ -331,6 +331,9 @@ public partial class Cad {
         string op=(string)request["op"];var p=(Dictionary<string,object>)request["params"];
         activeJobId=p.ContainsKey("job_id")?(string)p["job_id"]:null;activeRequestId=request.ContainsKey("id")?request["id"] as string:null;
         switch(op) {
+            case "_preview_gear_transmission": return PreviewGearTransmission((string)p["model_id"]);
+            case "_apply_gear_transmission": return ApplyGearTransmission((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));
+            case "_test_gear_transmission_rollback": return ApplyGearTransmission((string)p["plan_id"],true,true);
             case "get_environment": return UserEnvironment();
             case "list_mate_references": return ListMateReferences((string)p["model_id"],(string)p["component_id"],(string)p["kind"],Convert.ToInt32(p["limit"]),(string)p["cursor"],p.ContainsKey("detail_level")&&(string)p["detail_level"]=="compact",p.ContainsKey("face_offset")?Convert.ToInt32(p["face_offset"]):0,p.ContainsKey("mate_context_budget_s")?Convert.ToDouble(p["mate_context_budget_s"]):10,p.ContainsKey("geometry_scan_budget_s")?Convert.ToDouble(p["geometry_scan_budget_s"]):10,p.ContainsKey("edge_offset")?Convert.ToInt32(p["edge_offset"]):0);
             case "_circular_reference_state": {var model=GetUserModel((string)p["model_id"]);using(var scope=new Scope(this,model.Path,null))return CircularQueryState(model,scope.Doc);}
