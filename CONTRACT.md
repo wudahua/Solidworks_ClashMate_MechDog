@@ -110,3 +110,13 @@ alpha.11起，宿主登记/启动、OwnerClient及owner入口在创建会话前�
 完整安装模式升级在受管文件写入前执行上述维护，无法核实或存在活动任务则返回`UPGRADE_BACKUP_HOSTS_REQUIRE_REVIEW`，保留原文件与证据。提交后再次核对；此时收尾不确定单独记为`host_cleanup_status=review_required`，不能伪称源码回滚。`retired_host_tasks`、`backup_host_review`记录实际范围。DryRun仅检验任务契约并列出待核对宿主，不请求退出；DryRun通过不保证运行中宿主可以安全退役。源码校验专用的`install=False`模式不检查本机宿主，不能冒充完整升级。宿主存在并不证明执行器或全局互斥锁被占用；须分别读取原归属和租约证据。
 
 开发者由AI执行`unittest discover`、`tests/run_offline_policies.py`、干净包`verify_release.py`、升级预演/真实升级及自己的真实CAD样本。CI运行离线和无CAD宿主契约；Session0不能启动交互宿主时显式跳过，不能称为通过。真实CAD、离线夹具、跨机与真人WorkBuddy结论分别记录。普通用户无需配置专门测试MCP、输入命令或收集散落日志。
+
+## alpha.16 旧工具与受管任务交接
+
+prepare先完成参数与路径校验，再检查旧工具状态。仅本宿主保留的Popen、成功握手、无队列/待答/隔离请求、idle且派生字段一致的日志可自动交接；有已派发请求时还须核对日志owner及executor身份。向这个子进程发送EOF并确认退出后才替换Bridge，保留交接收据、历史日志和已有CAD副本，不调用CAD退出或恢复。未完成受管任务不走此交接；其他进程、未知日志和未确认退出仍阻断，不创建新任务。
+
+get_recovery_state.session_admission是离线观察：idle只表示上次请求结束，不证明姿态，也不允许已使用的连接换PID。STARTUP_SELECTION_NOT_ALLOWED附连接使用、待答及隔离原因；读取原连接时省略solidworks_pid，不以auto重置活连接。仅历史idle日志不证明持有旧执行器，不自动标记为升级残留或删除。
+
+齿轮任务motion_parameters.requested_minimum_travel保留请求值0；signed_target_travel_deg表达带方向目标。verification_criterion为完整带符号输入波形与外齿轮比例，input_waveform_tolerance_deg=0.1、external_ratio_tolerance_deg=0.0001，不以95%门槛验证。普通motion任务的minimum_travel语义不变。
+
+get_job要求原样32位小写十六进制：格式错为INVALID_JOB_ID，格式有效但本安装记录不存在为JOB_NOT_FOUND，存在但不可核验为JOB_RECORD_INVALID。均不改写标识、不自动重放任务；缺少旧版本原始响应时不声称已定位job_前缀的生成来源。

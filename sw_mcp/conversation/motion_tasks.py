@@ -34,6 +34,12 @@ def prepare_inputs(path,task_kind='motion',motion='rotary',speed=12,duration_s=1
     settings=parameters(motion,speed,duration_s,output_fps,reverse_direction,minimum_travel) if task_kind in {'motion','gear_transmission'} else None
     if task_kind=='gear_transmission' and (motion!='rotary' or speed>60 or duration_s>2 or output_fps not in {30,60} or minimum_travel!=0):
         raise core.StopBatch('GEAR_PARAMETERS_INVALID','首版泵比例传动限旋转、60rpm、2秒、30/60fps；minimum_travel保留默认0，验证完整目标角度。')
+    if task_kind=='gear_transmission':
+        settings.pop('minimum_travel')
+        settings.update(requested_minimum_travel=minimum_travel,
+                        verification_criterion='full_signed_input_waveform_and_external_ratio_not_minimum_travel',
+                        signed_target_travel_deg=settings['expected_travel']*(-1 if reverse_direction else 1),
+                        input_waveform_tolerance_deg=.1,external_ratio_tolerance_deg=1e-4)
     if not Path(path).is_absolute():raise core.StopBatch('INVALID_ASSEMBLY_PATH','需要装配体绝对路径，由AI定位。')
     assembly=core.no_links(Path(path))
     if not assembly.is_file() or assembly.suffix.lower()!='.sldasm':raise core.StopBatch('INVALID_ASSEMBLY_PATH')

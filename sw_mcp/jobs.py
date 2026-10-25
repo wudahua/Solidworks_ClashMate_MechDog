@@ -15,6 +15,14 @@ from . import job_payload
 from .errors import operational_error
 
 
+class JobLookupError(ValueError):
+    def __init__(self,code,message,job_id):
+        super().__init__(message)
+        self.code=code
+        self.diagnostics={'job_id':job_id[:128] if isinstance(job_id,str) else None,
+                          'identifier_rewritten':False,'cad_dispatched':False,'job_created':False}
+
+
 def verification_fields(operation, result=None, error=None):
     # Only an explicit requested-motion assertion can establish this boolean.
     status = "not_requested"
@@ -135,6 +143,8 @@ class Jobs:
             self._persist(job)
 
     def get(self, job_id: str, response_artifact_id="", offset=0, limit=2000, response_json_pointer="") -> dict:
+        if not isinstance(job_id,str) or not re.fullmatch(r"[a-f0-9]{32}",job_id):
+            raise JobLookupError('INVALID_JOB_ID','job_id须原样使用工具返回的32位小写十六进制；含job_等前缀、短标识或其他格式均无效。不要删改标识来猜测任务。',job_id)
         if response_json_pointer and not response_artifact_id:
             raise ValueError("response_json_pointer 需要 response_artifact_id。")
         if response_artifact_id:
@@ -142,14 +152,14 @@ class Jobs:
         with self._lock:
             job = copy.deepcopy(self._jobs.get(job_id))
         if job is None:
-            if not isinstance(job_id, str) or not re.fullmatch(r"[a-f0-9]{32}", job_id):
-                raise ValueError("无效 job_id：须使用完整32位标识，且与提交任务使用同一安装目录；不按短前缀猜测。")
             try:
                 job = json.loads((self.root / "runs/jobs" / (job_id + ".json")).read_text(encoding="utf-8"))
                 if job.get("job_id") != job_id or job.get("status") not in {"queued", "running", "succeeded", "failed", "timed_out", "executor_lost"}:
                     raise ValueError("Invalid job record")
+            except FileNotFoundError:
+                raise JobLookupError('JOB_NOT_FOUND','格式有效，但本安装目录未找到该任务。AI核对原始返回值及提交任务的安装目录；不删改标识、不自动重跑任务。',job_id) from None
             except (OSError, ValueError, AttributeError):
-                raise ValueError("未找到可读取的任务记录。") from None
+                raise JobLookupError('JOB_RECORD_INVALID','本安装的任务记录无法核验；保留已有记录和诊断，不猜测或重建任务。',job_id) from None
             job["historical_job_read_only"] = True
             job["automatically_resumed"] = False
             if job["status"] in {"queued", "running"}:

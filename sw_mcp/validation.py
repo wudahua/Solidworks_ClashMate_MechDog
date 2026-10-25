@@ -28,6 +28,9 @@ def refuse(code, message, diagnostics=None, next_action=None):
     # INVALID_MATE_PLAN_ID deliberately uses this branch (preview_mate first).
     elif error['next_action'].get('tool'):
         error['next_action']['options_status'] = 'tool_identified_arguments_require_user_input'
+    elif code in {'INVALID_JOB_ID','JOB_NOT_FOUND','JOB_RECORD_INVALID'}:
+        error['next_action'].update(options_status='job_identity_and_saved_record_review_required',
+                                   instruction='AI原样核对提交工具返回的job_id及原安装目录；不删前缀猜测、不自动重跑原任务。')
     elif code in {'INVALID_ARGUMENT', 'UNKNOWN_ARGUMENT', 'INVALID_MATE_CONTEXT_BUDGET',
                   'LIMIT_OUT_OF_RANGE', 'INVALID_FACE_OFFSET', 'INVALID_EDGE_OFFSET', 'ASSEMBLY_FILE_UNAVAILABLE',
                   'DURATION_OR_FPS_OUT_OF_RANGE', 'SPEED_OUT_OF_RANGE', 'MINIMUM_TRAVEL_OUT_OF_RANGE',
