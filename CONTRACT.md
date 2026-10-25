@@ -41,6 +41,10 @@ prepare/plan/execute/finish可能返回 `{ok:true,result:{task_id,accepted:true,
 
 ## 错误信封与下一步
 
+alpha.13将输入完整性、运动验证和原生收尾分别报告。源文件校验绑定原生导入的冻结依赖，不将工作区CSV/日志/说明当作CAD输入；`finish.source_integrity`及`源文件核对.json`保留变化、缺失、不可读和额外文件。真实源CAD变化仍是`SOURCE_CHANGED`，`closed_source_changed`表示资源已结束而输入完整性失败，不能将`closed=true`当作整体通过，也不能忽略`next_round_allowed=false`；AI先说明变化原因和收尾结论。
+
+`finish`收据按阶段保存，不因之后文件核验错误抹掉。旧失败记录若已有完整的恢复、正常退出、身份和空闲日志证据，可在明确授权后用`close_unrestored=true`只读核对归档；完整既有恢复收据标记其来源，不冒称进行了新的恢复，`previous_task_passed=false`仍保留。若证据不全，恢复继续按未验证报告，不能仅凭PID不存在解除保护。`get`发现已结束收据时不再探测死连接；受管恢复查询拒绝带阻塞任务及阶段。仍存活的旧代码宿主不能热替换，不能编辑任务JSON或强杀来绕过门禁。
+
 任务同步拒绝及后台失败保留：`code`、`message`、`assertion`、`restoration_status`、`document_context_restoration_status`、`diagnostics`、`next_action`。`next_action`包含`automatic_retry:false`、`options:[]`、`options_status`、自然语言`instruction`，必要时给出`tool`、`arguments`和恢复查询。**出现tool只是路由提示，不代表参数需要用户输入，也不表示已经获准执行。人工确认分类优先于工具提示和选项。**
 
 `assertion`为`pass`、`fail`或`inconclusive`；派发前输入/授权拒绝可为`not_applicable`。任务错误不据错误码推断已经恢复：`restoration_status=unknown`仍保留；`diagnostics.cad_dispatched`和`job_created`在结果未知时为null，不得解读为false。确认/参数门禁已证明当前请求未派发时为false，也不证明之前任务已恢复。后台错误不能因名字像参数错误就声称未触及CAD。
@@ -57,7 +61,7 @@ prepare/plan/execute/finish可能返回 `{ok:true,result:{task_id,accepted:true,
 | `task_state_review_required_no_write_retry` | AI读取已有任务的阶段、busy和结果；运行中只查询，完成后安全收尾。不要重复prepare或execute，也不通过重启绕过一次性执行保护。 |
 | `fresh_task_plan_required_no_write_retry` | AI核对原任务、已选零件对、引用和一次性令牌；旧方案失效。先读取现场并按安全收尾结论决定重新规划，新方案须重新确认，不换绑旧基线或重放写入。 |
 | `task_record_selection_required` | AI不传task_id调用get_mechanism_task查找现有记录；不猜测ID，不因找不到记录就重复创建或执行任务。 |
-| `task_owner_recovery_review_required` | AI读取旧任务、原资源身份和现有恢复记录；不能从JSON重建COM、重放令牌或自动关闭失败记录。只有明确授权且资源退出证据齐全时才可异常归档，恢复仍按未验证报告。 |
+| `task_owner_recovery_review_required` | AI读取旧任务、原资源身份和恢复记录；不能从JSON重建COM、重放令牌或自动关闭失败记录。仅明确授权且完整准入证据通过时归档；无完成收据时恢复未验证，已有完整收据则标记其来源，不能补记原任务通过。 |
 | `native_outcome_review_required_no_write_retry` | AI读取原请求、归属和恢复日志；超时或进程存在都不证明请求结束。未知状态不重试写入、不自动恢复或强制结束；原请求结束且同一活连接核对通过后才提出恢复。 |
 | `mechanical_evidence_review_required_no_parameter_change` | AI读取已有初态、轨迹、组件身份和验证证据，报告不完整或不一致；不是简单参数错误，不放宽容差、改绑基线或为补诊断重复求解。 |
 | `supported_mechanical_scope_review_required` | AI说明当前受支持的零件、引用及验证范围，依据现有证据推荐可行方案；不自动解固定、替换几何或声称任意机构可用。必要时请用户澄清机械目标。 |

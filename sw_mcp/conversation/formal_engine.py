@@ -44,7 +44,8 @@ class FormalEngine:
             validate_prepare_arguments(arguments)
         recovery_session=self.tasks.sessions.get(self.tasks.active) if self.tasks.active and name in {'get_recovery_state','restore_model_checkpoint'} else None
         if self.tasks.prior_unfinished and name in {'get_recovery_state','restore_model_checkpoint'}:
-            raise core.StopBatch('ORPHAN_NATIVE_SESSION_UNAVAILABLE','原活会话丢失；get_mechanism_task读取旧归属记录，不能用主安装日志冒充该任务状态。')
+            raise core.StopBatch('ORPHAN_NATIVE_SESSION_UNAVAILABLE','原活会话丢失；get_mechanism_task读取旧归属记录，不能用主安装日志冒充该任务状态。',
+                {'tasks':self.tasks.get(),'native_calls':False})
         binding=self.artifact_binding(arguments) if name in offline|{'replay_motion_frame'} else None
         if name=='prepare_mechanism_task' and (self.product.bridge._process or any(j['status'] in {'queued','running'} for j in self.product.jobs._jobs.values())):
             raise core.StopBatch('LEGACY_SESSION_REQUIRES_FINISH','AI先调用finish_motion_session结束旧工具会话，再创建受管任务。')
@@ -57,7 +58,9 @@ class FormalEngine:
         bridge_override=False
         try:
             if recovery_session:
-                if not recovery_session.bridge:raise core.StopBatch('MANAGED_RUNTIME_NOT_READY')
+                if not recovery_session.bridge:raise core.StopBatch('MANAGED_RUNTIME_NOT_READY','任务没有可用的原生连接；读取该任务收尾记录，不改查主安装日志。',
+                    {'task_id':self.tasks.active,'phase':self.tasks.tasks.get(self.tasks.active,{}).get('phase'),
+                     'next_tool':'get_mechanism_task','arguments':{'task_id':self.tasks.active},'native_calls':False})
                 if name=='restore_model_checkpoint':
                     if self.tasks.tasks[self.tasks.active].get('busy'):raise core.StopBatch('TASK_BUSY')
                     recovery_session.admit_owned_recovery(arguments.get('model_id'),arguments.get('checkpoint_id'),arguments.get('allow_replacement_session',False))
