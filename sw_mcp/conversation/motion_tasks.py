@@ -2,7 +2,7 @@
 import hashlib,json,math,time,uuid
 from pathlib import Path
 from .task_engine import TaskEngine,ConversationSession,core,matching_components,mechanical_choices
-from . import mate_motion,startup_gate
+from . import mate_motion,startup_gate,source_integrity
 from sw_mcp.native_grid import require_grid
 
 
@@ -156,7 +156,7 @@ class MotionTaskEngine(TaskEngine):
             # Refuse contention before creating an active task that cannot own a CAD session.
             startup_gate.require_idle(self.work/'startup-check')
             tid=uuid.uuid4().hex;folder=self.work/('task-'+tid);folder.mkdir()
-            t=dict(task_id=tid,directory=str(folder),source=str(assembly),source_hashes=core.fixture_hashes(assembly),
+            t=dict(task_id=tid,directory=str(folder),source=str(assembly),**source_integrity.snapshot_record(assembly),
                 task_kind=task_kind,motion_parameters=settings,moving_component_hint=moving,reference_component_hint=reference,
                 phase='created',busy=False,closed=False,confirmation_required=True,automatic_write_retry=False,
                 server_pid=__import__('os').getpid(),server_instance_id=self.server_instance_id)
@@ -171,6 +171,7 @@ class MotionTaskEngine(TaskEngine):
 
     def _proposals(self,t,value):
         if t.get('task_kind')!='motion':return super()._proposals(t,value)
+        source_integrity.bind(t,self.sessions[t['task_id']])
         rows=value['motion_candidates'];s=self.sessions[t['task_id']]
         t.update(model_id=s.model,phase='proposal_ready',proposals=[{'candidate_id':'candidate-'+str(i+1),
             **{k:r[k] for k in ['component_name','reference_name','axis_global','axis_point_global_m','reason']},
@@ -325,18 +326,18 @@ class MotionTaskEngine(TaskEngine):
             result_path=core.no_links(Path(imported['path']))
             result_path.relative_to(s.runtime.resolve())
             s.committed=True;s.import_restored=False
+            t['finish']={'restoration':None,'restoration_status':'not_requested_result_preserved',
+                'result_checkpoint_restore':restored_result,'cleanup_status':'pending','next_round_allowed':False};self.save(t)
             receipt=s.close()
+            t['finish']['session']=receipt;self.save(t)
             native=core.read(s.folder/'exit.json');executor=core.read(s.folder/'执行器收尾.json')
+            t['finish'].update(native_exit=native,executor_exit=executor);self.save(t)
             if executor.get('confirmed') is not True or not native.get('native_process_exited'):raise core.StopBatch('TASK_FINISH_UNCONFIRMED')
-            if core.fixture_hashes(Path(t['source']))!=t['source_hashes']:raise core.StopBatch('SOURCE_CHANGED')
-            t.update(closed=True,phase='closed',finish={'restoration':None,'restoration_status':'not_requested_result_preserved',
+            integrity=self._source_review(t,s)
+            self._settle_closed(t,{'restoration':None,'restoration_status':'not_requested_result_preserved',
                 'result_checkpoint_restore':restored_result,'session':receipt,'native_exit':native,'executor_exit':executor,
                 'cleanup_status':'pass' if native.get('normal_zero_exit') is True else 'warning_nonzero_native_exit',
-                'source_files_unchanged':True,'next_round_allowed':True,'result_assembly_path':str(result_path),
+                'result_assembly_path':str(result_path),
                 'result_assembly_sha256':core.digest(result_path),'includes_test_motion_study':True,
-                'result_scope':'verified_declared_motion_or_concentric_scope_not_whole_mechanism_or_DOF'},
-                next_action={'tool':'prepare_mechanism_task','arguments':{'assembly_path':t['source']},
-                    'instruction':'成果保留在独立副本，源文件未改；可以开始下一轮，不复用旧方案或令牌。'})
-            if native.get('normal_zero_exit') is not True:t.update(phase='closed_with_cleanup_warning',task_outcome='completed_with_cleanup_warning')
-            with self.lock:self.active=None
+                'result_scope':'verified_declared_motion_or_concentric_scope_not_whole_mechanism_or_DOF'},integrity)
         return self._submit(t,'keeping_result',operation)
