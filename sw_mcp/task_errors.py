@@ -24,7 +24,7 @@ GROUPS = (
      'AI核对工具声明、字段范围及原调用；定位文件或修正参数后显式调用。仅机械选择或授权确有必要时询问用户，不要求用户手抄ID或命令。',
      {'INVALID_MOTION_TYPE', 'INVALID_MOTION_PARAMETERS', 'INVALID_MINIMUM_TRAVEL',
       'INVALID_TASK_KIND', 'CONCENTRIC_FIXED_CARD_PARAMETERS', 'INVALID_ASSEMBLY_PATH',
-      'ASSEMBLY_NOT_FOUND', 'INVALID_INITIAL_STATE', 'INVALID_TASK_ID',
+      'ASSEMBLY_NOT_FOUND', 'INVALID_INITIAL_STATE', 'INVALID_TASK_ID','INVALID_ALIGNMENT_MODE','SCOPE_CONFIRMATION_MUST_BE_BOOLEAN',
       'INCOMPATIBLE_FINISH_CHOICES', 'INVALID_POSE_BUDGET', 'INVALID_RECOMMENDATION_INDEX',
       'INVALID_RUN_ID', 'INVALID_SCOPE_CONFIRMATION', 'UNKNOWN_MATE_ACTION'}),
     ('mechanical_selection_required',
@@ -44,7 +44,7 @@ GROUPS = (
      'AI核对原任务、已选零件对、引用和一次性令牌；旧方案失效。先读取现场并按安全收尾结论决定重新规划，新方案须重新确认，不换绑旧基线或重放写入。',
      {'PLAN_TOKEN_MISMATCH', 'CONFIRMED_PAIR_CHANGED', 'MOTION_PROPOSAL_STALE',
       'MATE_RECOMMENDATION_STALE', 'MOTION_BASELINE_PAIR_MISMATCH',
-      'MOTION_PAIR_REDISCOVERY_REQUIRED', 'MOTION_AXIS_CHANGED_AFTER_RESET'}),
+      'MOTION_PAIR_REDISCOVERY_REQUIRED', 'MOTION_AXIS_CHANGED_AFTER_RESET','ALIGNMENT_PROPOSAL_STALE'}),
     ('task_record_selection_required',
      'AI不传task_id调用get_mechanism_task查找现有记录；不猜测ID，不因找不到记录就重复创建或执行任务。',
      {'TASK_NOT_IN_CURRENT_SERVER'}),
@@ -76,10 +76,13 @@ GROUPS = (
       'VIRTUAL_POSE_IDENTITY_UNPROVEN', 'VIRTUAL_POSE_IDENTITY_COLLISION',
       'POSE_IDENTITY_EVIDENCE_CHANGED', 'POSE_IDENTITY_MAPPING_CHANGED', 'POSE_IDENTITY_COLLISION',
       'POSES_EMPTY', 'POSE_SCOPE_CHANGED', 'POSE_TIME_CHANGED', 'POSES_NONFINITE',
-      'SOURCE_CHANGED', 'CANDIDATE_SOURCE_MISMATCH', 'TASK_ARTIFACT_BINDING_MISSING', 'MOTION_POSE_EVIDENCE_UNAVAILABLE'}),
+      'SOURCE_CHANGED', 'CANDIDATE_SOURCE_MISMATCH', 'TASK_ARTIFACT_BINDING_MISSING', 'MOTION_POSE_EVIDENCE_UNAVAILABLE',
+      'INVALID_INITIAL_TRANSFORM','CARD_ID_OR_IMMUTABLE_POLICY_CHANGED','CARD_SAMPLE_SCOPE_OR_GRID_CHANGED','CARD_TIME_GRID_CHANGED','ALIGNMENT_AUDIT_FAILED'}),
     ('supported_mechanical_scope_review_required',
      'AI说明当前受支持的零件、引用及验证范围，依据现有证据推荐可行方案；不自动解固定、替换几何或声称任意机构可用。必要时请用户澄清机械目标。',
-     {'CONCENTRIC_SCOPE_CARD_NOT_ELIGIBLE', 'MOTION_REQUIRES_ONE_FLOATING_ONE_FIXED',
+     {'CONCENTRIC_SCOPE_CARD_NOT_ELIGIBLE','UNSUPPORTED_CARD_MATE','CARD_REQUIRES_ONE_FLOATING_ONE_FIXED',
+      'CARD_REQUIRES_ONLY_SELECTED_COMPONENT_FLOATING','CARD_REQUIRES_ALIGNED_INITIAL_AXES_NO_REPOSITIONING',
+      'ALIGNMENT_REQUIRES_PARALLEL_AXES','ALIGNMENT_TRANSLATION_LIMIT_EXCEEDED','ALIGNMENT_MOTION_NOT_VERIFIED','MOTION_REQUIRES_ONE_FLOATING_ONE_FIXED',
       'NO_CYLINDRICAL_DRIVE_ON_SELECTED_AXIS', 'NO_MOTION_DRIVE_CANDIDATE'}),
     ('geometry_completeness_review_required',
      'AI读取已保存的扫描范围、预算及续查待办；不把截断当完成，不循环使用自指游标，不为补材料重跑运动求解。',
@@ -150,4 +153,10 @@ def task_failure(code, message, diagnostics=None, *, task_id='', asynchronous=Fa
         action['recovery_state_query'] = {'tool': 'get_mechanism_task', 'arguments': {'collect_evidence': True}}
     elif code in {'TASK_OWNER_REQUEST_UNCONFIRMED', 'OWNER_OPERATION_OUTCOME_UNCONFIRMED'}:
         action['recovery_state_query'] = {'tool': 'get_mechanism_task', 'arguments': {'task_id': task_id} if task_id else {}}
+    if code == 'ORPHAN_EXECUTOR_GATE_NOT_IDLE':
+        action['instruction'] += (' AI先核对门禁由哪个安装/客户端持有；若本正式服务仅有空闲旧工具执行器、'
+            'active_task为空、没有运行中工具任务且恢复状态明确空闲，可先调用finish_motion_session，'
+            '再重新核对归档条件。其他客户端占用或状态未知时保留现场，不结束不明进程。')
+        action['conditional_actions'] = [{'tool':'finish_motion_session','arguments':{},'automatic_retry':False,
+            'when':'same_service_legacy_executor_only_and_no_active_managed_task_and_no_running_jobs_and_recovery_confirmed_idle'}]
     return value

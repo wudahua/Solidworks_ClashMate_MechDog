@@ -25,7 +25,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.13", instructions="日常优先纯AI对话：先get_mechanism_task找回任务，无任务再prepare_mechanism_task，按推荐plan，仅机械歧义或具体写入授权需要用户回答。motion支持旋转/直线，concentric支持受限圆边同轴配合；execute一次，get查询，finish恢复并核对退出再开始第二轮。客户端断连不结束活任务；持有进程丢失只读旧记录，不重建COM或重放令牌。get_mechanism_task(collect_evidence=True)自动读已有诊断，无需用户命令或网页。旧低层会话先finish_motion_session释放本服务执行器才能进入受管任务。以下保留原有工具用法：先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。配合关联mate_context_complete=false时只作几何参考，不推断没有配合；可按mate_context_next_query显式从空cursor重扫，保留原几何待办，改变mate_context_budget_s后重新分页。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求；成功后可核对baseline_candidate的新运行ID用于新预演，旧基线失配时不得自动改绑。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.14", instructions="日常优先纯AI对话：先get_mechanism_task找回任务，无任务再prepare_mechanism_task，按推荐plan，仅机械歧义或具体写入授权需要用户回答。motion支持旋转/直线，concentric支持受限圆边同轴配合；execute一次，get查询，finish恢复并核对退出再开始第二轮。客户端断连不结束活任务；持有进程丢失只读旧记录，不重建COM或重放令牌。get_mechanism_task(collect_evidence=True)自动读已有诊断，无需用户命令或网页。旧低层会话先finish_motion_session释放本服务执行器才能进入受管任务。以下保留原有工具用法：先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。配合关联mate_context_complete=false时只作几何参考，不推断没有配合；可按mate_context_next_query显式从空cursor重扫，保留原几何待办，改变mate_context_budget_s后重新分页。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求；成功后可核对baseline_candidate的新运行ID用于新预演，旧基线失配时不得自动改绑。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 _task_engine=None
 _formal_engine=None
@@ -61,14 +61,14 @@ async def get_mechanism_task(task_id:str='',collect_evidence:bool=False):
     return await dialogue_call('get',task_id)
 
 @mcp.tool()
-async def plan_mechanism_task(task_id:str,candidate_id:str='',moving_component_hint:str='',reference_component_hint:str='',initial_state:Literal['saved','study_zero']='saved'):
-    """AI解释推荐并形成一次性待确认方案；名称歧义时用自然语言线索复用原副本澄清。用户不必抄ID。旋转/直线需核对轴线及方向；不创建马达或配合。"""
-    return await dialogue_call('plan',task_id,candidate_id,moving_component_hint,reference_component_hint,initial_state)
+async def plan_mechanism_task(task_id:str,candidate_id:str='',moving_component_hint:str='',reference_component_hint:str='',initial_state:Literal['saved','study_zero']='saved',alignment_mode:Literal['strict','small_translation']='strict'):
+    """AI解释推荐并形成一次性待确认方案，不创建马达或配合。圆边默认strict卡不允许重定位；若返回小幅平移建议，可用small_translation只读规划，最多0.01mm横移、不纠正倾斜，须向用户单独说明并确认，对齐后旋转不证明对齐前运动保留。名称歧义用自然语言澄清。"""
+    return await dialogue_call('plan',task_id,candidate_id,moving_component_hint,reference_component_hint,initial_state,alignment_mode)
 
 @mcp.tool()
-async def execute_mechanism_task(task_id:str,plan_token:str,confirmed:bool=False,scope_confirmed:bool=False):
-    """明确授权后一次执行已确认方案。motion创建单一驱动并验证声明运动、导出曲线；concentric采集基线、创建圆边同轴配合并比较约束范围。token只消费一次；失败/断连不重试写入。"""
-    return await dialogue_call('execute',task_id,plan_token,confirmed,scope_confirmed)
+async def execute_mechanism_task(task_id:str,plan_token:str,confirmed:bool=False,scope_confirmed:bool=False,alignment_confirmed:bool=False):
+    """明确授权后一次执行方案。strict圆边卡比较配合前后；small_translation必须另外取得初态调整授权并传alignment_confirmed=true，创建同轴配合、独立审计横移和其他组件，再验证对齐后两次旋转，不声称对齐前轨迹保留。token只消费一次；失败/断连不重试写入。"""
+    return await dialogue_call('execute',task_id,plan_token,confirmed,scope_confirmed,alignment_confirmed)
 
 @mcp.tool()
 async def finish_mechanism_task(task_id:str,close_unrestored:bool=False,keep_result:bool=False):

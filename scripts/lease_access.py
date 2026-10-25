@@ -13,7 +13,8 @@ def open_lease_file(path):
     kernel.CreateFileW.restype = ctypes.c_void_p
     kernel.CloseHandle.argtypes = [ctypes.c_void_p]
     # OPEN_ALWAYS, shared read/write/delete. A conflicting holder yields 32/33;
-    # ACL/attributes/filter denial (5) remains ambiguous, never asserted busy.
+    # Access denial (5) can include service/handle topology as well as ACL,
+    # attributes or filters. Preserve the code; never assert a holder from it.
     handle = kernel.CreateFileW(str(path), 0xC0000000, 7, None, 4, 0x80, None)
     if handle == ctypes.c_void_p(-1).value:
         raise ctypes.WinError(ctypes.get_last_error())
@@ -61,4 +62,13 @@ def lease_diagnostics(path, error, stage):
             'native_code_source': 'Win32_GetLastError' if winerror is not None else 'exception_errno_only_no_native_code',
             'access_failure_kind': 'sharing_or_lock_violation' if winerror in (32, 33) else 'access_or_io_failure_not_proven_owner',
             'owner_pid': None, 'owner_identity_status': 'OS_lock_does_not_expose_holder_PID',
+            'possible_causes': ['same_installation_service_or_host_handle_topology','file_attributes','ACL','filesystem_filter_or_IO'] if winerror == 5 else [],
+            'service_presence_proven': False, 'lock_path_probe_mutation': False,
             'cad_dispatched': False}
+
+
+def lease_access_instruction():
+    return ('WinError 5或访问失败不能单独证明权限不足或服务占用。AI先只读核对本安装已有MCP服务、对话宿主及任务/恢复记录；'
+            '不要为检查而新启动执行器。仅在本服务无活动受管任务、无运行中旧工具任务且恢复状态已确认空闲时，'
+            '可调用finish_motion_session；安全收尾后只停用同一安装的相关客户端，再显式重做升级预检。'
+            '若确认服务已退出仍失败，再检查文件属性、ACL或文件系统过滤器；不删除、重命名锁文件，不改权限，不强杀或自动重试。')
