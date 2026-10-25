@@ -31,7 +31,7 @@ class Bridge:
     LONG_OPERATIONS = frozenset({"check_interference_during_motion", "run_parameter_search", "diagnose_gear_phase",
         "import_assembly", "run_user_study", "verify_motion_preservation", "replay_motion_frame",
         "restore_model_checkpoint", "apply_mate", "create_motion_study", "convert_motion_study",
-        "reset_study_time", "create_model_checkpoint", "probe_motion_compatibility"})
+        "reset_study_time", "create_model_checkpoint", "probe_motion_compatibility", "_preview_gear_transmission", "_apply_gear_transmission", "_test_gear_transmission_rollback"})
     ASYNC_QUERIES = frozenset({"inspect_model", "list_mate_references", "list_drive_candidates"})
 
     def _wait_budget(self, operation, params):

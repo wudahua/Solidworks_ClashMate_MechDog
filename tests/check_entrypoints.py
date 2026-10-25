@@ -1,5 +1,7 @@
 """Check entry point classification; native CAD is always an explicit workflow."""
 ENTRIES = {
+  "gear_transmission_native": {"mode": "native_cad", "scope": "explicit own pump rollback, two complete gear tasks, reconnect and saved-result reopen; no contact claim"},
+  "test_gear_transmission": {"mode": "unittest", "caller": "test_gear_transmission.py", "scope": "synthetic full rotor chain and ratio/slip/drift counterexamples plus exactly-once confirmation; no CAD"},
   "small_alignment_native": {"mode": "native_cad", "scope": "explicit own pump copies, separate alignment confirmation and two tasks through one owner"},
   "test_small_alignment": {"mode": "unittest", "caller": "test_small_alignment.py", "scope": "strict-card typed errors, bounded lateral alignment and separate confirmation with no CAD in fixtures"},
   "test_upgrade_guidance": {"mode": "unittest", "caller": "test_upgrade_guidance.py", "scope": "real no-CAD multi-process leases, access ambiguity, conditional cleanup and bounded presentation with intact source inventory"},

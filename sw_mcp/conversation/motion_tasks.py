@@ -28,10 +28,12 @@ def prepare_inputs(path,task_kind='motion',motion='rotary',speed=12,duration_s=1
     lease, task record, executor, COM call or startup-gate mutation belongs here.
     The task handler repeats this check so direct calls cannot bypass admission.
     """
-    if task_kind not in {'motion','concentric'}:raise core.StopBatch('INVALID_TASK_KIND')
+    if task_kind not in {'motion','concentric','gear_transmission'}:raise core.StopBatch('INVALID_TASK_KIND')
     if task_kind=='concentric' and (motion!='rotary' or speed!=12 or duration_s!=1 or output_fps!=30 or reverse_direction is not False or minimum_travel!=0):
         raise core.StopBatch('CONCENTRIC_FIXED_CARD_PARAMETERS','圆边首版固定12rpm、1秒30fps；不静默忽略其他运动参数。')
-    settings=parameters(motion,speed,duration_s,output_fps,reverse_direction,minimum_travel) if task_kind=='motion' else None
+    settings=parameters(motion,speed,duration_s,output_fps,reverse_direction,minimum_travel) if task_kind in {'motion','gear_transmission'} else None
+    if task_kind=='gear_transmission' and (motion!='rotary' or speed>60 or duration_s>2 or output_fps not in {30,60} or minimum_travel!=0):
+        raise core.StopBatch('GEAR_PARAMETERS_INVALID','首版泵比例传动限旋转、60rpm、2秒、30/60fps；minimum_travel保留默认0，验证完整目标角度。')
     if not Path(path).is_absolute():raise core.StopBatch('INVALID_ASSEMBLY_PATH','需要装配体绝对路径，由AI定位。')
     assembly=core.no_links(Path(path))
     if not assembly.is_file() or assembly.suffix.lower()!='.sldasm':raise core.StopBatch('INVALID_ASSEMBLY_PATH')
@@ -41,7 +43,12 @@ def prepare_inputs(path,task_kind='motion',motion='rotary',speed=12,duration_s=1
 def validate_prepare_arguments(arguments):
     """Map schema-checked public names to the shared admission defaults."""
     fields=('task_kind','motion','speed','duration_s','output_fps','reverse_direction','minimum_travel')
+    validate_gear_hints(arguments.get('task_kind','motion'),arguments.get('moving_component_hint',''),arguments.get('reference_component_hint',''))
     return prepare_inputs(arguments.get('assembly_path',''),**{k:arguments[k] for k in fields if k in arguments})
+
+def validate_gear_hints(kind,moving,reference):
+    if kind=='gear_transmission' and (moving not in {'','长轴'} or reference not in {'','泵体'}):
+        raise core.StopBatch('GEAR_ROLE_SELECTION_REQUIRED','首版泵模板自动推荐长轴输入及泵体参考；其他名称不被静默忽略。')
 
 
 def direction_key(row,motion):
@@ -104,6 +111,9 @@ def frame_zero(path):
 class MotionSession(ConversationSession):
     task_kind='concentric'
     def rescan(self,hint=''):
+        if self.task_kind=='gear_transmission':
+            from .gear_transmission import discover
+            return discover(self)
         if self.task_kind!='motion':return super().rescan(hint)
         inspection=self.call('inspect_model',model_id=self.model,detail_level='full')
         if self.initial_inspection is None:self.initial_inspection=inspection
@@ -150,6 +160,7 @@ class MotionTaskEngine(TaskEngine):
     def prepare(self,path,moving='',reference='',task_kind='motion',motion='rotary',speed=12,
                 duration_s=1,output_fps=30,reverse_direction=False,minimum_travel=0):
         assembly,settings=prepare_inputs(path,task_kind,motion,speed,duration_s,output_fps,reverse_direction,minimum_travel)
+        validate_gear_hints(task_kind,moving,reference)
         with self.lock:
             if self.prior_unfinished:raise core.StopBatch('PRIOR_TASK_UNCONFIRMED',diagnostics={'records':self.prior_unfinished})
             if self.active:raise core.StopBatch('TASK_SESSION_ACTIVE',diagnostics={'task_id':self.active})
@@ -170,6 +181,12 @@ class MotionTaskEngine(TaskEngine):
         return self._submit(t,'preparing',operation)
 
     def _proposals(self,t,value):
+        if t.get('task_kind')=='gear_transmission':
+            source_integrity.bind(t,self.sessions[t['task_id']]);proposal=value['gear_transmission']
+            t.update(model_id=self.sessions[t['task_id']].model,phase='proposal_ready',proposals=[{'candidate_id':'candidate-1',**proposal}],
+                requires_selection=False,next_action={'tool':'plan_mechanism_task','arguments':{'task_id':t['task_id'],'candidate_id':'candidate-1'},
+                    'instruction':'解释完整泵两侧推荐角色和反向1∶1比例；准备明确的解除固定、刚性连接、轴定位及齿轮方案，用户确认前不改写。'})
+            return
         if t.get('task_kind')!='motion':return super()._proposals(t,value)
         source_integrity.bind(t,self.sessions[t['task_id']])
         rows=value['motion_candidates'];s=self.sessions[t['task_id']]
@@ -190,6 +207,9 @@ class MotionTaskEngine(TaskEngine):
 
     def plan(self,task_id,candidate_id='',moving_component_hint='',reference_component_hint='',initial_state='saved',alignment_mode='strict'):
         t=self.tasks[task_id]
+        if t.get('task_kind')=='gear_transmission':
+            from .gear_transmission import propose
+            return propose(self,t,candidate_id,initial_state,alignment_mode,moving_component_hint,reference_component_hint)
         if t.get('task_kind')!='motion' or t['phase']=='awaiting_component_selection':
             if initial_state!='saved':raise core.StopBatch('INITIAL_STATE_SELECTION_NOT_READY')
             return super().plan(task_id,candidate_id,moving_component_hint,reference_component_hint,alignment_mode)
@@ -226,6 +246,9 @@ class MotionTaskEngine(TaskEngine):
 
     def execute(self,task_id,plan_token,confirmed=False,scope_confirmed=False,alignment_confirmed=False):
         t=self.tasks[task_id]
+        if t.get('task_kind')=='gear_transmission':
+            from .gear_transmission import execute
+            return execute(self,t,plan_token,confirmed,scope_confirmed,alignment_confirmed)
         if t.get('task_kind')!='motion':return super().execute(task_id,plan_token,confirmed,scope_confirmed,alignment_confirmed)
         if alignment_confirmed is not False:raise core.StopBatch('INVALID_ALIGNMENT_MODE')
         self._require_session(task_id)
@@ -315,7 +338,7 @@ class MotionTaskEngine(TaskEngine):
         def operation():
             s=self.sessions[task_id]
             restored_result=None
-            if t.get('task_kind')=='concentric':
+            if t.get('task_kind') in {'concentric','gear_transmission'}:
                 if not getattr(s,'result_checkpoint',None):raise core.StopBatch('RESULT_CHECKPOINT_UNAVAILABLE')
                 restored_result=s.call('restore_model_checkpoint',model_id=s.model,checkpoint_id=s.result_checkpoint)
                 if not core.restored_ok(restored_result):s.unknown=True;raise core.StopBatch('RESULT_RESTORE_NOT_VERIFIED')

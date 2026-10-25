@@ -93,6 +93,10 @@ alpha.13将输入完整性、运动验证和原生收尾分别报告。源文件
 
 ## 安装、升级与开发验收
 
+`prepare_mechanism_task(task_kind="gear_transmission")`为独立的两轴泵模板，使用既有五项受管工具。首版要求18个解析的顶层零件、0既有配合，名称/空间角色为长轴、短轴、泵体及各两件齿轮和键。名称线索仅可留空或长轴/泵体，不忽略其他选择。限rotary、60rpm、2秒、30或60fps，minimum_travel保持0；比例为方案中明确的外齿轮1∶1反向，不从圆柱面直径推断齿数。plan只读，列出解除固定范围、四刚性连接、两同轴、两轴向、一齿轮及0.01mm/1e-6rad装配位姿预算。execute须取得整套装配写入与比例试算的明确授权；不借用small_translation确认，不改变原严格卡。
+
+内部原生方案不作为额外公开工具，绑定模型签名、一次性原生plan及可恢复检查点。只驱动长轴；两次独立求解验证六件同步、刚性组相对姿态、固定件、材料轴线及反向比例，导出带符号转角。成功结论不认证齿形、接触、摩擦、受力、整机DOF或装配前运动保留。默认finish恢复导入状态；keep_result只限已验证结果副本，退出非零如实单列。未知请求不重放。
+
 AI核验官方ZIP与SHA256并解压到独立目录，使用**新包内**`upgrade.ps1`，`TargetDir`指向原安装。包装脚本按`$PSScriptRoot/scripts/upgrade.py`定位自己的Python入口，**不按TargetDir定位入口**。回执的`upgrade_entry`和`path_policy_source=running_upgrade_entry`证明实际升级器。不能从“备份脚本预演通过”推断旧校验器变得前向兼容；应核对实际文件与入口。
 
 升级前AI先读取已有任务并正常收尾；`get_environment`会连接CAD并启动本服务执行器，不能用它充当无副作用的空闲探针。WinError 5保持`UPGRADE_LEASE_ACCESS_FAILED`和原生码，不单凭错误号认定权限不足或占用；先核对同安装已有服务、宿主和恢复记录，仅在无活动受管任务/运行中旧任务、恢复确认空闲时才调用`finish_motion_session`，安全收尾后停用相关客户端并显式预检。仍失败才继续检查属性、ACL或过滤器，不改名/删除锁、不改权限、不强杀或自动重试。`ORPHAN_EXECUTOR_GATE_NOT_IDLE`的条件式收尾提示仅适用于本服务的已知空闲旧执行器，不能据此结束其他客户端或未知进程。
