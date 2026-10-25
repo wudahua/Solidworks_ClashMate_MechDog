@@ -1,5 +1,7 @@
 """Check entry point classification; native CAD is always an explicit workflow."""
 ENTRIES = {
+  "test_motion_task_feedback": {"mode": "unittest", "caller": "test_motion_task_feedback.py", "scope": "legacy bridge replacement, original native failure and missing pose evidence; no CAD in fixtures"},
+  "test_prepare_admission": {"mode": "unittest", "caller": "test_prepare_admission.py", "scope": "shared read-only prepare validation before real occupied installation lease; valid requests retain lock protection"},
   "test_v043a11": {"mode": "unittest", "caller": "test_v043a11.py", "scope": "snapshot startup denial, exact owned idle host retirement and archived byte rollback"},
   "test_v043a10": {"mode": "unittest", "caller": "test_v043a10.py", "scope": "all task error exits, owner SDK, frontend and asynchronous saved failure semantics"},
   "test_v043a9": {"mode": "unittest", "caller": "test_v043a9.py", "scope": "principal fixtures plus real no-CAD register/query and interactive RunEx when session available"},

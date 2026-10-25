@@ -20,6 +20,30 @@ def parameters(motion,speed,duration,fps,reverse,minimum):
                 speed_unit='rpm' if motion=='rotary' else 'mm/s',travel_unit='deg' if motion=='rotary' else 'mm')
 
 
+def prepare_inputs(path,task_kind='motion',motion='rotary',speed=12,duration_s=1,
+                   output_fps=30,reverse_direction=False,minimum_travel=0):
+    """Read-only admission shared by owner dispatch and direct task preparation.
+
+    Validate parameters before the path, as in the original task handler. No
+    lease, task record, executor, COM call or startup-gate mutation belongs here.
+    The task handler repeats this check so direct calls cannot bypass admission.
+    """
+    if task_kind not in {'motion','concentric'}:raise core.StopBatch('INVALID_TASK_KIND')
+    if task_kind=='concentric' and (motion!='rotary' or speed!=12 or duration_s!=1 or output_fps!=30 or reverse_direction is not False or minimum_travel!=0):
+        raise core.StopBatch('CONCENTRIC_FIXED_CARD_PARAMETERS','圆边首版固定12rpm、1秒30fps；不静默忽略其他运动参数。')
+    settings=parameters(motion,speed,duration_s,output_fps,reverse_direction,minimum_travel) if task_kind=='motion' else None
+    if not Path(path).is_absolute():raise core.StopBatch('INVALID_ASSEMBLY_PATH','需要装配体绝对路径，由AI定位。')
+    assembly=core.no_links(Path(path))
+    if not assembly.is_file() or assembly.suffix.lower()!='.sldasm':raise core.StopBatch('INVALID_ASSEMBLY_PATH')
+    return assembly,settings
+
+
+def validate_prepare_arguments(arguments):
+    """Map schema-checked public names to the shared admission defaults."""
+    fields=('task_kind','motion','speed','duration_s','output_fps','reverse_direction','minimum_travel')
+    return prepare_inputs(arguments.get('assembly_path',''),**{k:arguments[k] for k in fields if k in arguments})
+
+
 def direction_key(row,motion):
     axis=mate_motion.unit(row['axis_global'])
     # Parallel plane normals are equivalent motor directions. Cylinder axes must also share a line.
@@ -35,7 +59,14 @@ def group_directions(rows,motion):
     for row in rows:grouped.setdefault(direction_key(row,motion),[]).append(row)
     out=[]
     for key,items in sorted(grouped.items()):
-        items.sort(key=lambda r:(-r.get('area_m2',0),r['entity_id']))
+        # Entity IDs may change between copies. For linear directions prefer
+        # an actually available native face with the canonical axis sign;
+        # never synthesize/flip an entity normal or silently change the axis.
+        def order(row):
+            a=mate_motion.unit(row['axis_global'])
+            positive=next((x>0 for x in a if abs(x)>1e-8),True)
+            return ((0 if positive else 1) if motion=='linear' else 0,-row.get('area_m2',0),row['entity_id'])
+        items.sort(key=order)
         out.append({**items[0],'equivalent_direction_face_count':len(items),
             'grouping_scope':'same_axis_line' if motion=='rotary' else 'parallel_plane_normal_only'})
     return out
@@ -102,6 +133,9 @@ class MotionSession(ConversationSession):
                     'axis_global':face['axis_global'],'axis_point_global_m':face['reference_point_global_m'],
                     'reason':'已核对浮动目标、参考件及原生几何；参考件未固定不代表不能相对测量，方向分组不证明机构运动相容。'})
         if not rows:raise core.StopBatch('NO_MOTION_DRIVE_CANDIDATE','未找到受支持的原生驱动面；不自动解除固定或补配合。')
+        if self.motion_parameters['motion']=='linear':
+            from .axis_guidance import annotate_linear_axes
+            annotate_linear_axes(rows,inspection.get('mates',[]))
         self.motion_candidates=rows
         self.motion_signature=self.call('_circular_reference_state',model_id=self.model)['signature']
         return {'motion_candidates':rows,'geometry_complete':True,
@@ -115,13 +149,7 @@ class MotionTaskEngine(TaskEngine):
 
     def prepare(self,path,moving='',reference='',task_kind='motion',motion='rotary',speed=12,
                 duration_s=1,output_fps=30,reverse_direction=False,minimum_travel=0):
-        if task_kind not in {'motion','concentric'}:raise core.StopBatch('INVALID_TASK_KIND')
-        if task_kind=='concentric' and (motion!='rotary' or speed!=12 or duration_s!=1 or output_fps!=30 or reverse_direction is not False or minimum_travel!=0):
-            raise core.StopBatch('CONCENTRIC_FIXED_CARD_PARAMETERS','圆边首版固定12rpm、1秒30fps；不静默忽略其他运动参数。')
-        settings=parameters(motion,speed,duration_s,output_fps,reverse_direction,minimum_travel) if task_kind=='motion' else None
-        if not Path(path).is_absolute():raise core.StopBatch('INVALID_ASSEMBLY_PATH','需要装配体绝对路径，由AI定位。')
-        assembly=core.no_links(Path(path))
-        if not assembly.is_file() or assembly.suffix.lower()!='.sldasm':raise core.StopBatch('INVALID_ASSEMBLY_PATH')
+        assembly,settings=prepare_inputs(path,task_kind,motion,speed,duration_s,output_fps,reverse_direction,minimum_travel)
         with self.lock:
             if self.prior_unfinished:raise core.StopBatch('PRIOR_TASK_UNCONFIRMED',diagnostics={'records':self.prior_unfinished})
             if self.active:raise core.StopBatch('TASK_SESSION_ACTIVE',diagnostics={'task_id':self.active})
@@ -145,11 +173,18 @@ class MotionTaskEngine(TaskEngine):
         if t.get('task_kind')!='motion':return super()._proposals(t,value)
         rows=value['motion_candidates'];s=self.sessions[t['task_id']]
         t.update(model_id=s.model,phase='proposal_ready',proposals=[{'candidate_id':'candidate-'+str(i+1),
-            **{k:r[k] for k in ['component_name','reference_name','axis_global','axis_point_global_m','reason']}}
+            **{k:r[k] for k in ['component_name','reference_name','axis_global','axis_point_global_m','reason']},
+            **{k:r[k] for k in ('axis_evidence','recommended_from_native_mate_axis') if k in r}}
             for i,r in enumerate(rows)],requires_selection=len(rows)!=1,scope_geometry_complete=True,
             geometry_scope=value['scope'],studies=value['studies'],
             next_action={'tool':'plan_mechanism_task','arguments':{'task_id':t['task_id']},
                 'instruction':'解释推荐的组件、参考及方向；存在不同轴线时按机械用途澄清。'})
+        preferred=[p for p in t['proposals'] if p.get('recommended_from_native_mate_axis')]
+        t['suggested_candidate_id']=preferred[0]['candidate_id'] if len(preferred)==1 else None
+        t['recommendation_scope']='native_joint_axis_hint_not_proven_allowed_motion_or_design_intent'
+        if t['suggested_candidate_id']:
+            t['next_action']['arguments']['candidate_id']=t['suggested_candidate_id']
+            t['next_action']['instruction']='AI优先解释与原生同轴配合轴线一致的候选及其证据；该线索不等于自由度证明，不覆盖用户明确指定方向。确认具体试算方案后才execute。'
         t.pop('component_selection',None)
 
     def plan(self,task_id,candidate_id='',moving_component_hint='',reference_component_hint='',initial_state='saved'):
@@ -227,7 +262,24 @@ class MotionTaskEngine(TaskEngine):
                 entity_id=drive['entity_id'],expected_motion=p['motion'],minimum_travel=p['minimum_travel'],
                 duration_s=p['duration_s'],output_fps=p['output_fps'],reference_component_id=ref['component_id'],run_id=uuid.uuid4().hex,plan_id='')
             core.write(s.folder/'运动验证.json',run)
-            gates.append(require_same_poses(initial,frame_zero(s.runtime/'runs'/run['run_id']/'component-poses.csv'),'actual_solved_frame_zero'))
+            native_ok=run.get('assertion')=='pass' and run.get('restoration_status')=='restored' and run.get('source_files_unchanged') is True and not run.get('error_code')
+            t['verification']={'declared_scope_passed':False,'run_id':run.get('run_id'),'native_assertion':run.get('assertion'),
+                'native_error_code':run.get('error_code'),'native_restoration_status':run.get('restoration_status'),
+                'report_path':run.get('report_path'),'scope':'selected_motion_only_not_all_DOF',
+                'curve_status':'not_exported_native_verification_not_passed','whole_mechanism_or_DOF_certified':False}
+            if not native_ok:
+                if run.get('error_code'):
+                    raise core.StopBatch(run['error_code'],run.get('failure') or '原生运动验证未完成；读取已保存诊断并恢复收尾，不重复求解。',
+                        {'run_id':run.get('run_id'),'report_path':run.get('report_path'),
+                         'native_verification':run,'task_verification_path':str(s.folder/'运动验证.json')})
+                t.update(phase='verification_failed',next_action={'tool':'finish_mechanism_task','arguments':{'task_id':task_id},
+                    'instruction':'原生判据、恢复或源文件核对未全部通过；读取运动验证记录后安全收尾，不导出为成功曲线，不自动重算。'})
+                return
+            poses=s.runtime/'runs'/run['run_id']/'component-poses.csv'
+            if not poses.is_file():
+                raise core.StopBatch('MOTION_POSE_EVIDENCE_UNAVAILABLE','原生返回成功，但没有可核对的姿态文件；未导出曲线或宣告运动通过。',
+                    {'run_id':run['run_id'],'pose_path':str(poses),'report_path':run.get('report_path')})
+            gates.append(require_same_poses(initial,frame_zero(poses),'actual_solved_frame_zero'))
             core.write(s.folder/'机械起点门禁.json',gates)
             from sw_mcp.artifacts import Artifacts
             artifacts=Artifacts(s.runtime)
@@ -243,6 +295,7 @@ class MotionTaskEngine(TaskEngine):
                 'signed_net_travel':signed,'direction_verified_about_selected_native_axis':direction_pass,
                 'direction_scope':'native_axis_and_reverse_switch_not_unstated_designer_intent',
                 'curve':curve,'curve_scope':'global_component_origin_magnitude_not_signed_relative_travel',
+                'curve_status':'exported_validated_native_run',
                 'screenshot_status':'not_requested_no_extra_solve','whole_mechanism_or_DOF_certified':False},
                 next_action={'tool':'finish_mechanism_task','arguments':{'task_id':task_id},
                     'instruction':'报告原生验证与曲线；恢复初始检查点并核对退出后再开始下一轮。'})

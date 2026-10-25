@@ -2,7 +2,7 @@
 import asyncio
 import sys
 from .task_engine import core,release_executor
-from .motion_tasks import MotionTaskEngine
+from .motion_tasks import MotionTaskEngine,validate_prepare_arguments
 
 
 class FormalEngine:
@@ -38,6 +38,10 @@ class FormalEngine:
         managed_recovery=name=='restore_model_checkpoint' and bool(self.tasks.active)
         if name not in offline|{'get_mechanism_task','finish_mechanism_task','finish_motion_session','get_recovery_state'} and not managed_recovery and fingerprint()!=self.source_fingerprint:
             raise core.StopBatch('HOST_SOURCE_CHANGED','源码已变化；先读取和收尾原任务，空闲后重连接入新宿主，不在旧任务中混用新源码。')
+        if name=='prepare_mechanism_task':
+            # Input errors are independent of service occupancy. Keep source
+            # identity admission above, and every lease/native gate below.
+            validate_prepare_arguments(arguments)
         recovery_session=self.tasks.sessions.get(self.tasks.active) if self.tasks.active and name in {'get_recovery_state','restore_model_checkpoint'} else None
         if self.tasks.prior_unfinished and name in {'get_recovery_state','restore_model_checkpoint'}:
             raise core.StopBatch('ORPHAN_NATIVE_SESSION_UNAVAILABLE','原活会话丢失；get_mechanism_task读取旧归属记录，不能用主安装日志冒充该任务状态。')
@@ -50,13 +54,14 @@ class FormalEngine:
         if name not in managed|offline and not (name=='replay_motion_frame' and binding) and not recovery_session and self.tasks.active:
             raise core.StopBatch('MANAGED_TASK_ACTIVE','已有受管任务；使用get_mechanism_task读取，不向另一实例派发。',{'task_id':self.tasks.active})
         original_artifacts=self.product.artifacts;original_bridge=self.product.bridge
+        bridge_override=False
         try:
             if recovery_session:
                 if not recovery_session.bridge:raise core.StopBatch('MANAGED_RUNTIME_NOT_READY')
                 if name=='restore_model_checkpoint':
                     if self.tasks.tasks[self.tasks.active].get('busy'):raise core.StopBatch('TASK_BUSY')
                     recovery_session.admit_owned_recovery(arguments.get('model_id'),arguments.get('checkpoint_id'),arguments.get('allow_replacement_session',False))
-                self.product.bridge=recovery_session.bridge
+                self.product.bridge=recovery_session.bridge;bridge_override=True
             if binding:
                 from sw_mcp.artifacts import Artifacts
                 runtime,task,session=binding
@@ -64,13 +69,16 @@ class FormalEngine:
                 if name=='replay_motion_frame' and not arguments.get('saved_image_only',False):
                     if not session or task.get('closed') or task.get('busy') or arguments.get('wait_for_completion',True) is not True or arguments.get('use_input_snapshot'):
                         raise core.StopBatch('MANAGED_REPLAY_REQUIRES_LIVE_IDLE_TASK','受管任务原生回放须为本次未关闭空闲任务，使用同步回放；已关闭任务只能读已有截图。')
-                    session.require_live_idle();self.product.bridge=session.bridge
+                    session.require_live_idle();self.product.bridge=session.bridge;bridge_override=True
             result=asyncio.run(self.product.mcp.call_tool(name,arguments))
             if recovery_session and name=='restore_model_checkpoint' and (result.structured_content or {}).get('ok') is True:
                 recovery_session.accept_owned_recovery(result.structured_content['result'])
                 self.tasks.mark_recovered(self.tasks.active,result.structured_content['result'])
         finally:
-            self.product.artifacts=original_artifacts;self.product.bridge=original_bridge
+            self.product.artifacts=original_artifacts
+            # Restore only temporary managed-session bindings. finish_legacy
+            # intentionally replaces the default bridge after verified EOF.
+            if bridge_override:self.product.bridge=original_bridge
         _=self.active  # Release only after every managed task has closed, never on MCP EOF.
         # The owner records outcomes independently of the short-lived MCP frontend.
         try:

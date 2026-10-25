@@ -8,17 +8,17 @@ from pathlib import Path
 from verify_release import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.3-alpha.11"
+VERSION = "0.4.3-alpha.12"
 
 
 def build(candidate=False):
-    sources = [ROOT/name for name in ("README.md", "CONTRACT.md", "发布说明_v0.4.3-alpha.11.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
+    sources = [ROOT/name for name in ("README.md", "CONTRACT.md", "发布说明_v0.4.3-alpha.12.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
     sources += sorted((ROOT/"executor").glob("*.cs"))
     sources += [ROOT/"executor/build.ps1"]
     sources += sorted((ROOT/"sw_mcp").glob("*.py"))
     sources += sorted(p for p in (ROOT/'sw_mcp/conversation').iterdir() if p.is_file() and p.suffix in {'.py','.ps1','.cs'})
     sources += [ROOT/'tests'/name for name in ('test_conversation_tasks.py','test_conversation_runtime.py','test_conversation_orphan.py','test_conversation_motion.py','dialogue_client.py','dialogue_native.py','dialogue_lifecycle.py','dialogue_fixture_owner.py','dialogue_fixture_frontend.py')]
-    sources += [ROOT/'tests/test_v043a9.py', ROOT/'tests/test_v043a10.py', ROOT/'tests/test_v043a11.py']
+    sources += [ROOT/'tests/test_v043a9.py', ROOT/'tests/test_v043a10.py', ROOT/'tests/test_v043a11.py', ROOT/'tests/test_prepare_admission.py', ROOT/'tests/test_motion_task_feedback.py']
     sources += [ROOT/"scripts"/name for name in ("self_check.py", "validate_runtime.py", "install_preflight.py", "build_release.py", "verify_release.py", "upgrade.py", "recover.py", "local_storage.py", "lease_access.py", "host_maintenance.py", "host_inventory.ps1")]
     sources += [ROOT/"tests"/name for name in ("test_service.py", "test_reliability.py", "motion_acceptance_v04.py", "motion_protocol_v04.py", "motion_recovery_v04.py", "motion_source_revision_v04.py", "motion_reliability_v04.py", "motion_reset_recovery_v04.py", "motion_time_axis_v04.py", "candidate_geometry_v04.py", "study_history_v04.py", "motion_startup_retry_v04.py", "motion_history_v04.py", "motion_feature_evidence_v04.py", "motion_history_diagnostics_v04.py", "motion_intent_v041.py", "basic_mates_v041.py", "mate_protocol_v041.py")]
     sources += [ROOT/"tests"/name for name in ("test_installation.py", "SessionConnectionTests.cs", "session_connection_checks.py", "session_connection_native.py", "installation_powershell_checks.py")]

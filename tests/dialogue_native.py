@@ -11,7 +11,7 @@ from sw_mcp.conversation.process_identity import same_process
 ROOT=Path(__file__).resolve().parents[1]
 
 
-def main(case,keep_last=False):
+def main(case,keep_last=False,axis_index=2,expected_native_error='',use_recommendation=False):
     folder=ROOT/'runs/dialogue-native'/uuid.uuid4().hex[:8];folder.mkdir(parents=True)
     work=folder/'work';runtime=ROOT/'runs/cr'
     pump=Path(core.read(ROOT/'圆边配合交付_v0.2/prepared-input.json')['assembly'])
@@ -23,6 +23,9 @@ def main(case,keep_last=False):
     result={'status':'running','case':case,'rounds':[],'local_real_CAD':True,'human_WorkBuddy_tested':False,
         'confirmation_source':'existing_authorized_development_cards','source':str(source),
         'work':str(work),'runtime':str(runtime),'sources_sha256':source_manifest(),'source_hashes':before,'keep_last':keep_last}
+    result.update(test_card_axis_index=axis_index,expected_native_error=expected_native_error,
+        acceptance_scope='native_rejection_reporting_and_restore_not_motion_success' if expected_native_error else 'declared_motion_and_restore',
+        motion_passed=False if expected_native_error else None,use_recommendation=use_recommendation)
     core.write(ROOT/'runs/当前正式对话验收.json',{'directory':str(folder),'case':case,'status':'running'})
     c=None;tid=None
     try:
@@ -40,9 +43,12 @@ def main(case,keep_last=False):
             assert state['phase']=='proposal_ready',state
             if mode=='concentric':chosen=state['proposals'][0]
             else:
-                matches=[r for r in state['proposals'] if abs(r['axis_global'][2])>1-1e-8]
+                matches=[r for r in state['proposals'] if abs(r['axis_global'][axis_index])>1-1e-8]
                 assert len(matches)==1,{'different_native_axes_require_mechanical_selection':matches,'all':state['proposals']}
                 chosen=matches[0]
+                if use_recommendation:
+                    assert state['suggested_candidate_id']==chosen['candidate_id'],state
+                    result.setdefault('recommendations_verified',[]).append(chosen)
             plan=c.tool('plan_mechanism_task',task_id=tid,candidate_id=chosen['candidate_id'])
             if plan.get('needs_initial_state_selection'):
                 core.write(folder/f'round-{round_no}-initial-state-choice.json',plan)
@@ -73,11 +79,18 @@ def main(case,keep_last=False):
                 refusals.append(error)
             core.write(folder/f'round-{round_no}-confirmation-refusals.json',refusals)
             c.tool('execute_mechanism_task',task_id=tid,plan_token=planned['plan_token'],confirmed=True,scope_confirmed=True)
-            verified=c.wait(tid);assert verified['phase']=='verified' and verified['verification']['declared_scope_passed'],verified
+            verified=c.wait(tid)
+            if expected_native_error:
+                assert verified['phase']=='failed' and verified['error']['code']==expected_native_error,verified
+                assert verified['verification']['declared_scope_passed'] is False
+                assert verified['verification']['curve_status']=='not_exported_native_verification_not_passed'
+                result.setdefault('expected_native_failures',[]).append(verified)
+            else:assert verified['phase']=='verified' and verified['verification']['declared_scope_passed'],verified
             run=verified['verification'].get('run_id',verified['verification'].get('after_run_id'))
-            history=c.tool('get_motion_summary',run_id=run)
-            assert history.get('run_id')==run,history
-            result.setdefault('managed_history_reads',[]).append({'run_id':run,'read_via_public_tool':True})
+            if not expected_native_error:
+                history=c.tool('get_motion_summary',run_id=run)
+                assert history.get('run_id')==run,history
+                result.setdefault('managed_history_reads',[]).append({'run_id':run,'read_via_public_tool':True})
             try:
                 c.tool('execute_mechanism_task',task_id=tid,plan_token=planned['plan_token'],confirmed=True,scope_confirmed=True)
                 raise AssertionError('duplicate execution accepted')
@@ -113,7 +126,7 @@ def main(case,keep_last=False):
             if not control(spec,'query').get('running_instances'):break
             time.sleep(.2)
         result['host_test_registration_removed']=control(spec,'unregister')
-        result.update(status='pass',source_files_unchanged=True,two_rounds_same_owner=True)
+        result.update(status='pass',source_files_unchanged=True,two_rounds_same_owner=True,motion_passed=not bool(expected_native_error))
     except Exception as error:
         result.update(status='failed',error=str(error),traceback=traceback.format_exc(),active_task=tid)
         if c and tid:
@@ -131,4 +144,6 @@ def main(case,keep_last=False):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--case',choices=['rotary','linear','concentric','chain'],required=True);p.add_argument('--keep-last',action='store_true')
-    args=p.parse_args();main(args.case,args.keep_last)
+    p.add_argument('--axis-index',type=int,choices=[0,1,2],default=2,help='Explicit developer test-card world axis; not inferred from a part name')
+    p.add_argument('--expect-native-error',default='');p.add_argument('--use-recommendation',action='store_true')
+    args=p.parse_args();main(args.case,args.keep_last,args.axis_index,args.expect_native_error,args.use_recommendation)
