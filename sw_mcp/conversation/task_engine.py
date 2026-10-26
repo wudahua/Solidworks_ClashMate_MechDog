@@ -15,7 +15,7 @@ from . import task_execution,task_progress
 
 HERE=Path(__file__).resolve().parent
 
-from . import core,mate_worker,mate_motion,startup_gate,source_integrity,completed_close
+from . import core,mate_worker,mate_motion,startup_gate,source_integrity,completed_close,orphan_close
 from .runtime_location import choose_runtime
 from sw_mcp.task_errors import task_failure
 
@@ -230,10 +230,19 @@ class TaskEngine:
                     'truncated':len(workspace)>20,'full_record_path':str(Path(t['directory'])/'任务状态.json'),
                     'json_pointer':'/source_workspace_files','scope':'presentation_only_full_inventory_retained_for_integrity_and_evidence'}
             if not t.get('closed') and t.get('server_instance_id')!=self.server_instance_id:
+                review=orphan_close.review(t)
                 value.update(busy=False,connection_status='owner_lost_read_only',persisted_phase=t['phase'],
-                    task_owner_available=False,next_action={'tool':'finish_mechanism_task','arguments':{'task_id':task_id,'close_unrestored':False},
-                    'instruction':('已执行任务仅在完整的恢复、正常退出、身份和空闲日志证据均齐全时，用户明确同意后才能用close_unrestored=true归档；否则保留未知现场，不重建COM。'
-                                   if t.get('execution_consumed') else '原活会话丢失，恢复未验证；用户明确同意后用close_unrestored=true核对旧资源已退出并归档。未知状态仍阻断，不重建COM。')})
+                    task_owner_available=False,orphan_review=review,
+                    next_action={'tool':'finish_mechanism_task' if review['archive_eligible'] else 'get_mechanism_task',
+                        'arguments':{'task_id':task_id,'close_unrestored':True,'keep_result':False} if review['archive_eligible'] else {'task_id':task_id,'collect_evidence':True},
+                        'automatic_retry':False,'requires_explicit_confirmation':review['archive_eligible'],
+                        'instruction':'原活会话已丢失；只读核对全部旧资源身份与退出。符合条件且用户明确同意后，以close_unrestored=true、keep_result=false异常归档；保留现有文件不等于另存已验证成果。缺证据时AI自动收集，不查询死亡COM或重放写入。'})
+                if t.get('error'):
+                    value['error_context']={'scope':'historical_task_failure','current_get_request_failed':False,
+                        'record_updated_at':t.get('updated_at'),'timestamp_basis':'persisted_record_update_not_proven_error_creation_time',
+                        'recovery_state_query_applicable':False,
+                        'instruction':'这是历史任务失败快照，不是本次get请求出错；原owner已丢失时读取orphan_review，不循环查询死亡COM。'}
+                    value['historical_errors']=[{'error':value['error'],'context':value['error_context']}]
             else:value.update(task_owner_available=True,connection_status='closed_record' if t.get('closed') else 'attached')
             s=self.sessions.get(task_id)
             already_ended=bool(s and getattr(s,'ended',False)) or completed_close.has_receipt(t)
@@ -294,11 +303,21 @@ class TaskEngine:
                 with self.lock:t['busy']=False;self.save(t)
         self.pool.submit(work)
         return {'task_id':t['task_id'],'accepted':True,'next_tool':'get_mechanism_task'}
+    def prior_task_diagnostics(self):
+        records=list(self.prior_unfinished)
+        return {'records':records,'blocking_tasks':[{'task_id':t['task_id'],'phase':t['phase'],
+            'record':str(Path(t['directory'])/'任务状态.json'),'next_tool':'get_mechanism_task'}
+            for t in self.tasks.values() if str(Path(t['directory'])/'任务状态.json') in records][:10],
+            'archive_before_new_prepare':True,
+            'required_evidence':['original_owner_CAD_executor_identities_and_exit','bound_native_journal','available_executor_gate'],
+            'not_required':'reconnect_to_dead_COM_or_change_historical_journal_to_idle',
+            'confirmation':'close_unrestored=true, keep_result=false only after explicit consent and resource proof',
+            'CAD_calls':0}
     def prepare(self,path,moving='',reference=''):
         assembly=core.no_links(Path(path))
         if not assembly.is_absolute() or not assembly.is_file() or assembly.suffix.lower()!='.sldasm':raise core.StopBatch('INVALID_ASSEMBLY_PATH')
         with self.lock:
-            if self.prior_unfinished:raise core.StopBatch('PRIOR_TASK_UNCONFIRMED','保留上次任务证据，不自动重建会话。',{'records':self.prior_unfinished})
+            if self.prior_unfinished:raise core.StopBatch('PRIOR_TASK_UNCONFIRMED','保留上次任务证据，不自动重建会话。',self.prior_task_diagnostics())
             if self.active:raise core.StopBatch('TASK_SESSION_ACTIVE','先完成当前任务收尾，不启动第二个执行器。',{'task_id':self.active})
             task_id=uuid.uuid4().hex;folder=self.work/('task-'+task_id);folder.mkdir()
             t={'task_id':task_id,'directory':str(folder),'source':str(assembly),'phase':'created','busy':False,'closed':False,
@@ -425,54 +444,41 @@ class TaskEngine:
                 next_action={'tool':'finish_mechanism_task','arguments':{'task_id':task_id},'instruction':'AI恢复导入检查点，核对执行器和CAD退出；不靠重启MCP开始下一轮。'})
         return self._submit(t,'running',operation)
     def close_orphan(self,t,confirmed):
-        """Retire a pre-execution failed record, never restore/rebind native resources from JSON."""
-        if confirmed is not True:raise core.StopBatch('ORPHAN_CLOSE_CONFIRMATION_REQUIRED','原会话已丢失，恢复未验证；须明确同意保留副本并关闭失败记录。')
-        if completed_close.has_receipt(t):return self.archive_completed_close(t,confirmed)
-        if t.get('execution_consumed') or t['phase'] not in {'awaiting_confirmation','proposal_ready','scope_review_required','awaiting_component_selection','alignment_choice_required','failed'}:
-            raise core.StopBatch('ORPHAN_NATIVE_OUTCOME_UNCONFIRMED','已执行或阶段不明确的旧任务继续保留，未解除写入保护。')
-        from .process_identity import same_process
-        folder=core.no_links(Path(t['directory'])/'session')
-        ownership_path=core.no_links(folder/'活会话归属.json')
-        if not ownership_path.is_file():raise core.StopBatch('ORPHAN_RESOURCE_IDENTITY_MISSING','缺少旧资源归属证据，保留记录。')
-        ownership=core.read(ownership_path)
-        if ownership.get('owner',{}).get('pid')!=t['server_pid'] or ownership.get('native_unknown') is not False or ownership.get('in_flight')!={} or ownership.get('committed') is not False:
-            raise core.StopBatch('ORPHAN_NATIVE_OUTCOME_UNCONFIRMED','归属、原生请求或提交状态未确认。')
-        proof={}
-        for role in ['owner','CAD','executor']:
-            identity=ownership.get(role)
-            if identity:
-                if not identity.get('created'):raise core.StopBatch('ORPHAN_RESOURCE_IDENTITY_MISSING')
-                observed=same_process(identity);proof[role]={'recorded':identity,'now':observed}
-                if observed['status'] not in {'exited','pid_reused'}:
-                    raise core.StopBatch('ORPHAN_RESOURCE_NOT_CONFIRMED_EXITED','旧资源仍在运行或无法确认，不关闭记录。',proof)
-            elif role=='owner' or t.get('model_id'):
-                raise core.StopBatch('ORPHAN_RESOURCE_IDENTITY_MISSING','已登记模型缺少原生进程身份。')
-        if ownership.get('executor'):
-            journal_path=core.no_links(Path(ownership['runtime'])/'runs/executor-state.json')
-            if not journal_path.is_file():raise core.StopBatch('ORPHAN_NATIVE_OUTCOME_UNCONFIRMED','旧请求日志缺失，保留记录。')
-            journal=core.read(journal_path)
-            if journal.get('status')!='idle' or journal.get('recovery_required') is not False or journal.get('executor_pid')!=ownership['executor']['pid'] or journal.get('solidworks_pid')!=ownership['CAD']['pid']:
-                raise core.StopBatch('ORPHAN_NATIVE_OUTCOME_UNCONFIRMED','原生日志未证明旧请求空闲。')
-            proof['native_journal']={'sha256':core.digest(journal_path),'status':'idle','current_owner_attached':False}
-        gate=startup_gate.observe();proof['executor_gate']=gate
-        if gate.get('status')!='available':raise core.StopBatch('ORPHAN_EXECUTOR_GATE_NOT_IDLE','执行器门禁不空闲，不允许下一任务。',gate)
-        integrity=source_integrity.review(t)
-        if not integrity['unchanged']:raise core.StopBatch('SOURCE_CHANGED',diagnostics=integrity)
-        proof.update(restoration_verified=False,source_files_unchanged=True,CAD_calls=0,processes_terminated=False)
+        """Close only metadata after every original resource is proved ended."""
+        if confirmed is not True:
+            raise core.StopBatch('ORPHAN_CLOSE_CONFIRMATION_REQUIRED',
+                '须明确同意保留现有副本文件与失败证据并异常归档；不保存为已验证成果。使用close_unrestored=true、keep_result=false。',
+                {'task_id':t['task_id'],'orphan_review':orphan_close.review(t)})
+        receipt_failure=None
+        if completed_close.has_receipt(t):
+            try:return self.archive_completed_close(t,confirmed)
+            except core.StopBatch as error:
+                if not error.code.startswith('ORPHAN_'):raise
+                receipt_failure={'code':error.code,'message':str(error)}
+        proof=orphan_close.require_retirement(t)
+        if receipt_failure:proof['previous_complete_close_proof_unavailable']=receipt_failure
+        proof['task_record_sha256_before_archive']=core.digest(Path(t['directory'])/'任务状态.json')
         backup=Path(t['directory'])/'关闭前原任务状态.json'
-        if not backup.exists():
-            with backup.open('x',encoding='utf8') as f:json.dump(t,f,ensure_ascii=False,indent=2)
+        if not backup.exists():core.write(backup,t)
         core.write(Path(t['directory'])/'异常收尾核对.json',proof)
-        t.update(closed=True,phase='closed_unverified',busy=False,plan_token_revoked=True,task_outcome='failed_owner_lost',
-            finish={'restoration':None,'restoration_status':'not_verified','session':{'ended':True,'import_checkpoint_restored':False,
+        if t.get('error'):t['original_failure']=json.loads(json.dumps(t['error']))
+        integrity=self._source_review(t)
+        finish={'restoration':None,'restoration_status':'not_verified',
+            'cleanup_status':'resources_ended_native_outcome_unverified',
+            'session':{'ended':True,'import_checkpoint_restored':False,
                 'finish_mode':'failed_record_closed_copy_preserved_without_restore'},
-                'native_exit':{'native_process_exited':True,'exit_code':None,'normal_zero_exit':False},
-                'executor_exit':{'confirmed':True,'executor_exit_code':None,'normal_zero_exit':False},
-                'source_files_unchanged':True,'next_round_allowed':True,'previous_task_passed':False},
-            next_action={'tool':'prepare_mechanism_task','arguments':{'assembly_path':t['source']},
-                'instruction':'旧任务按失败保留，恢复未验证；可创建新的独立副本，不能复用旧方案、基线或令牌。'})
+            'native_exit':{'native_process_exited':True if proof['native_resources_started'] else None,
+                'native_started':proof['native_resources_started'],'exit_code':None,'normal_zero_exit':False},
+            'executor_exit':{'confirmed':True,'executor_exit_code':None,'normal_zero_exit':False},
+            'next_round_allowed':integrity['unchanged'],'previous_task_passed':False,
+            'native_outcome':'unverified_all_bound_resources_ended','CAD_calls':0}
+        t['busy']=False
+        self._settle_closed(t,finish,integrity)
+        if integrity['unchanged']:
+            t.update(phase='closed_unverified',task_outcome='failed_owner_lost',
+                next_action={'tool':'prepare_mechanism_task','arguments':{'assembly_path':t['source']},
+                    'automatic_retry':False,'instruction':'旧任务按失败归档，恢复及正常退出码未验证；可按新的明确任务创建独立副本，不复用旧方案、基线或令牌。'})
         self.save(t)
-        self.prior_unfinished=[p for p in self.prior_unfinished if Path(p)!=Path(t['directory'])/'任务状态.json']
         return {'task_id':t['task_id'],'closed':True,'result':t['finish'],'replayed':False}
     def _settle_closed(self,t,finish,integrity):
         """Native lifecycle and input integrity are independent conclusions."""

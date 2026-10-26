@@ -35,7 +35,7 @@ prepare/plan/execute/finish可能返回 `{ok:true,result:{task_id,accepted:true,
 
 后台失败位于成功查询的`result.error`，采用与同步`error`相同的分类与`next_action`；不能只检查外层`ok=true`。名称歧义可进入`awaiting_component_selection`，AI解释候选后将自然语言选择交给plan复用副本。几何排序不证明意图。
 
-`confirmed`和`scope_confirmed`默认false。不得因工具返回了查询提示、存在候选、或已有旧授权，就自行把它们改为true。`keep_result`仅适用于已验证成果；与`close_unrestored`互斥。关闭失败记录需另行明确同意；旧资源身份、退出与空闲日志未证明时继续阻断。归档失败不等于恢复成功。
+`confirmed`和`scope_confirmed`默认false。不得因工具返回了查询提示、存在候选、或已有旧授权，就自行把它们改为true。`keep_result`仅适用于已验证成果；与`close_unrestored`互斥。关闭失败记录需另行明确同意；旧资源身份、退出与日志绑定未证明时继续阻断。旧日志的空闲状态只用于完整恢复收尾证明，不作为全部资源已结束后的异常归档门槛。归档失败不等于恢复成功。
 
 客户端重连可继续原宿主的活任务；宿主丢失时只能读旧记录，不能从JSON重建COM或复用旧令牌。`get_recovery_state`与`restore_model_checkpoint`仅可对原受管活连接、已结束旧请求、原实例身份与导入检查点一致的任务恢复。恢复独立核对姿态、固定状态和配合数，并撤销旧确认。超时不代表CAD已停止。新源码不得接管活任务。
 
@@ -169,3 +169,14 @@ plan_mechanism_task的assembly_intent仅用于external_gear_pair，包含完整�
 补齐方案可携带native_grid_recommendation：依据已读取的高帧率历史，显式推荐其整数约数作为采样帧率，并在一次性确认前解释请求/推荐采样率与原生输出率的区别。仅受管补齐任务按明确列出该规则的已确认方案启用exact_grid_or_exact_native_subset；普通低层调用默认exact_grid_only。可接受的密集原生网格必须完整、均匀、有限、严格递增，原生帧率为请求采样率整数倍，全部采样时间在原生数组中以原1e-7秒门限匹配；不插值、不近邻取整。time-axis.json保留完整native_time_s、selected_native_indices、selected_time_s和诊断。output_fps在该显式模式下表示实际采集的姿态帧率，原生求解帧率另见solver_settings_after_calculate。冻结回放仅沿用原成功记录绑定的规则；任何缺点、错点、姿态或恢复失败仍拒绝。
 
 补齐模式的支承测量可使用IsFixed=false且由约束保持静止的参考件：须以完整当前采样轨迹逐帧核验1e-7m/1e-6rad静止容差，并记录reference_stationarity_evidence；声明或名称本身不构成证据，不改写固定标志。参考件实际移动、归入转动组或缺采样均拒绝。旧圆边测试卡默认准入保持固定参考要求。
+
+
+## alpha.21 孤儿记录的异常归档
+
+`get_mechanism_task`在原owner丢失时只读返回`orphan_review`，保持持久失败原文，并用`error_context/historical_errors`说明当前查询成功、错误来自历史任务。时间字段仅标注原记录更新时间，不伪造错误产生时刻。缺失或损坏证据仍返回可读的阻断条件；不能据`native_stage=restored`自动迁移为通过。
+
+完整恢复收尾仍走既有严格收据核对。没有完整收据时，须明确授权`close_unrestored=true, keep_result=false`；按PID及创建身份逐一确认原owner、CAD和执行器均已退出或PID已复用，并核对同模型归属、原日志PID绑定及当前门禁空闲。任何仍存活或身份未知的资源、启动中缺失身份、日志不匹配或门禁占用均拒绝。只有明确未启动原生资源且历史干净的任务才允许仅核对owner退出。
+
+全部资源已结束后，日志即使保留active/unknown/recovery_required，也不要求死亡进程回写idle；日志不修改，失败、待处理请求和已执行标志均保留。只关闭元数据并撤销旧令牌，`phase=closed_unverified`、`restoration_status=not_verified`、`previous_task_passed=false`，不调用CAD、恢复、保存或结束进程。源文件变化单独记录为`closed_source_changed`，不能抹掉资源退出事实或宣告原任务通过。新任务必须使用新副本、方案和明确授权。
+
+`get_mechanism_task(collect_evidence=true)`自动采集绑定原任务的外置运行日志和只读资源观测；不借用当前主安装日志，不把诊断采集当成原子原生审计。旧宿主不能热更新；更新前的活动或未知现场继续受保护。

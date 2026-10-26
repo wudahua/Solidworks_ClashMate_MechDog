@@ -171,7 +171,7 @@ class MotionTaskEngine(TaskEngine):
         assembly,settings=prepare_inputs(path,task_kind,motion,speed,duration_s,output_fps,reverse_direction,minimum_travel)
         validate_gear_hints(task_kind,moving,reference)
         with self.lock:
-            if self.prior_unfinished:raise core.StopBatch('PRIOR_TASK_UNCONFIRMED',diagnostics={'records':self.prior_unfinished})
+            if self.prior_unfinished:raise core.StopBatch('PRIOR_TASK_UNCONFIRMED',diagnostics=self.prior_task_diagnostics())
             if self.active:raise core.StopBatch('TASK_SESSION_ACTIVE',diagnostics={'task_id':self.active})
             # Refuse contention before creating an active task that cannot own a CAD session.
             startup_gate.require_idle(self.work/'startup-check')

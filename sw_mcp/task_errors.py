@@ -164,6 +164,22 @@ def task_failure(code, message, diagnostics=None, *, task_id='', asynchronous=Fa
         action.update(tool='get_mechanism_task', arguments={'collect_evidence': True} if host else {'task_id': task_id} if task_id else {})
     if host:
         action['recovery_state_query'] = {'tool': 'get_mechanism_task', 'arguments': {'collect_evidence': True}}
+    elif code == 'PRIOR_TASK_UNCONFIRMED' or code.startswith('ORPHAN_'):
+        selected=task_id or diag.get('task_id') or ((diag.get('blocking_tasks') or [{}])[0].get('task_id',''))
+        selected=selected if re.fullmatch('[a-f0-9]{32}',selected or '') else ''
+        action.update(tool='get_mechanism_task',arguments={'task_id':selected} if selected else {},
+            recovery_state_query={'tool':'get_mechanism_task','arguments':{'task_id':selected} if selected else {}},
+            archive_before_new_prepare=True,
+            archive_confirmation={'tool':'finish_mechanism_task',
+                'arguments':{'task_id':selected,'close_unrestored':True,'keep_result':False},
+                'only_after':'explicit_user_consent_and_all_original_resource_exit_proof',
+                'not_verified_result_save':True},
+            evidence_collection={'tool':'get_mechanism_task','arguments':{'task_id':selected,'collect_evidence':True} if selected else {'collect_evidence':True}})
+        if not selected:
+            action.pop('archive_confirmation',None)
+            action['task_id_readback_required']=True
+        if code == 'ORPHAN_CLOSE_CONFIRMATION_REQUIRED':
+            action['instruction']='向用户说明：仅保留现有副本文件和失败证据并关闭记录，恢复未验证，不另存已验证成果。取得明确授权后以close_unrestored=true、keep_result=false核对归档条件；不得自行确认或强制归档。'
     elif code in {'TASK_OWNER_REQUEST_UNCONFIRMED', 'OWNER_OPERATION_OUTCOME_UNCONFIRMED'}:
         action['recovery_state_query'] = {'tool': 'get_mechanism_task', 'arguments': {'task_id': task_id} if task_id else {}}
     if code == 'ORPHAN_EXECUTOR_GATE_NOT_IDLE':
