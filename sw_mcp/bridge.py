@@ -440,6 +440,35 @@ class Bridge:
         # Do not set idle. Only the verified restore response can lift quarantine.
         return self.request("restore_model_checkpoint", model_id=model_id, checkpoint_id=checkpoint_id)
 
+    def _annotate_constraint_review(self, value):
+        """Advisory evidence, computed once before persisting terminal replies."""
+        if not isinstance(value, dict) or not isinstance(value.get('components'), list) or not isinstance(value.get('mates'), list):
+            return value
+        from sw_mcp import assembly_constraints
+        from sw_mcp.conversation import core
+        try:
+            report = assembly_constraints.analyze(value['components'], value['mates'],
+                inventory_complete=all(c.get('suppressed') is False and c.get('loaded') is True and not c.get('subassembly') and not c.get('speedpak') for c in value['components']),
+                structural_relations=value.get('structural_relations'))
+            if report['status'] == 'unsupported_inventory':
+                return {**value, 'assembly_constraint_review': report}
+            path = self.root/'runs'/'constraint-reviews'/(report['input_sha256']+'.json')
+            core.no_links(path)
+            core.write(path, report)
+            return {**value, 'assembly_constraint_review': {
+                **assembly_constraints.summary(report),
+                'evidence_artifact': {'path': str(path), 'sha256': core.digest(path)},
+                'CAD_calls_added': 0, 'scope': 'saved_native_inspection_no_additional_CAD_dispatch',
+            }}
+        except (OSError, ValueError, TypeError, KeyError, AttributeError, core.StopBatch) as error:
+            # A report or artifact failure must not erase the native response,
+            # quarantine a successful query or invite a repeated CAD operation.
+            return {**value, 'assembly_constraint_review': {
+                'status': 'analysis_unavailable', 'error': type(error).__name__,
+                'native_inspection_preserved': True, 'write_dispatched': False,
+                'motion_verified': False, 'automatic_CAD_retry': False,
+            }}
+
     def _read(self):
         try:
             assert self._process and self._process.stdout
@@ -453,6 +482,8 @@ class Bridge:
                     future = self._pending.get(request_id)
                 state = self.recovery_state()
                 if request_id == state.get("request_id") and state.get("owner_id") == self._owner_id:
+                    if state.get('operation') == 'inspect_model' and response.get('ok'):
+                        response['result'] = self._annotate_constraint_review(response.get('result'))
                     restoration = response.get("error", {}).get("restoration_status", "not_required")
                     if response.get("error", {}).get("code") == "COM_CALL_FAILED" and restoration == "not_required":
                         restoration = "unknown"

@@ -53,3 +53,24 @@ def require_grid(duration, fps):
         raise GridAdmissionError(duration, fps, aligned=False)
     if duration * fps < MINIMUM_INTERVALS - 1e-8:
         raise GridAdmissionError(duration, fps)
+
+
+def recommend_exact_native_subset(duration, requested_fps, component_count, observed_rates):
+    """Recommend a declared sampling grid that exactly divides known source grids.
+
+    This is a proposal, not evidence of a future solve or permission to execute.
+    """
+    rates=sorted({r for r in observed_rates if type(r) is int and r>=max(5,requested_fps)})
+    if not rates:return None
+    candidates=[f for f in range(max(5,requested_fps),121)
+                if all(r%f==0 and abs(duration*r-round(duration*r))<=1e-8 and duration*r+1<=100001 for r in rates)
+                and abs(duration*f-round(duration*f))<=1e-8 and 10<=round(duration*f)<=1800
+                and (round(duration*f)+1)*component_count<=100000]
+    if not candidates:raise ValueError('no_exact_native_subset_within_pose_and_grid_budgets')
+    fps=candidates[0]
+    return {'policy':'exact_grid_or_exact_native_subset','requested_output_fps':requested_fps,
+            'recommended_sampling_fps':fps,'recommendation_changed':fps!=requested_fps,
+            'observed_historical_native_rates':rates,'requires_plan_confirmation':True,
+            'future_native_grid_not_proven':True,'interpolation_allowed':False,
+            'clock_tolerance_s':1e-7,'maximum_native_time_points':100001,
+            'reason':'select_only_existing_native_times_at_integer_stride_no_interpolation_no_nearest_time_rounding'}

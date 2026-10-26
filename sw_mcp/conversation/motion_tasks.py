@@ -198,7 +198,7 @@ class MotionTaskEngine(TaskEngine):
                 next_action={'tool':'plan_mechanism_task','arguments':{'task_id':t['task_id']},
                     'instruction':'AI解释两轴、齿轮、键和固定支承推荐及比例依据；唯一方案自动采用推荐。只在角色或比例无法确定时用自然语言澄清，不让用户填写实体ID。'})
             if suggestion.get('requires_stationary_scope_review'):
-                t['next_action']['instruction']='AI读取scope_review.constraint_inventory区分固定、原生完全约束与待核对附件；仅在用户明确说明哪些组件应静止后，将完整名称列表作为stationary_component_hints生成方案，再确认具体固定和配合变更。不得让用户手抄ID，不得默认固定全部附件，不重复改名称试错。'
+                t['next_action']['instruction']='AI先读取assembly_constraint_review及scope_review，解释已有配合能证明的关系、局部约束缺口与运动归属歧义；集中澄清需要随动或静止的机械分组，不让用户逐个填写73个名称或ID。优先复用已有约束并补最小必要配合；stationary_component_hints只用于用户明确授权的静止仿真简化，不等同于配合补齐，不默认固定附件，不重复改名称试错。'
             if len(suggestion['proposals'])==1:t['next_action']['arguments']['candidate_id']=suggestion['proposals'][0]['candidate_id']
             return
         if t.get('task_kind')=='gear_transmission':
@@ -226,13 +226,13 @@ class MotionTaskEngine(TaskEngine):
         t.pop('component_selection',None)
 
     def plan(self,task_id,candidate_id='',moving_component_hint='',reference_component_hint='',initial_state='saved',alignment_mode='strict',
-             gear_ratio_numerator=0,gear_ratio_denominator=0,input_shaft_hint='',output_shaft_hint='',input_gear_hint='',output_gear_hint='',stationary_component_hints=None):
+             gear_ratio_numerator=0,gear_ratio_denominator=0,input_shaft_hint='',output_shaft_hint='',input_gear_hint='',output_gear_hint='',stationary_component_hints=None,assembly_intent=None):
         t=self.tasks[task_id]
         if t.get('task_kind')=='external_gear_pair':
             from .external_gear_task import propose
             return propose(self,t,candidate_id,initial_state,alignment_mode,moving_component_hint,reference_component_hint,
-                           gear_ratio_numerator,gear_ratio_denominator,{'input_shaft':input_shaft_hint,'output_shaft':output_shaft_hint,'input_gear':input_gear_hint,'output_gear':output_gear_hint},stationary_component_hints)
-        if stationary_component_hints or gear_ratio_numerator or gear_ratio_denominator or input_shaft_hint or output_shaft_hint or input_gear_hint or output_gear_hint:
+                           gear_ratio_numerator,gear_ratio_denominator,{'input_shaft':input_shaft_hint,'output_shaft':output_shaft_hint,'input_gear':input_gear_hint,'output_gear':output_gear_hint},stationary_component_hints,assembly_intent)
+        if assembly_intent is not None or stationary_component_hints or gear_ratio_numerator or gear_ratio_denominator or input_shaft_hint or output_shaft_hint or input_gear_hint or output_gear_hint:
             raise core.StopBatch('EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE','两轴比例或角色补充参数只用于external_gear_pair，不静默忽略。')
         if t.get('task_kind')=='gear_transmission':
             from .gear_transmission import propose
