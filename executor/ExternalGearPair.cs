@@ -9,7 +9,7 @@ public partial class Cad {
     class ExternalGearPlan {
         public string Id,ModelId,Signature;public int Revision;public bool Consumed,Reverse;
         public Dictionary<string,string> Roles,References;
-        public Dictionary<string,string[]> Groups;
+        public Dictionary<string,string[]> Groups;public string[] Stationary;
         public Dictionary<string,double[]> Poses;public Dictionary<string,bool> Fixed;
         public List<ExternalGearAction> Actions=new List<ExternalGearAction>();
         public double Numerator,Denominator;public double[] Axis;
@@ -106,12 +106,15 @@ public partial class Cad {
             var groups=EGDict(rec["groups"]).ToDictionary(v=>v.Key,v=>EGStrings(v.Value));
             if(groups.Count!=2||!groups.ContainsKey("input")||!groups.ContainsKey("output")||groups.Values.Any(v=>v.Length<1||v.Length>6||v.Distinct().Count()!=v.Length)||groups["input"].Intersect(groups["output"]).Any()||groups.Values.Any(v=>v.Contains(roles["body"])))throw new CadFault("EXTERNAL_GEAR_REFERENCE_INVALID","两个轴系分组不能相交，且不能包含固定参考。");
             foreach(string side in new[]{"input","output"})if(!groups[side].Contains(roles[side+"_shaft"])||!groups[side].Contains(roles[side+"_gear"]))throw new CadFault("EXTERNAL_GEAR_REFERENCE_INVALID","轴和齿轮须在对应轴系中。");
-            var allIds=roles.Values.Concat(groups.Values.SelectMany(v=>v)).Distinct().ToArray();var components=allIds.ToDictionary(v=>v,v=>ResolveUserComponent(m,doc,v));
+            var stationary=rec.ContainsKey("stationary_components")?EGStrings(rec["stationary_components"]):new string[0];
+            if(stationary.Length>128||stationary.Distinct().Count()!=stationary.Length||stationary.Intersect(groups.Values.SelectMany(v=>v)).Any())throw new CadFault("EXTERNAL_GEAR_REFERENCE_INVALID","静止侧与转子重叠或声明重复。");
+            var allIds=roles.Values.Concat(groups.Values.SelectMany(v=>v)).Concat(stationary).Distinct().ToArray();var components=allIds.ToDictionary(v=>v,v=>ResolveUserComponent(m,doc,v));
             var moving=groups.Values.SelectMany(v=>v).Distinct().ToArray();var cs=UserComponents(doc);
             if(cs.Length>128||cs.Any(c=>c.IsSuppressed()||c.IsSpeedPak||c.GetModelDoc2()==null||!m.Files.Contains(c.GetPathName(),StringComparer.OrdinalIgnoreCase)))throw new CadFault("EXTERNAL_GEAR_SCOPE_UNSUPPORTED","要求已解析、隔离的顶层零件。");
-            if(!components[roles["body"]].IsFixed()||cs.Any(c=>!moving.Select(v=>components[v].Name2).Contains(c.Name2)&&!c.IsFixed()))throw new CadFault("EXTERNAL_GEAR_SCOPE_UNSUPPORTED","轴系之外必须有明确固定状态，不自动固定未归属零件。");
-            var p=new ExternalGearPlan{Id=Guid.NewGuid().ToString("N"),ModelId=id,Revision=m.Revision,Signature=MateSignature(m,doc),Roles=roles,Groups=groups,Numerator=numerator,Denominator=denominator,
+            if(!components[roles["body"]].IsFixed()&&!stationary.Contains(roles["body"])||cs.Any(c=>!moving.Select(v=>components[v].Name2).Contains(c.Name2)&&!c.IsFixed()&&!stationary.Select(v=>components[v].Name2).Contains(c.Name2)))throw new CadFault("EXTERNAL_GEAR_SCOPE_UNSUPPORTED","轴系外未固定件须有明确静止侧声明，未自动固定未归属零件。");
+            var p=new ExternalGearPlan{Id=Guid.NewGuid().ToString("N"),ModelId=id,Revision=m.Revision,Signature=MateSignature(m,doc),Roles=roles,Groups=groups,Stationary=stationary,Numerator=numerator,Denominator=denominator,
                 References=new Dictionary<string,string>(),Poses=Transforms(doc),Fixed=cs.ToDictionary(c=>c.Name2,c=>c.IsFixed()),ExistingCount=EGAllMates(doc).Length};
+            foreach(string cid in stationary)if(!components[cid].IsFixed())p.Actions.Add(new ExternalGearAction{Kind="fix_declared_stationary",A=cid});
             var description=new List<object>();var gearAxes=new List<double[]>();
             foreach(string side in new[]{"input","output"}) {
                 var shaft=components[roles[side+"_shaft"]];var gear=components[roles[side+"_gear"]];
@@ -119,7 +122,7 @@ public partial class Cad {
                 var shape=MateGeometry(doc,shaftFace,shaft);var axis=(double[])shape["axis_global"];var point=(double[])shape["reference_point_global_m"];
                 if(p.Axis==null)p.Axis=axis;else if(Math.Abs(GTDot(p.Axis,axis))<1-1e-8)throw new CadFault("EXTERNAL_GEAR_SCOPE_UNSUPPORTED","两根轴不平行。");
                 var supportRec=EGDict(EGDict(rec["supports"])[side]);string supportId=(string)supportRec["component_id"];
-                var support=ResolveUserComponent(m,doc,supportId);if(!support.IsFixed()||moving.Contains(supportId))throw new CadFault("EXTERNAL_GEAR_REFERENCE_INVALID","支承参考必须固定且不属于运动组。");components[supportId]=support;
+                var support=ResolveUserComponent(m,doc,supportId);if(!support.IsFixed()&&!stationary.Contains(supportId)||moving.Contains(supportId))throw new CadFault("EXTERNAL_GEAR_REFERENCE_INVALID","支承参考必须固定且不属于运动组。");components[supportId]=support;
                 var supportFace=EGFace(doc,(string)EGDict(supportRec["axis"])["native_reference"],support);var supportShape=MateGeometry(doc,supportFace,support);
                 double gap=GTGap((double[])supportShape["reference_point_global_m"],point,p.Axis);
                 if(gap>1e-5||Math.Abs(GTDot((double[])supportShape["axis_global"],p.Axis))<1-1e-8)throw new CadFault("GEAR_SUPPORT_ALIGNMENT_EXCEEDED","轴与推荐支承轴线不一致，未重定位。",new{side=side,offset_mm=gap*1000});
@@ -185,10 +188,11 @@ public partial class Cad {
                 if(MateSignature(m,doc)!=p.Signature)throw new CadFault("GEAR_PLAN_STALE","检查点探测后初态变化，未修改。");
                 var all=p.Roles.Values.Concat(p.Groups.Values.SelectMany(v=>v)).Distinct().ToDictionary(v=>v,v=>ResolveUserComponent(m,doc,v));
                 var moving=p.Groups.Values.SelectMany(v=>v).Distinct().ToArray();mutating=true;LastOperationRestoration="pending";
+                foreach(string cid in p.Stationary){var c=ResolveUserComponent(m,doc,cid);if(!c.IsFixed()){doc.ClearSelection2(true);if(!c.Select4(false,null,false))throw new CadFault("GEAR_CONSTRAINT_CREATE_FAILED","静止侧选择失败。");ad.FixComponent();doc.ClearSelection2(true);}if(!c.IsFixed())throw new CadFault("GEAR_FIXED_STATE_UNVERIFIED","已确认的静止侧固定未生效。");}
                 foreach(string cid in moving){var c=all[cid];if(c.IsFixed()){doc.ClearSelection2(true);if(!c.Select4(false,null,false))throw new CadFault("GEAR_CONSTRAINT_CREATE_FAILED","解除固定选择失败。");ad.UnfixComponent();doc.ClearSelection2(true);}if(c.IsFixed())throw new CadFault("GEAR_FIXED_STATE_UNVERIFIED","解除指定固定未生效。");}
                 if(testFault)throw new CadFault("CONTROLLED_GEAR_FAULT","验收：普通两轴解除固定后受控回退。");
                 foreach(var action in p.Actions) {
-                    if(action.Kind.StartsWith("reuse_"))continue;
+                    if(action.Kind.StartsWith("reuse_")||action.Kind=="fix_declared_stationary")continue;
                     if(action.Kind=="suppress_existing_for_rigid") {
                         var feature=EGFeature(doc,action.ExistingFeatureId);
                         if(!feature.SetSuppression2(0,1,null)||!EGSuppressed(feature))throw new CadFault("GEAR_CONSTRAINT_CREATE_FAILED","已确认的轴系既有配合压缩未生效。",action.Describe());

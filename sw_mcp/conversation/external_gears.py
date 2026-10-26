@@ -1,6 +1,6 @@
 """Evidence-based two-axis recommendations; never equate a hole diameter to pitch."""
 import itertools,math,re
-from . import core,geometry_audit as g
+from . import core,geometry_audit as g,component_constraints
 
 SCOPE='two_parallel_axis_external_gear_pair_prescribed_ratio_not_contact'
 
@@ -86,9 +86,11 @@ def ratio_recommendation(a,b,design,mates,groups=None):
             'question':'模型未提供可区分的齿数或比例依据。两个齿轮的齿数或希望采用的运动试算传动比是多少？',
             'hole_and_outside_diameters_used_as_pitch_diameters':False}
 
-def recommend(survey,moving_hint='',reference_hint='',role_hints=None):
+def recommend(survey,moving_hint='',reference_hint='',role_hints=None,stationary_hints=None):
     if not survey.get('inventory_complete'):raise core.StopBatch('EXTERNAL_GEAR_SCOPE_UNSUPPORTED','顶层组件未完整解析。',{'skipped':survey.get('skipped')})
     role_hints=role_hints or {}
+    stationary_hints=[] if stationary_hints is None else stationary_hints
+    if not isinstance(stationary_hints,list) or len(stationary_hints)>128 or any(not isinstance(v,str) or not v.strip() or len(v)>256 for v in stationary_hints):raise core.StopBatch("EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE","静止侧声明须为明确组件名称列表。")
     components=survey['components'];design=survey['design_evidence'];gears=[]
     for c in components:
         if not c.get('source_configuration_matches') or not c.get('box'):continue
@@ -107,19 +109,29 @@ def recommend(survey,moving_hint='',reference_hint='',role_hints=None):
             if right_match and not left_match:a,b,aa,ba=b,a,ba,aa
         if role_hints.get('input_gear') and role_hints['input_gear'].casefold() in b['instance'].casefold():a,b,aa,ba=b,a,ba,aa
         if any(text and text.casefold() not in component['instance'].casefold() for key,component in [('input_gear',a),('output_gear',b)] if (text:=role_hints.get(key))):continue
-        try:proposal=pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints)
+        try:proposal=pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints,stationary_hints)
         except core.StopBatch as error:
             issues.append({'input':a['instance'],'output':b['instance'],'code':error.code,'message':str(error),'diagnostics':error.diagnostics});continue
         proposal.update(candidate_id='candidate-'+str(len(proposals)+1),input_selection_reason='建议较小齿数侧或已有长轴作为输入；这是推荐，具体方案确认后执行')
         proposals.append(proposal)
     if not proposals:
+        if len(issues)==1 and issues[0]['code']=='EXTERNAL_GEAR_SCOPE_UNSUPPORTED':
+            issue=issues[0]
+            raise core.StopBatch(issue['code'],'两轴组合已识别，但静止侧约束尚未满足；重复更换名称不能解决此范围阻断。',
+                {'gear_candidates':[c['instance'] for c,a,t in gears],'pair_issues':issues,
+                 **issue['diagnostics'],'name_clarification_can_resolve':False,'write_dispatched':False})
         raise core.StopBatch('EXTERNAL_GEAR_SELECTION_REQUIRED','未找到唯一可用的两轴齿轮方案；AI应依据已有诊断澄清机械用途，不让用户填写实体ID。',
                              {'gear_candidates':[c['instance'] for c,a,t in gears],'pair_issues':issues})
     return {'proposals':proposals,'requires_selection':len(proposals)!=1,'issues':issues,
             'scope':SCOPE,'automatic_selection':'unique_evidence_supported_pair_only','write_dispatched':False}
 
-def pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints=None):
+def pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints=None,stationary_hints=None):
     role_hints=role_hints or {}
+    stationary=[]
+    for hint in stationary_hints or []:
+        matches=[c for c in survey['components'] if c['instance'].casefold()==hint.casefold()]
+        if len(matches)!=1:raise core.StopBatch('EXTERNAL_GEAR_SELECTION_REQUIRED','静止侧名称无法唯一匹配，未模糊替换。',{'hint':hint})
+        if matches[0]['component_id'] not in stationary:stationary.append(matches[0]['component_id'])
     components=survey['components'];gears={a['component_id'],b['component_id']};groups={};axes={};supports={};reasons={}
     for side,gear,axis in [('input',a,aa),('output',b,ba)]:
         candidates=[]
@@ -148,7 +160,7 @@ def pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints=N
         reasons[side]={'shaft_name':shaft['instance'],'gear_name':gear['instance'],'shaft_evidence':'gear_own_axis_no_separate_shaft_found' if shaft['component_id']==gear['component_id'] else 'coaxial_native_cylinders_and_name_or_slender_shape'}
         fixed=[]
         for c in components:
-            if not c['fixed_component'] or c['component_id'] in gears or c['component_id']==shaft['component_id']:continue
+            if not c['fixed_component'] and c['component_id'] not in stationary or c['component_id'] in gears or c['component_id']==shaft['component_id']:continue
             aligned=matches_axis(c,axis['axis'],axis['point'])
             if not aligned:continue
             face=min(aligned['faces'],key=lambda f:abs(f['cylinder_radius_m']-axes[side]['cylinder_radius_m']))
@@ -156,7 +168,16 @@ def pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints=N
             if reference_hint and reference_hint.casefold() not in c['instance'].casefold():continue
             fixed.append((score,c,face))
         fixed.sort(key=lambda row:(row[0],row[1]['instance']))
-        if not fixed:raise core.StopBatch('EXTERNAL_GEAR_SELECTION_REQUIRED','缺少可核验的固定同轴支承参考。',{'side':side})
+        if not fixed:
+            possible=[c for c in components if not c['fixed_component'] and c['component_id'] not in gears|{shaft['component_id']}
+                      and matches_axis(c,axis['axis'],axis['point']) and (not reference_hint or reference_hint.casefold() in c['instance'].casefold())]
+            if possible:
+                raise core.StopBatch('EXTERNAL_GEAR_SCOPE_UNSUPPORTED','存在同轴支承几何候选，但其静止归属尚未声明；未把它当作名称缺失或自动固定。',
+                    {'side':side,'support_geometry_candidates':[c['instance'] for c in possible],
+                     'constraint_inventory':component_constraints.inventory(components,survey['mates'],groups),
+                     'stationary_preparation':{'status':'requires_explicit_mechanical_scope_declaration_then_plan_confirmation',
+                        'candidates':[{'instance':c['instance'],'constraint_state':c.get('constraint_state')} for c in possible],'automatic_fix':False}})
+            raise core.StopBatch('EXTERNAL_GEAR_SELECTION_REQUIRED','缺少可核验的同轴支承几何参考。',{'side':side})
         _,support,face=fixed[0];supports[side]={'component_id':support['component_id'],'instance':support['instance'],'axis':face,
             'reason':'fixed_native_coaxial_reference_not_contact_validation'}
         # Keys are recommended by name + proximity. Unknown small components are
@@ -167,8 +188,13 @@ def pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints=N
             p=center(c);own=radial(p,axis['point'],axis['axis']);other=radial(p,ba['point'] if side=='input' else aa['point'],axis['axis'])
             if own<other-1e-4 and own<max(axes[side]['cylinder_radius_m']*2,.01):groups[side].append(c['component_id'])
     if set(groups['input'])&set(groups['output']):raise core.StopBatch('EXTERNAL_GEAR_SELECTION_REQUIRED','两个刚性组存在重叠组件。')
-    moving=set(groups['input']+groups['output']);outside=[c['instance'] for c in components if not c['fixed_component'] and c['component_id'] not in moving]
-    if outside:raise core.StopBatch('EXTERNAL_GEAR_SCOPE_UNSUPPORTED','推荐两侧之外仍有浮动件，不能自动当作静止件。',{'unassigned_floating_components':outside})
+    moving=set(groups['input']+groups['output'])
+    if moving.intersection(stationary):raise core.StopBatch('EXTERNAL_GEAR_SELECTION_REQUIRED','静止侧声明与推荐转子组重叠，未固定运动件。')
+    outside=[c['instance'] for c in components if not c['fixed_component'] and c['component_id'] not in moving and c['component_id'] not in stationary]
+    if outside:raise core.StopBatch('EXTERNAL_GEAR_SCOPE_UNSUPPORTED','推荐轴系外存在未固定组件；浮动标志不等于存在剩余自由度，未自动固定这些零件。',
+        {'unassigned_floating_components':outside,'constraint_inventory':component_constraints.inventory(components,survey['mates'],groups),
+         'stationary_preparation':{'status':'requires_explicit_mechanical_scope_declaration_then_plan_confirmation','candidates':[{'instance':c['instance'],'constraint_state':c.get('constraint_state')} for c in components if c['instance'] in outside],'automatic_fix':False},
+         'fixed_flag_alone_proves_free_DOF':False,'blanket_fix_recommended':False,'write_dispatched':False})
     by_id={c['component_id']:c for c in components}
     chosen=[any(moving_hint.casefold() in by_id[c]['instance'].casefold() for c in groups[side]) for side in ('input','output')] if moving_hint else None
     if chosen==[False,False]:raise core.StopBatch('EXTERNAL_GEAR_SELECTION_REQUIRED','输入名称线索未匹配到任一推荐轴系。',{'hint':moving_hint})
@@ -182,6 +208,7 @@ def pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints=N
     ratio=ratio_recommendation(a,b,survey['design_evidence'],survey['mates'],groups)
     if ratio['numerator']:ratio['expected_output_over_input']=-ratio['numerator']/ratio['denominator']
     return {'scope':SCOPE,'model_id':survey['model_id'],'reference_state_signature':survey['reference_state_signature'],
+            'stationary_components':stationary,'stationary_scope':[{'component_id':c['component_id'],'instance':c['instance'],'currently_fixed':c['fixed_component']} for c in components if c['component_id'] in stationary],
             'roles':{'input_shaft':groups['input'][0],'input_gear':a['component_id'],'output_shaft':groups['output'][0],
                      'output_gear':b['component_id'],'body':reference},'groups':groups,'shaft_axes':axes,'supports':supports,
             'gear_ratio':ratio,'recommendation_evidence':reasons,'moving_components':[

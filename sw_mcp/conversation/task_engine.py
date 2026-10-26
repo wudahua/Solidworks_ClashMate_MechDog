@@ -428,7 +428,7 @@ class TaskEngine:
         """Retire a pre-execution failed record, never restore/rebind native resources from JSON."""
         if confirmed is not True:raise core.StopBatch('ORPHAN_CLOSE_CONFIRMATION_REQUIRED','原会话已丢失，恢复未验证；须明确同意保留副本并关闭失败记录。')
         if completed_close.has_receipt(t):return self.archive_completed_close(t,confirmed)
-        if t.get('execution_consumed') or t['phase'] not in {'awaiting_confirmation','proposal_ready','awaiting_component_selection','alignment_choice_required','failed'}:
+        if t.get('execution_consumed') or t['phase'] not in {'awaiting_confirmation','proposal_ready','scope_review_required','awaiting_component_selection','alignment_choice_required','failed'}:
             raise core.StopBatch('ORPHAN_NATIVE_OUTCOME_UNCONFIRMED','已执行或阶段不明确的旧任务继续保留，未解除写入保护。')
         from .process_identity import same_process
         folder=core.no_links(Path(t['directory'])/'session')

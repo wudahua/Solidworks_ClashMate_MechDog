@@ -66,6 +66,12 @@ class OrphanCloseTests(unittest.TestCase):
             result=self.other.finish(self.tid,True);restore.assert_not_called()
         self.assertTrue(result['closed']);self.assertFalse(result['result']['previous_task_passed'])
 
+    def test_unexecuted_stationary_scope_review_can_retire_without_restore_claim(self):
+        self.other.tasks[self.tid]['phase']='scope_review_required'
+        result=self.other.finish(self.tid,True)
+        self.assertTrue(result['closed']);self.assertFalse(result['result']['previous_task_passed'])
+        self.assertIsNone(result['result']['restoration'])
+
     def test_pending_or_previously_executed_work_remains_blocked(self):
         self.ownership['in_flight']={'operation':'import_assembly'};core.write(self.folder/'活会话归属.json',self.ownership)
         with self.assertRaises(core.StopBatch):self.other.finish(self.tid,True)

@@ -7,6 +7,7 @@ import time
 from . import core
 
 LABELS = {
+    'import_full_rebuild':'完整重建隔离副本', 'import_rebuild_snapshot':'核对重建前配合与姿态', 'prepare_gear_copy_metadata':'准备副本标准件标记',
     'initializing_solve': '初始化求解', 'motion_preflight': '检查求解条件',
     'native_calculate': '原生 Motion 求解', 'capture_solver_poses': '采集全组件姿态',
     'postprocess_motion': '整理轨迹与验证驱动', 'restore_solve_scope': '恢复求解前状态',
@@ -71,7 +72,7 @@ def _native_record(path, job_id, run_id, started):
 @contextmanager
 def watch_call(session, operation, arguments, interval=2):
     callback = getattr(session, 'on_progress', None)
-    if callback is None or operation not in {'run_user_study','_apply_external_gear_pair','_apply_gear_transmission','restore_model_checkpoint','import_assembly'}:
+    if callback is None or operation not in {'run_user_study','_apply_external_gear_pair','_apply_gear_transmission','restore_model_checkpoint','import_assembly','_import_gear_assembly'}:
         yield
         return
     started = time.time()

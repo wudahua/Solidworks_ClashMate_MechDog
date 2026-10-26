@@ -28,7 +28,7 @@ class CadError(RuntimeError):
 class Bridge:
     """Owns one executor. A timeout never implies that CAD has stopped."""
 
-    LONG_OPERATIONS = frozenset({"_survey_external_gear_pair", "_preview_external_gear_pair", "_apply_external_gear_pair", "_test_external_gear_rollback", "check_interference_during_motion", "run_parameter_search", "diagnose_gear_phase",
+    LONG_OPERATIONS = frozenset({"_import_gear_assembly", "_survey_external_gear_pair", "_preview_external_gear_pair", "_apply_external_gear_pair", "_test_external_gear_rollback", "check_interference_during_motion", "run_parameter_search", "diagnose_gear_phase",
         "import_assembly", "run_user_study", "verify_motion_preservation", "replay_motion_frame",
         "restore_model_checkpoint", "apply_mate", "create_motion_study", "convert_motion_study",
         "reset_study_time", "create_model_checkpoint", "probe_motion_compatibility", "_preview_gear_transmission", "_apply_gear_transmission", "_test_gear_transmission_rollback"})
@@ -532,7 +532,7 @@ class Bridge:
             try:
                 assert self._process and self._process.stdin
                 model_id = params.get("model_id")
-                if operation == "import_assembly" and params.get("import_id"):
+                if operation in {"import_assembly","_import_gear_assembly"} and params.get("import_id"):
                     if not isinstance(params["import_id"], str) or not re.fullmatch(r"[a-f0-9]{32}", params["import_id"]):
                         raise CadError("INVALID_IMPORT_ID", "导入标识无效。", "not_required")
                     model_id = "user_" + params["import_id"]
