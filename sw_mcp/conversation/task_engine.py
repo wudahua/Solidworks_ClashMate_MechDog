@@ -11,6 +11,7 @@ import threading
 import time
 import traceback
 import uuid
+from . import task_execution,task_progress
 
 HERE=Path(__file__).resolve().parent
 
@@ -54,8 +55,8 @@ def release_executor(bridge,folder,timeout=8):
     return receipt
 
 class ConversationSession(mate_worker.Session):
-    def __init__(self,project,folder,runtime_base,moving='',reference='',on_stage=None):
-        self.moving_hint=moving;self.reference_hint=reference;self.on_stage=on_stage;self.initial_inspection=None
+    def __init__(self,project,folder,runtime_base,moving='',reference='',on_stage=None,on_progress=None):
+        self.moving_hint=moving;self.reference_hint=reference;self.on_stage=on_stage;self.on_progress=on_progress;self.initial_inspection=None
         super().__init__(project,folder,runtime_base)
     def state(self,status,message,**kw):
         super().state(status,message,**kw)
@@ -82,8 +83,11 @@ class ConversationSession(mate_worker.Session):
             'committed':getattr(self,'committed',False),'ended':getattr(self,'ended',False),'observed_at':time.time()}
         core.write(path,value)
     def call(self,operation,**kw):
+        if operation=='run_user_study':kw={**kw,'job_id':kw['run_id']}
         self.persist_ownership({'operation':operation,'started':time.time()})
-        try:return super().call(operation,**kw)
+        try:
+            with task_progress.watch_call(self,operation,kw):
+                return super().call(operation,**kw)
         finally:
             self.persist_ownership({})
     def require_live_idle(self):
@@ -304,8 +308,9 @@ class TaskEngine:
             self.tasks[task_id]=t;self.active=task_id
         def operation():
             def stage(status,message):
-                with self.lock:t.update(native_stage=status,message=message);self.save(t)
-            s=self.session_factory(self.project,folder/'session',self.runtime_base,moving=moving,reference=reference,on_stage=stage)
+                task_progress.observe_stage(self,t,status,message)
+            s=self.session_factory(self.project,folder/'session',self.runtime_base,moving=moving,reference=reference,on_stage=stage,
+                on_progress=lambda value:task_progress.observe_call(self,t,value))
             self.sessions[task_id]=s
             recommendations=s.discover(assembly)
             self._proposals(t,recommendations)
@@ -395,9 +400,7 @@ class TaskEngine:
         if t.get('alignment_mode')=='small_translation' and alignment_confirmed is not True:
             raise core.StopBatch('CONFIRMATION_REQUIRED','小幅对齐改变初始姿态，必须取得单独明确同意。',{'separate_alignment_confirmation_required':True,'constraint_write_dispatched':False})
         if t.get('alignment_mode','strict')=='strict' and alignment_confirmed is not False:raise core.StopBatch('INVALID_ALIGNMENT_MODE')
-        if t.get('plan_token')!=plan_token:raise core.StopBatch('PLAN_TOKEN_MISMATCH')
-        if t.get('execution_consumed'):raise core.StopBatch('TASK_ALREADY_EXECUTED','已提交过本方案；AI读取现有结果，不重试写入。')
-        if t['phase']!='awaiting_confirmation':raise core.StopBatch('TASK_NOT_READY_FOR_EXECUTION')
+        task_execution.require_plan_token(t,plan_token)
         t['execution_consumed']=True;t['confirmation']={'confirmed':True,'scope_confirmed':True,'alignment_confirmed':alignment_confirmed,'plan_token':plan_token,'time':time.time()};self.save(t)
         def operation():
             s=self.sessions[task_id]

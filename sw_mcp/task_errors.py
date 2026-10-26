@@ -43,9 +43,12 @@ GROUPS = (
       'MANAGED_RUNTIME_NOT_READY', 'MANAGED_REPLAY_REQUIRES_LIVE_IDLE_TASK'}),
     ('fresh_task_plan_required_no_write_retry',
      'AI核对原任务、已选零件对、引用和一次性令牌；旧方案失效。先读取现场并按安全收尾结论决定重新规划，新方案须重新确认，不换绑旧基线或重放写入。',
-     {'PLAN_TOKEN_MISMATCH', 'CONFIRMED_PAIR_CHANGED', 'MOTION_PROPOSAL_STALE', 'GEAR_PLAN_STALE',
+     {'CONFIRMED_PAIR_CHANGED', 'MOTION_PROPOSAL_STALE', 'GEAR_PLAN_STALE',
       'MATE_RECOMMENDATION_STALE', 'MOTION_BASELINE_PAIR_MISMATCH',
       'MOTION_PAIR_REDISCOVERY_REQUIRED', 'MOTION_AXIS_CHANGED_AFTER_RESET','ALIGNMENT_PROPOSAL_STALE'}),
+    ('task_plan_token_readback_required_no_write_retry',
+     '提交令牌不匹配。AI先用get_mechanism_task读回原任务，核对阶段、方案和已有授权；不能仅凭此码断言方案失效，也不直接重复写入。已消费、过期或归属不明时只读原结果及收尾记录。',
+     {'PLAN_TOKEN_MISMATCH'}),
     ('task_record_selection_required',
      'AI不传task_id调用get_mechanism_task查找现有记录；不猜测ID，不因找不到记录就重复创建或执行任务。',
      {'TASK_NOT_IN_CURRENT_SERVER'}),
@@ -119,7 +122,7 @@ PRE_DISPATCH_CODES = frozenset({
     'INVALID_MOTION_TYPE', 'INVALID_MOTION_PARAMETERS', 'INVALID_MINIMUM_TRAVEL',
     'INVALID_TASK_KIND', 'CONCENTRIC_FIXED_CARD_PARAMETERS', 'INVALID_ASSEMBLY_PATH',
     'INVALID_INITIAL_STATE', 'INVALID_TASK_ID', 'INCOMPATIBLE_FINISH_CHOICES',
-    'TASK_NOT_IN_CURRENT_SERVER', *CONFIRMATION_CODES,
+    'TASK_NOT_IN_CURRENT_SERVER', 'PLAN_TOKEN_MISMATCH', *CONFIRMATION_CODES,
 })
 
 
@@ -144,6 +147,9 @@ def task_failure(code, message, diagnostics=None, *, task_id='', asynchronous=Fa
         status, instruction = TASK_ACTION_CLASSES.get(code, NATIVE_ACTION_CLASSES.get(code, (None, None)))
     if status:
         action.update(options_status=status, instruction=instruction)
+    if code=='PLAN_TOKEN_MISMATCH' and not asynchronous and diag.get('current_plan_still_valid') is True:
+        action.update(instruction='本次输入令牌错误，当前方案未消费且无需重建。AI读取原任务取得当前令牌，逐项核对方案与已有明确授权一致后才可提交；方案或授权改变须重新确认。不得猜令牌，不自动重试写入。',
+                      requires_new_plan=False,readback_required=True,confirmation_must_match_current_proposal=True)
     # Native errors retain their more specific operational_error classifications.
     if code == 'INVALID_TASK_ID':
         value['message'] = 'task_id须为32位小写十六进制；无任务ID时先不传task_id调用get_mechanism_task。'
