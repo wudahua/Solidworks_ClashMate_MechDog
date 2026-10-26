@@ -1,5 +1,5 @@
 {
-  "version": "0.4.3-alpha.20",
+  "version": "0.4.3-alpha.21",
   "kind": "source_only",
   "text_line_endings": "LF",
   "includes_user_cad": false,
@@ -8,18 +8,18 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 19236,
-      "sha256": "728139e7c23983f14df59b83c9ec70112378a1cc4c951fc1c2386696385db1f1"
+      "bytes": 20620,
+      "sha256": "48cfd3ae604dd70325f2f61c1745f041c272af164184fd67a2789d08c7364255"
     },
     {
       "path": "CONTRACT.md",
-      "bytes": 34965,
-      "sha256": "7cfb5762891e306d5cc69cb73c0291f1a903f3c505f9c459811904909b6a3ec3"
+      "bytes": 36809,
+      "sha256": "381fa72956f816400e4b0ac145864aa8b5da451063ec3bffdfb62db84c89576a"
     },
     {
-      "path": "发布说明_v0.4.3-alpha.20.md",
-      "bytes": 5284,
-      "sha256": "5700c1c2617ce7729d45d8e8a2ca05626ea06180c3c3ec4d1ca634af41525389"
+      "path": "发布说明_v0.4.3-alpha.21.md",
+      "bytes": 3311,
+      "sha256": "def1c53cd1f1571990316caa0b6ceae69a4d9aa24604e1e13029c0a153900f4e"
     },
     {
       "path": "LICENSE",
@@ -53,8 +53,8 @@
     },
     {
       "path": "motion_server.py",
-      "bytes": 45606,
-      "sha256": "33cc755ed9b9c2f2d4f5758fce9938e37bbd8186724f07d9523dd74b96ace4b0"
+      "bytes": 45947,
+      "sha256": "7aafda03796a3fe902b6ff33d59105a56e49df20223a2c575279b3f33ae1ee3d"
     },
     {
       "path": "mcp-config.example.json",
@@ -534,7 +534,7 @@
     {
       "path": "executor/UserMotion.cs",
       "bytes": 78486,
-      "sha256": "e1937de52e5edac4757f85775ad6bad8f6e286754ba5d5c1852f8a7b2140fcc7"
+      "sha256": "f85294488f50a472085dd46dd1f087746cbca77a15af3b11c7a7d27372734231"
     },
     {
       "path": "executor/VirtualImport.cs",
@@ -623,8 +623,8 @@
     },
     {
       "path": "sw_mcp/task_errors.py",
-      "bytes": 14837,
-      "sha256": "510036c91854e264845b6cb6b4a398169f7c0ac8d6a06f3736dd64d589dfdd0a"
+      "bytes": 16297,
+      "sha256": "586717746b994be6a1e75f9c44df46f3552d6fb99df1a5c0e8f9656f345cad66"
     },
     {
       "path": "sw_mcp/validation.py",
@@ -664,12 +664,12 @@
     {
       "path": "sw_mcp/conversation/core.py",
       "bytes": 11926,
-      "sha256": "4e560d99fafed862d2b7ebb6ef8a01ed26b2d54c101bc69e341792f93ca41f51"
+      "sha256": "dfbbc64944db387d1d731dabce56e51e695dcdde20eef6926d9664f9578a0a70"
     },
     {
       "path": "sw_mcp/conversation/evidence_bundle.py",
-      "bytes": 3529,
-      "sha256": "160ed24e2b9cbf86efc7b8b6330d33ef33ecae0d22a22a09abfab240f407efc9"
+      "bytes": 6339,
+      "sha256": "f48a2837695c2971f82aad9109d447752cb0db32c750b23305f782380e22b2b9"
     },
     {
       "path": "sw_mcp/conversation/external_gear_task.py",
@@ -733,8 +733,13 @@
     },
     {
       "path": "sw_mcp/conversation/motion_tasks.py",
-      "bytes": 32225,
-      "sha256": "eb6409539a1ab1925c7bf019762a1566f283b177a36cea77cd18ef8f913ecd5a"
+      "bytes": 32221,
+      "sha256": "96620c45b60095e31dc0582781d5d8cce4123a00b09f699af1891115cd8e9b3a"
+    },
+    {
+      "path": "sw_mcp/conversation/orphan_close.py",
+      "bytes": 6318,
+      "sha256": "93e3fc35d4fc04c7bd7475c57ce6c1b67f8c783253331a11d842e68b87e6f749"
     },
     {
       "path": "sw_mcp/conversation/owner_entry.py",
@@ -788,8 +793,8 @@
     },
     {
       "path": "sw_mcp/conversation/task_engine.py",
-      "bytes": 44716,
-      "sha256": "6fcbaeebd829774179d4800c3e33cd1cd5062c2522d968370dfe6b3bdae45cc8"
+      "bytes": 44332,
+      "sha256": "3bc7aa6bf3e315f47fa5de17cca48afaa0545808f2c9f342d5bc1bfb6ca6e855"
     },
     {
       "path": "sw_mcp/conversation/task_execution.py",
@@ -813,8 +818,8 @@
     },
     {
       "path": "tests/test_conversation_orphan.py",
-      "bytes": 6209,
-      "sha256": "b2d17394d95bcd88af9622051b58275c6fe57a1c3a55911b690b8f28e9879fee"
+      "bytes": 13640,
+      "sha256": "271c53c740955c75b4c6a20882f21b414687e3ff60d6dcbf81ca27a977bbe9a4"
     },
     {
       "path": "tests/test_conversation_motion.py",
@@ -929,7 +934,7 @@
     {
       "path": "scripts/build_release.py",
       "bytes": 9746,
-      "sha256": "465cd0257c734cccfc12fbed02965219ada7d2a22d03e63358ac1e7324325d22"
+      "sha256": "cf2dac9cabdf28d0985de786a98eef6da03c5a62aafe9edbb18c9d462de32e6f"
     },
     {
       "path": "scripts/verify_release.py",
