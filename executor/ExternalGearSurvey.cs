@@ -51,7 +51,7 @@ public partial class Cad {
                 var selected=cylinders.OrderByDescending(f=>f.GetArea()).Take(24).Select(f=>{
                     var shape=MateGeometry(doc,f,c);shape["area_m2"]=f.GetArea();shape["native_reference"]=GTReference(doc,f);return shape;
                 }).ToArray();
-                rows.Add(new{component_id=GTComponentId(doc,c),instance=c.Name2,fixed_component=c.IsFixed(),
+                rows.Add(new{component_id=GTComponentId(doc,c),instance=c.Name2,fixed_component=c.IsFixed(),constraint_state=ComponentConstraintObservation(c),
                     transform=(double[])c.GetTotalTransform(false).ArrayData,box=c.GetBox(false,false),
                     face_count=faces.Length,cylindrical_face_count=cylinders.Length,cylinders=selected,
                     cylindrical_faces_truncated=cylinders.Length>selected.Length,geometry_status=faceStatus,design_key=key,

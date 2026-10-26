@@ -1,16 +1,25 @@
 """Formal two-axis external gear task, with recommendation and ratio provenance."""
 import csv,json,math,shutil,uuid
 from pathlib import Path
-from . import core,external_gears as eg,gear_transmission as gt,geometry_audit as g,concentric_card as card,task_execution,task_progress
+from . import core,external_gears as eg,gear_transmission as gt,geometry_audit as g,concentric_card as card,task_execution,task_progress,component_constraints
 
 
 def discover(s):
     s.initial_inspection=s.call('inspect_model',model_id=s.model,detail_level='full')
+    scope=component_constraints.inventory(s.initial_inspection['components'],s.initial_inspection['mates'])
+    core.write(s.folder/'组件约束分类.json',scope)
+    component_constraints.require_import_health(getattr(s,'import_preflight',None),s.folder/'导入.json')
     s.state('recommending','正在读取齿轮设计参数、两轴及固定支承，推荐缺失配合与传动比…')
     survey=s.call('_survey_external_gear_pair',model_id=s.model);s.external_survey=survey
     core.write(s.folder/'两轴齿轮原生证据.json',survey)
+    core.write(s.folder/'组件约束分类.json',component_constraints.inventory(survey['components'],survey['mates']))
     try:value=eg.recommend(survey,s.moving_hint,s.reference_hint)
     except core.StopBatch as error:
+        if error.code=='EXTERNAL_GEAR_SCOPE_UNSUPPORTED':
+            value={'proposals':[],'requires_selection':False,'requires_stationary_scope_review':True,'blocking_code':error.code,'scope':eg.SCOPE,
+                   'scope_review':error.diagnostics,'write_dispatched':False}
+            s.external_recommendation=value;core.write(s.folder/'两轴齿轮推荐.json',value)
+            return {'external_gear_pair':value}
         if error.code not in {'EXTERNAL_GEAR_SELECTION_REQUIRED','EXTERNAL_GEAR_RATIO_AMBIGUOUS'}:raise
         value={'proposals':[],'requires_selection':True,'scope':eg.SCOPE,'mechanical_clarification':{
             'code':error.code,'question':str(error),'details':error.diagnostics},'write_dispatched':False}
@@ -18,15 +27,18 @@ def discover(s):
     return {'external_gear_pair':value}
 
 
-def propose(engine,t,candidate,initial_state,alignment_mode,moving,reference,ratio_numerator,ratio_denominator,role_hints):
+def propose(engine,t,candidate,initial_state,alignment_mode,moving,reference,ratio_numerator,ratio_denominator,role_hints,stationary_hints=None):
     engine._require_session(t['task_id'])
-    if t['phase']!='proposal_ready':raise core.StopBatch('TASK_NOT_READY_FOR_PLAN')
+    if stationary_hints is not None and not isinstance(stationary_hints,list):raise core.StopBatch('EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE','静止侧声明须为名称列表。')
+    if t['phase'] not in {'proposal_ready','scope_review_required'}:raise core.StopBatch('TASK_NOT_READY_FOR_PLAN')
     if initial_state!='saved' or alignment_mode!='strict':raise core.StopBatch('EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE','普通两轴任务使用保存初态；不借用圆边小幅对齐授权。')
     for x in (ratio_numerator,ratio_denominator):
         if type(x) not in (int,float) or not math.isfinite(x) or not 0<=x<=1000:raise core.StopBatch('EXTERNAL_GEAR_RATIO_INVALID')
     if bool(ratio_numerator)!=bool(ratio_denominator):raise core.StopBatch('EXTERNAL_GEAR_RATIO_INVALID','比例分子、分母须一起提供或同时留0使用推荐。')
     s=engine.sessions[t['task_id']]
-    recommendation=eg.recommend(s.external_survey,moving or s.moving_hint,reference or s.reference_hint,role_hints) if moving or reference or any(role_hints.values()) else s.external_recommendation
+    recommendation=eg.recommend(s.external_survey,moving or s.moving_hint,reference or s.reference_hint,role_hints,stationary_hints) if moving or reference or any(role_hints.values()) or stationary_hints else s.external_recommendation
+    if recommendation.get('requires_stationary_scope_review'):
+        raise core.StopBatch('EXTERNAL_GEAR_SCOPE_UNSUPPORTED','先澄清静止附件的机械归属；名称线索不能代替静止侧范围声明。',recommendation['scope_review'])
     cards=recommendation['proposals']
     matches=[r for r in cards if r['candidate_id']==candidate] if candidate else cards
     if len(matches)!=1:raise core.StopBatch('EXTERNAL_GEAR_SELECTION_REQUIRED','存在多个两轴组合，AI按零件用途澄清后选择推荐方案。',{'choices':cards,'mechanical_clarification':recommendation.get('mechanical_clarification')})
@@ -43,12 +55,14 @@ def propose(engine,t,candidate,initial_state,alignment_mode,moving,reference,rat
                   speed_recommendation_reason='avoid_output_angle_aliasing_with_declared_sampling_grid')
     def operation():
         native=s.call('_preview_external_gear_pair',model_id=s.model,recommendation_json=json.dumps(selected,ensure_ascii=False),numerator=n,denominator=d)
+        t.pop('blocking_code',None)
+        t.update(requires_stationary_scope_review=False,scope_review_status='declaration_planned_awaiting_write_confirmation')
         t.update(phase='awaiting_confirmation',plan_token=uuid.uuid4().hex,proposal={**native,'recommendation':eg.public_card(selected),
             'ratio_provenance':ratio if not ratio_numerator else {'source':'explicit_plan_ratio_override','numerator':n,'denominator':d},
             'motion':motion,'one_input_motor_only':True,'requires_explicit_assembly_and_ratio_confirmation':True,
             'constraint_strategy':'reuse_supports_retain_suppress_verified_rotor_pair_mates_and_add_one_rigid_where_needed','pre_setup_motion_preservation_certified':False},
             next_action={'tool':'execute_mechanism_task','arguments':{'task_id':t['task_id'],'plan_token':None},
-                'instruction':'AI说明推荐输入/输出轴、齿轮、键和支承及比例依据，逐项列出复用/新增配合、转子组既有配合的保留压缩及刚性替换、支承旋转锁修改、解除固定及0.01mm预算；若建议降低试算转速明确说明前后值。取得具体方案授权后一次执行，不声称接触或任意齿轮已支持。'})
+                'instruction':'AI须逐项说明stationary_scope中的拟固定组件；静止侧声明不是写入授权，仍须确认当前完整方案。AI说明推荐输入/输出轴、齿轮、键和支承及比例依据，逐项列出复用/新增配合、转子组既有配合的保留压缩及刚性替换、支承旋转锁修改、解除固定及0.01mm预算；若建议降低试算转速明确说明前后值。取得具体方案授权后一次执行，不声称接触或任意齿轮已支持。'})
         t['next_action']['arguments']['plan_token']=t['plan_token'];core.write(s.folder/'两轴齿轮待确认方案.json',t['proposal'])
     return engine._submit(t,'planning',operation)
 

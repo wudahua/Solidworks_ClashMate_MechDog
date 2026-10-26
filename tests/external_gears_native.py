@@ -32,7 +32,7 @@ class ObservedClient(Client):
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--assembly',type=Path,action='append',required=True)
     parser.add_argument('--output',type=Path,required=True);parser.add_argument('--runtime-base',type=Path,required=True)
-    parser.add_argument('--rollback',action='store_true');args=parser.parse_args()
+    parser.add_argument('--stationary-component',action='append',default=[]);parser.add_argument('--rollback',action='store_true');args=parser.parse_args()
     assert not (ROOT/'runs/executor-state.json').exists(),'Use a clean isolated installation; retain historical journals.'
     folder=core.no_links(args.output);folder.mkdir(parents=True,exist_ok=False);work=folder/'work'
     sources=[core.no_links(p) for p in args.assembly];before={str(p):core.fixture_hashes(p) for p in sources}
@@ -70,8 +70,9 @@ def main():
             reverse=index%2==1
             print('EXTERNAL GEAR ROUND',index+1,str(source),flush=True)
             tid=c.tool('prepare_mechanism_task',assembly_path=str(source),task_kind='external_gear_pair',reverse_direction=reverse)['task_id']
-            prepared=c.wait(tid);assert prepared['phase']=='proposal_ready',prepared
-            c.tool('plan_mechanism_task',task_id=tid);planned=c.wait(tid);core.write(folder/f'round-{index+1}-plan.json',planned)
+            prepared=c.wait(tid);assert prepared['phase'] in {'proposal_ready','scope_review_required'},prepared
+            core.write(folder/f'round-{index+1}-prepared.json',prepared)
+            c.tool('plan_mechanism_task',task_id=tid,stationary_component_hints=args.stationary_component);planned=c.wait(tid);core.write(folder/f'round-{index+1}-plan.json',planned)
             assert planned['phase']=='awaiting_confirmation',planned
             if owner is None:
                 owner=planned['server_instance_id'];assert c.close();c=ObservedClient(ROOT,work,args.runtime_base,folder/'frontend2',entry=ROOT/'motion_server.py')
