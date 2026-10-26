@@ -107,9 +107,8 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
     engine._require_session(t['task_id'])
     if confirmed is not True or scope_confirmed is not True:raise core.StopBatch('CONFIRMATION_REQUIRED','须明确同意完整泵轴系准备、解除固定及比例传动验证。')
     if alignment_confirmed is not False:raise core.StopBatch('INVALID_ALIGNMENT_MODE','本方案的装配位移预算在完整轴系方案中确认，不借用单圆边对齐令牌。')
-    if t.get('plan_token')!=token:raise core.StopBatch('PLAN_TOKEN_MISMATCH')
-    if t.get('execution_consumed'):raise core.StopBatch('TASK_ALREADY_EXECUTED')
-    if t['phase']!='awaiting_confirmation':raise core.StopBatch('TASK_NOT_READY_FOR_EXECUTION')
+    from . import task_execution,task_progress
+    task_execution.require_plan_token(t,token)
     t['execution_consumed']=True;t['confirmation']={'confirmed':True,'scope_confirmed':True,'assembly_setup_confirmed':True};engine.save(t)
     def operation():
         s=engine.sessions[t['task_id']];p=t['motion_parameters'];proposal=t['proposal'];validate_roles(proposal)
@@ -132,7 +131,8 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
             raise core.StopBatch('GEAR_FIXED_STATE_UNVERIFIED')
         s.capture_applied_result();runs=[]
         for number in (1,2):
-            s.state('solving','正在以长轴单马达求解完整比例传动，核对六个运动件及固定件…')
+            task_progress.start_round(engine,t,number,2)
+            s.state('solving',f'第{number}/2轮独立求解：核对完整比例传动六个运动件及固定件…')
             run=s.call('run_user_study',model_id=s.model,study=study,duration_s=p['duration_s'],output_fps=p['output_fps'],run_id=uuid.uuid4().hex)
             core.write(s.folder/f'完整传动求解-{number}.json',run)
             if run.get('result_validity')!='verified' or run.get('restoration_status')!='restored' or run.get('source_files_unchanged') is not True or run.get('error_code'):

@@ -1,7 +1,7 @@
 """Formal two-axis external gear task, with recommendation and ratio provenance."""
 import csv,json,math,shutil,uuid
 from pathlib import Path
-from . import core,external_gears as eg,gear_transmission as gt,geometry_audit as g,concentric_card as card
+from . import core,external_gears as eg,gear_transmission as gt,geometry_audit as g,concentric_card as card,task_execution,task_progress
 
 
 def discover(s):
@@ -102,9 +102,7 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
     engine._require_session(t['task_id'])
     if confirmed is not True or scope_confirmed is not True:raise core.StopBatch('CONFIRMATION_REQUIRED','须确认推荐角色、比例、补配合及旋转状态修改。')
     if alignment_confirmed is not False:raise core.StopBatch('EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE')
-    if token!=t.get('plan_token'):raise core.StopBatch('PLAN_TOKEN_MISMATCH')
-    if t.get('execution_consumed'):raise core.StopBatch('TASK_ALREADY_EXECUTED')
-    if t['phase']!='awaiting_confirmation':raise core.StopBatch('TASK_NOT_READY_FOR_EXECUTION')
+    task_execution.require_plan_token(t,token)
     t['execution_consumed']=True;t['confirmation']={'confirmed':True,'scope_confirmed':True,'assembly_and_ratio_confirmed':True};engine.save(t)
     def operation():
         s=engine.sessions[t['task_id']];proposal=t['proposal'];p=proposal['motion'];roles=proposal['roles'];groups=proposal['groups']
@@ -122,11 +120,13 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
         if len(current['mates'])!=applied['native_parameters']['reported_mate_count'] or {c['component_id'] for c in components if not c['fixed_component']}!=set(groups['input']+groups['output']):raise core.StopBatch('GEAR_FIXED_STATE_UNVERIFIED')
         s.capture_applied_result();runs=[];ratio_abs=proposal['gear_ratio']['numerator']/proposal['gear_ratio']['denominator']
         for n in (1,2):
-            s.state('solving','正在核对两侧整组转角、已确认传动比、材料轴线与固定件轨迹…')
+            task_progress.start_round(engine,t,n,2)
+            s.state('solving',f'第{n}/2轮独立求解：核对两侧整组转角、传动比、材料轴线与固定件轨迹…')
             run=s.call('run_user_study',model_id=s.model,study=study,duration_s=p['duration_s'],output_fps=p['output_fps'],run_id=uuid.uuid4().hex)
             core.write(s.folder/f'两轴求解-{n}.json',run)
             if run.get('result_validity')!='verified' or run.get('restoration_status')!='restored' or run.get('source_files_unchanged') is not True or run.get('error_code'):raise core.StopBatch(run.get('error_code') or 'GEAR_MOTION_EVIDENCE_FAILED',diagnostics=run)
             target=s.folder/f'两轴姿态-{n}.csv';shutil.copyfile(s.runtime/'runs'/run['run_id']/'component-poses.csv',target)
+            s.state('auditing',f'第{n}/2轮求解已返回，正在独立审计；整项任务尚未通过。')
             proof=audit(target,roles,groups,axis,p,components,applied,ratio_abs);core.write(s.folder/f'两轴独立验证-{n}.json',proof)
             runs.append({'run_id':run['run_id'],'path':str(target),'sha256':core.digest(target),'audit':proof})
         repeat=core.compare_pose_files(runs[0]['path'],runs[1]['path'])
@@ -135,7 +135,9 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
         with curve.open('w',encoding='utf-8-sig',newline='') as out:
             writer=csv.writer(out);writer.writerow(['time_s',*[cid+'_deg' for cid in ids]])
             for f in range(runs[0]['audit']['frames']):writer.writerow([f/p['output_fps'],*[runs[0]['audit']['angles_by_component'][cid][f] for cid in ids]])
-        t.update(phase='verified',verification={'scope':eg.SCOPE,'declared_scope_passed':True,'runs':runs,'repeatability':repeat,'roles':roles,'groups':groups,
+        t['progress'].update(completed_rounds=2,stage='verified',verification_passed=True,
+                             stage_source='task_verification',native_progress_observed=False)
+        t.update(phase='verified',native_stage='verified',message='两轮求解、独立审计与重复性均通过；等待恢复或保留成果收尾。',verification={'scope':eg.SCOPE,'declared_scope_passed':True,'runs':runs,'repeatability':repeat,'roles':roles,'groups':groups,
             'gear_ratio':proposal['gear_ratio'],'ratio_provenance':proposal['ratio_provenance'],'motion':p,
             'baseline_run_id':runs[0]['run_id'],'after_run_id':runs[1]['run_id'],'curve':{'path':str(curve),'sha256':core.digest(curve),'quantity':'signed_rotation_deg_about_common_native_axis_relative_fixed_reference'},
             'contact_or_tooth_geometry_validated':False,'whole_mechanism_or_DOF_certified':False,'pre_setup_motion_preservation_certified':False},

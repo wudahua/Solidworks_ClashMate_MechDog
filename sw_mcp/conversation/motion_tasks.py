@@ -2,7 +2,7 @@
 import hashlib,json,math,time,uuid
 from pathlib import Path
 from .task_engine import TaskEngine,ConversationSession,core,matching_components,mechanical_choices
-from . import mate_motion,startup_gate,source_integrity
+from . import mate_motion,startup_gate,source_integrity,task_execution,task_progress
 from sw_mcp.native_grid import require_grid
 
 
@@ -183,8 +183,9 @@ class MotionTaskEngine(TaskEngine):
             self.tasks[tid]=t;self.active=tid
         def operation():
             def stage(status,message):
-                with self.lock:t.update(native_stage=status,message=message);self.save(t)
-            s=self.session_factory(self.project,folder/'session',self.runtime_base,moving=moving,reference=reference,on_stage=stage)
+                task_progress.observe_stage(self,t,status,message)
+            s=self.session_factory(self.project,folder/'session',self.runtime_base,moving=moving,reference=reference,on_stage=stage,
+                on_progress=lambda value:task_progress.observe_call(self,t,value))
             s.task_kind=task_kind;s.motion_parameters=settings;self.sessions[tid]=s
             self._proposals(t,s.discover(assembly))
         return self._submit(t,'preparing',operation)
@@ -280,9 +281,7 @@ class MotionTaskEngine(TaskEngine):
         if alignment_confirmed is not False:raise core.StopBatch('INVALID_ALIGNMENT_MODE')
         self._require_session(task_id)
         if confirmed is not True or scope_confirmed is not True:raise core.StopBatch('CONFIRMATION_REQUIRED')
-        if t.get('execution_consumed'):raise core.StopBatch('TASK_ALREADY_EXECUTED')
-        if t.get('plan_token')!=plan_token:raise core.StopBatch('PLAN_TOKEN_MISMATCH')
-        if t['phase']!='awaiting_confirmation':raise core.StopBatch('TASK_NOT_READY_FOR_EXECUTION')
+        task_execution.require_plan_token(t,plan_token)
         t['execution_consumed']=True;t['confirmation']={'confirmed':True,'scope_confirmed':True,'at':time.time()};self.save(t)
         def operation():
             s=self.sessions[task_id];p=t['motion_parameters'];r=s.motion_candidates[t['selected_index']]

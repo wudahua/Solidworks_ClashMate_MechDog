@@ -220,6 +220,19 @@ class TaskTests(unittest.TestCase):
         self.engine.plan(self.tid,gear_ratio_numerator=1000,gear_ratio_denominator=6);p=self.wait()['proposal']
         self.assertTrue(p['motion']['speed_recommendation_changed']);self.assertEqual(p['motion']['requested_speed_rpm'],12)
         self.assertAlmostEqual(p['motion']['speed'],1.2);self.assertEqual(p['ratio_provenance']['source'],'explicit_plan_ratio_override')
+    def test_wrong_token_readback_uses_original_plan_once_without_replanning(self):
+        self.engine.plan(self.tid);planned=self.wait();token=planned['plan_token']
+        with self.assertRaises(core.StopBatch) as error:self.engine.execute(self.tid,'wrong',True,True)
+        self.assertEqual(error.exception.code,'PLAN_TOKEN_MISMATCH')
+        self.assertTrue(error.exception.diagnostics['current_plan_still_valid'])
+        current=self.engine.get(self.tid)
+        self.assertEqual(current['phase'],'awaiting_confirmation');self.assertEqual(current['plan_token'],token)
+        self.assertNotIn('execution_consumed',current)
+        self.assertEqual([op for op,a in self.engine.sessions[self.tid].calls],['_preview_external_gear_pair'])
+        self.engine.execute(self.tid,current['plan_token'],True,True);self.wait()
+        with self.assertRaises(core.StopBatch) as error:self.engine.execute(self.tid,'wrong',True,True)
+        self.assertEqual(error.exception.code,'TASK_ALREADY_EXECUTED')
+        self.assertEqual(sum(op=='_apply_external_gear_pair' for op,a in self.engine.sessions[self.tid].calls),1)
     def test_invalid_ratio_or_other_mode_does_not_queue_native_preview(self):
         for kwargs in ({'gear_ratio_numerator':-1},{'gear_ratio_numerator':20},{'gear_ratio_denominator':float('nan')},{'alignment_mode':'small_translation'}):
             with self.subTest(kwargs=kwargs),self.assertRaises(core.StopBatch):self.engine.plan(self.tid,**kwargs)
