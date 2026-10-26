@@ -33,12 +33,13 @@ public partial class Cad {
         if(feature!=null)issues.Add(new{code="FEATURE_LIMIT",limit=256});
         return new{properties=properties,patterns=patterns,features=features,issues=issues,configuration_observed=part.ConfigurationManager.ActiveConfiguration.Name,requested_configuration=configuration};
     }
-    public object SurveyExternalGearPair(string id) {
+    public object SurveyExternalGearPair(string id,bool includeCompletionReferences=false) {
         var m=GetUserModel(id);var clock=Stopwatch.StartNew();
         using(var scope=new Scope(this,m.Path,null))using(var batch=new NativeCommandBatch(()=>Sw.CommandInProgress,v=>Sw.CommandInProgress=v)) {
             var doc=scope.Doc;var cs=UserComponents(doc);
             if(cs.Length>128)throw new CadFault("EXTERNAL_GEAR_SCOPE_UNSUPPORTED","首版两轴推荐限128个顶层零件。",new{components=cs.Length});
             var rows=new List<object>();var design=new Dictionary<string,object>();var skipped=new List<object>();
+            var completionTemplates=new Dictionary<string,List<CompletionPlaneTemplate>>();
             string signature=MateSignature(m,doc);
             foreach(var c in cs) {
                 var part=c.GetModelDoc2() as IModelDoc2;
@@ -55,6 +56,7 @@ public partial class Cad {
                     transform=(double[])c.GetTotalTransform(false).ArrayData,box=c.GetBox(false,false),
                     face_count=faces.Length,cylindrical_face_count=cylinders.Length,cylinders=selected,
                     cylindrical_faces_truncated=cylinders.Length>selected.Length,geometry_status=faceStatus,design_key=key,
+                    completion_planes=includeCompletionReferences?CompletionPlaneReferences(doc,c,completionTemplates):new object[0],
                     source_configuration_matches=part.ConfigurationManager.ActiveConfiguration.Name==c.ReferencedConfiguration});
             }
             var mates=Json.Deserialize<List<Dictionary<string,object>>>(Json.Serialize(UserMates(doc)));
@@ -69,10 +71,11 @@ public partial class Cad {
                         readback_adapter=adapter?"SW34_reciprocal_definition_getters_pose_calibrated":"unvalidated_native_definition"};
                 }
             }
+            var structuralRelations=AssemblyStructureObservation(doc);
             bool unchanged=signature==MateSignature(m,doc);
             if(!unchanged)throw new CadFault("GEAR_PLAN_STALE","只读推荐期间初态变化，未写入。",new{write_dispatched=false});
             return new{model_id=id,model_revision=m.Revision,reference_state_signature=signature,components=rows,
-                design_evidence=design,mates=mates,skipped=skipped,inventory_complete=skipped.Count==0,
+                design_evidence=design,mates=mates,structural_relations=structuralRelations,skipped=skipped,inventory_complete=skipped.Count==0,
                 elapsed_ms=clock.Elapsed.TotalMilliseconds,write_dispatched=false,contact_or_tooth_geometry_validated=false,
                 recommendation_scope="two_parallel_axis_external_gear_pair_evidence_not_arbitrary_transmission"};
         }

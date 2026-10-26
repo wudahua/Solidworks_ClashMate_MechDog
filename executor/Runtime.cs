@@ -13,7 +13,7 @@ public partial class Cad {
     class Run {
         public string Id,Path,Study,Fingerprint,Directory,Assembly,ModelRoot;
         public int EditVersion;
-        public bool Generic;
+        public bool Generic,AllowNativeGridSubset;
         public Dictionary<string,string> ComponentNames;
         public double Duration;
         public int Fps;
@@ -112,7 +112,7 @@ public partial class Cad {
             }
         }
     }
-    static string[] Names(IMotionStudyManager mgr) { return ((object[])mgr.GetMotionStudyNames()).Cast<string>().ToArray(); }
+    static string[] Names(IMotionStudyManager mgr) { return (mgr.GetMotionStudyNames() as object[]??new object[0]).Cast<string>().ToArray(); }
     static Dictionary<string,double[]> Transforms(IModelDoc2 d) { return ReadTransforms(d,null); }
     static Dictionary<string,double[]> ReadTransforms(IModelDoc2 d,Dictionary<string,object> profile) {
         var timer=System.Diagnostics.Stopwatch.StartNew();var components=((object[])((IAssemblyDoc)d).GetComponents(false)).Cast<IComponent2>().ToArray();long inventory=timer.ElapsedTicks,flags=0,names=0,transforms=0,arrays=0;int reads=0;
@@ -331,7 +331,7 @@ public partial class Cad {
         string op=(string)request["op"];var p=(Dictionary<string,object>)request["params"];
         activeJobId=p.ContainsKey("job_id")?(string)p["job_id"]:null;activeRequestId=request.ContainsKey("id")?request["id"] as string:null;
         switch(op) {
-            case "_survey_external_gear_pair": return SurveyExternalGearPair((string)p["model_id"]);
+            case "_survey_external_gear_pair": return SurveyExternalGearPair((string)p["model_id"],p.ContainsKey("include_completion_references")&&Convert.ToBoolean(p["include_completion_references"]));
             case "_preview_external_gear_pair": return PreviewExternalGearPair((string)p["model_id"],(string)p["recommendation_json"],Convert.ToDouble(p["numerator"]),Convert.ToDouble(p["denominator"]));
             case "_apply_external_gear_pair": return ApplyExternalGearPair((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));
             case "_test_external_gear_rollback": return ApplyExternalGearPair((string)p["plan_id"],true,true);
@@ -355,7 +355,7 @@ public partial class Cad {
             case "list_drive_candidates": return UserDriveCandidates((string)p["model_id"],p.ContainsKey("component_id")?(string)p["component_id"]:"",p.ContainsKey("kind")?(string)p["kind"]:"",p.ContainsKey("limit")?Convert.ToInt32(p["limit"]):20,p.ContainsKey("cursor")?(string)p["cursor"]:null,p.ContainsKey("group_faces")?Convert.ToBoolean(p["group_faces"]):true,p.ContainsKey("detail_level")&&(string)p["detail_level"]=="compact",p.ContainsKey("face_offset")?Convert.ToInt32(p["face_offset"]):0,p.ContainsKey("mate_context_budget_s")?Convert.ToDouble(p["mate_context_budget_s"]):10,p.ContainsKey("geometry_scan_budget_s")?Convert.ToDouble(p["geometry_scan_budget_s"]):10);
             case "create_motion_study": return CreateUserStudy((string)p["model_id"],(string)p["study"],(string)p["component_id"],(string)p["entity_id"],(string)p["motor_type"],Convert.ToDouble(p["speed"]),Convert.ToBoolean(p["reverse_direction"]),p.ContainsKey("reference_component_id")?(string)p["reference_component_id"]:"",p.ContainsKey("duration_s")?Convert.ToDouble(p["duration_s"]):1,p.ContainsKey("output_fps")?Convert.ToInt32(p["output_fps"]):30);
             case "convert_motion_study": return ConvertUserStudy((string)p["model_id"],(string)p["study"]);
-            case "run_user_study": return RunUserStudy((string)p["model_id"],(string)p["study"],Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"]);
+            case "run_user_study": return RunUserStudy((string)p["model_id"],(string)p["study"],Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"],false,p.ContainsKey("allow_native_grid_subset")&&p["allow_native_grid_subset"] is bool&&(bool)p["allow_native_grid_subset"]);
             case "get_motion_summary": return UserRunSummary((string)p["run_id"]);
             case "export_motion_curve": return ExportUserCurve((string)p["run_id"],(string)p["component_id"],(string)p["quantity"],(string)p["axis"]);
             case "replay_motion_frame": if(p.ContainsKey("use_input_snapshot")&&Convert.ToBoolean(p["use_input_snapshot"]))return ReplayFrozenSnapshot((string)p["run_id"],Convert.ToInt32(p["frame"]));return ReplayUserFrame((string)p["run_id"],Convert.ToInt32(p["frame"]),p.ContainsKey("diagnostic_limit")?Convert.ToInt32(p["diagnostic_limit"]):20);

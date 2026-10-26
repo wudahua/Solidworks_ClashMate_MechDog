@@ -170,6 +170,26 @@ class MotionEvidenceTests(unittest.TestCase):
         case[9]()
         with self.assertRaises(core.StopBatch) as error:task.audit(*case[:8])
         self.assertGreater(error.exception.diagnostics['rotor_relative_angle_errors_deg']['output'],35)
+    def test_constrained_unfixed_support_requires_observed_stationary_trajectory(self):
+        case=pose_fixture(self.folder,.5);axes=case[6]
+        for side in ('input','output'):axes['support_axes'][side]['fixed_component']=False
+        with self.assertRaises(core.StopBatch):task.audit(*case[:8])
+        axes['constraint_completion']=True
+        proof=task.audit(*case[:8]);self.assertTrue(proof['passed'])
+        for evidence in proof['support_stationarity_evidence'].values():
+            self.assertEqual(evidence['admission'],'observed_stationary_full_sampled_trajectory')
+            self.assertEqual(evidence['checked_frames'],31);self.assertTrue(evidence['fixed_flag_not_overridden'])
+        self.assertFalse(axes['support_axes']['input']['fixed_component'])
+
+    def test_unfixed_support_with_actual_motion_is_never_admitted(self):
+        case=pose_fixture(self.folder,.5);axes=case[6];axes['constraint_completion']=True
+        for side in ('input','output'):axes['support_axes'][side]['fixed_component']=False
+        for row in case[8]:
+            if row['component_id']=='body' and row['frame']==30:row['x_m']+=.0001
+        case[9]()
+        with self.assertRaises(core.StopBatch) as error:task.audit(*case[:8])
+        self.assertEqual(error.exception.diagnostics['cause'],'REFERENCE_NOT_STATIONARY_IN_SAMPLED_TRAJECTORY')
+
     def test_wrong_ratio_key_slip_fixed_motion_and_axial_drift_fail(self):
         for fault in ('ratio','key','fixed','axial'):
             case=pose_fixture(self.folder,.5)
@@ -237,6 +257,26 @@ class TaskTests(unittest.TestCase):
         for kwargs in ({'gear_ratio_numerator':-1},{'gear_ratio_numerator':20},{'gear_ratio_denominator':float('nan')},{'alignment_mode':'small_translation'}):
             with self.subTest(kwargs=kwargs),self.assertRaises(core.StopBatch):self.engine.plan(self.tid,**kwargs)
         self.assertEqual(self.engine.sessions[self.tid].calls,[])
+    def test_new_study_suppression_drift_blocks_solve_and_result_checkpoint(self):
+        self.engine.plan(self.tid);planned=self.wait();proposal=planned['proposal'];session=self.engine.sessions[self.tid]
+        case=pose_fixture(self.folder);components=case[5];operations=[]
+        def call(operation,**args):
+            operations.append(operation)
+            if operation=='_apply_external_gear_pair':
+                return {'roles':proposal['roles'],'groups':proposal['groups'],'native_parameters':{'verified':True,'reported_mate_count':1},
+                    'drive':{'axis_global':[0,0,1],'entity_id':'drive'},'axis_global':[0,0,1],
+                    'observed_mate_suppression':{'99':False}}
+            if operation=='inspect_model':return {'components':components,'mates':[{'native_feature_id':99,'suppressed':True}]}
+            if operation=='create_motion_study':return {'fixture':'activation_reapplied_an_old_suppression_track'}
+            raise AssertionError('must not dispatch '+operation)
+        session.call=call
+        session.capture_applied_result=lambda: self.fail('must not freeze a constraint-drifted result')
+        self.engine.execute(self.tid,planned['plan_token'],True,True);failed=self.wait()
+        self.assertEqual(failed['error']['code'],'GEAR_PARAMETERS_UNVERIFIED')
+        self.assertEqual(failed['error']['diagnostics']['stage'],'new_motion_study_constraint_mask')
+        self.assertFalse(failed['error']['diagnostics']['solve_dispatched'])
+        self.assertNotIn('run_user_study',operations)
+
     def test_motion_limits_remain_checked_before_native_start(self):
         for changes in ({'speed':61},{'minimum_travel':1},{'motion':'linear'}):
             with self.subTest(changes=changes),self.assertRaises(core.StopBatch):prepare_inputs(str(self.source),task_kind='external_gear_pair',**changes)

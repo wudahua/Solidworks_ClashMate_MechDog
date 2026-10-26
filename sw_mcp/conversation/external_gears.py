@@ -1,6 +1,7 @@
 """Evidence-based two-axis recommendations; never equate a hole diameter to pitch."""
 import itertools,math,re
 from . import core,geometry_audit as g,component_constraints
+from .. import assembly_constraints
 
 SCOPE='two_parallel_axis_external_gear_pair_prescribed_ratio_not_contact'
 
@@ -86,7 +87,7 @@ def ratio_recommendation(a,b,design,mates,groups=None):
             'question':'模型未提供可区分的齿数或比例依据。两个齿轮的齿数或希望采用的运动试算传动比是多少？',
             'hole_and_outside_diameters_used_as_pitch_diameters':False}
 
-def recommend(survey,moving_hint='',reference_hint='',role_hints=None,stationary_hints=None):
+def recommend(survey,moving_hint='',reference_hint='',role_hints=None,stationary_hints=None,intent_groups=None):
     if not survey.get('inventory_complete'):raise core.StopBatch('EXTERNAL_GEAR_SCOPE_UNSUPPORTED','顶层组件未完整解析。',{'skipped':survey.get('skipped')})
     role_hints=role_hints or {}
     stationary_hints=[] if stationary_hints is None else stationary_hints
@@ -109,7 +110,8 @@ def recommend(survey,moving_hint='',reference_hint='',role_hints=None,stationary
             if right_match and not left_match:a,b,aa,ba=b,a,ba,aa
         if role_hints.get('input_gear') and role_hints['input_gear'].casefold() in b['instance'].casefold():a,b,aa,ba=b,a,ba,aa
         if any(text and text.casefold() not in component['instance'].casefold() for key,component in [('input_gear',a),('output_gear',b)] if (text:=role_hints.get(key))):continue
-        try:proposal=pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints,stationary_hints)
+        if intent_groups and b['component_id'] in intent_groups['input'] and a['component_id'] in intent_groups['output']:a,b,aa,ba=b,a,ba,aa
+        try:proposal=pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints,stationary_hints,intent_groups)
         except core.StopBatch as error:
             issues.append({'input':a['instance'],'output':b['instance'],'code':error.code,'message':str(error),'diagnostics':error.diagnostics});continue
         proposal.update(candidate_id='candidate-'+str(len(proposals)+1),input_selection_reason='建议较小齿数侧或已有长轴作为输入；这是推荐，具体方案确认后执行')
@@ -125,7 +127,7 @@ def recommend(survey,moving_hint='',reference_hint='',role_hints=None,stationary
     return {'proposals':proposals,'requires_selection':len(proposals)!=1,'issues':issues,
             'scope':SCOPE,'automatic_selection':'unique_evidence_supported_pair_only','write_dispatched':False}
 
-def pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints=None,stationary_hints=None):
+def pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints=None,stationary_hints=None,intent_groups=None):
     role_hints=role_hints or {}
     stationary=[]
     for hint in stationary_hints or []:
@@ -187,12 +189,18 @@ def pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints=N
             if not any(word in c['instance'].casefold() for word in ('key','键','鍵')):continue
             p=center(c);own=radial(p,axis['point'],axis['axis']);other=radial(p,ba['point'] if side=='input' else aa['point'],axis['axis'])
             if own<other-1e-4 and own<max(axes[side]['cylinder_radius_m']*2,.01):groups[side].append(c['component_id'])
+    if intent_groups:
+        for side in ('input','output'):
+            if not set(groups[side]).issubset(intent_groups[side]):raise core.StopBatch('EXTERNAL_GEAR_SELECTION_REQUIRED','已声明运动组与推荐轴、齿轮或键不符。',{'side':side})
+        groups={side:list(intent_groups[side]) for side in ('input','output')}
     if set(groups['input'])&set(groups['output']):raise core.StopBatch('EXTERNAL_GEAR_SELECTION_REQUIRED','两个刚性组存在重叠组件。')
     moving=set(groups['input']+groups['output'])
     if moving.intersection(stationary):raise core.StopBatch('EXTERNAL_GEAR_SELECTION_REQUIRED','静止侧声明与推荐转子组重叠，未固定运动件。')
     outside=[c['instance'] for c in components if not c['fixed_component'] and c['component_id'] not in moving and c['component_id'] not in stationary]
     if outside:raise core.StopBatch('EXTERNAL_GEAR_SCOPE_UNSUPPORTED','推荐轴系外存在未固定组件；浮动标志不等于存在剩余自由度，未自动固定这些零件。',
         {'unassigned_floating_components':outside,'constraint_inventory':component_constraints.inventory(components,survey['mates'],groups),
+         'proposed_motion_groups':groups,
+         'assembly_constraint_review':assembly_constraints.summary(assembly_constraints.analyze(components,survey['mates'],groups,inventory_complete=survey.get('inventory_complete',False),structural_relations=survey.get('structural_relations'))),
          'stationary_preparation':{'status':'requires_explicit_mechanical_scope_declaration_then_plan_confirmation','candidates':[{'instance':c['instance'],'constraint_state':c.get('constraint_state')} for c in components if c['instance'] in outside],'automatic_fix':False},
          'fixed_flag_alone_proves_free_DOF':False,'blanket_fix_recommended':False,'write_dispatched':False})
     by_id={c['component_id']:c for c in components}
@@ -218,7 +226,12 @@ def pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints=N
 
 def public_card(value):
     """Keep native persistent references in owner evidence, not in every AI turn."""
-    return {**{k:v for k,v in value.items() if k not in {'shaft_axes','supports','reference_state_signature'}},
+    card={**{k:v for k,v in value.items() if k not in {'shaft_axes','supports','reference_state_signature','constraint_completion'}},
             'shaft_axes':{side:{k:row[k] for k in ('component_id','axis_global','reference_point_global_m','cylinder_radius_m')} for side,row in value['shaft_axes'].items()},
             'supports':{side:{k:v for k,v in row.items() if k!='axis'} for side,row in value['supports'].items()},
             'native_references':'retained_by_owner_not_required_from_user'}
+    if value.get('constraint_completion'):
+        p=value['constraint_completion']
+        card['constraint_completion']={k:v for k,v in p.items() if k!='actions'}
+        card['constraint_completion']['actions']=[{k:v for k,v in a.items() if k not in {'reference_a','reference_b','reference_kind_a','reference_kind_b'}} for a in p['actions']]
+    return card

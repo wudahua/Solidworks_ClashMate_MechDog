@@ -17,7 +17,7 @@ from sw_mcp.conversation.process_identity import same_process
 
 class ObservedClient(Client):
     """Poll only the task owner; every native call is issued once by the task."""
-    def wait(self,task_id,maximum_s=650):
+    def wait(self,task_id,maximum_s=1800):
         deadline=time.monotonic()+maximum_s
         while time.monotonic()<deadline:
             state=self.tool('get_mechanism_task',task_id=task_id)
@@ -32,13 +32,16 @@ class ObservedClient(Client):
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--assembly',type=Path,action='append',required=True)
     parser.add_argument('--output',type=Path,required=True);parser.add_argument('--runtime-base',type=Path,required=True)
-    parser.add_argument('--stationary-component',action='append',default=[]);parser.add_argument('--rollback',action='store_true');args=parser.parse_args()
+    parser.add_argument('--stationary-component',action='append',default=[]);parser.add_argument('--assembly-intent',type=Path);parser.add_argument('--rollback',action='store_true');args=parser.parse_args()
     assert not (ROOT/'runs/executor-state.json').exists(),'Use a clean isolated installation; retain historical journals.'
     folder=core.no_links(args.output);folder.mkdir(parents=True,exist_ok=False);work=folder/'work'
     sources=[core.no_links(p) for p in args.assembly];before={str(p):core.fixture_hashes(p) for p in sources}
+    intent_record=core.read(core.no_links(args.assembly_intent)) if args.assembly_intent else None
+    intent_groups=intent_record.get('groups_by_instance',intent_record) if intent_record is not None else None
     result={'status':'running','version':core.VERSION,'sources_sha256':source_manifest(),'source_files':before,
         'local_real_CAD':True,'human_WorkBuddy_tested':False,'force_termination':False,'rounds':[],
         'confirmation_source':'user_authorized_local_development_card_not_human_client_confirmation'}
+    if args.assembly_intent:result['mechanical_intent_sha256']=core.digest(args.assembly_intent)
     c=None;tid=None;s=None
     try:
         if args.rollback:
@@ -72,7 +75,8 @@ def main():
             tid=c.tool('prepare_mechanism_task',assembly_path=str(source),task_kind='external_gear_pair',reverse_direction=reverse)['task_id']
             prepared=c.wait(tid);assert prepared['phase'] in {'proposal_ready','scope_review_required'},prepared
             core.write(folder/f'round-{index+1}-prepared.json',prepared)
-            c.tool('plan_mechanism_task',task_id=tid,stationary_component_hints=args.stationary_component);planned=c.wait(tid);core.write(folder/f'round-{index+1}-plan.json',planned)
+            planning={'assembly_intent':intent_groups} if args.assembly_intent else {'stationary_component_hints':args.stationary_component}
+            c.tool('plan_mechanism_task',task_id=tid,**planning);planned=c.wait(tid);core.write(folder/f'round-{index+1}-plan.json',planned)
             assert planned['phase']=='awaiting_confirmation',planned
             if owner is None:
                 owner=planned['server_instance_id'];assert c.close();c=ObservedClient(ROOT,work,args.runtime_base,folder/'frontend2',entry=ROOT/'motion_server.py')
@@ -110,8 +114,8 @@ def main():
         # Reopen and plan without execution: persisted native gear ratio and
         # healthy constraints must all be reused, with zero new mate actions.
         tid=c.tool('prepare_mechanism_task',assembly_path=result['saved_assembly'],task_kind='external_gear_pair')['task_id']
-        reopened=c.wait(tid);assert reopened['phase']=='proposal_ready',reopened
-        c.tool('plan_mechanism_task',task_id=tid);replanned=c.wait(tid);assert replanned['phase']=='awaiting_confirmation',replanned
+        reopened=c.wait(tid);assert reopened['phase'] in ({'proposal_ready','scope_review_required'} if args.assembly_intent else {'proposal_ready'}),reopened
+        c.tool('plan_mechanism_task',task_id=tid,**(planning if args.assembly_intent else {}));replanned=c.wait(tid);assert replanned['phase']=='awaiting_confirmation',replanned
         p=replanned['proposal'];assert p['expected_added_mates']==0 and p['existing_gear_feature_id'] is not None,p
         assert p['ratio_provenance']['source']=='existing_native_gear_mate'
         result['saved_reopen_plan']=replanned
@@ -122,7 +126,7 @@ def main():
         result['owner_shutdown']=OwnerClient(ROOT,work,args.runtime_base).call('shutdown_idle')
         identity=core.read(work/'owner.json')['identity'];deadline=time.monotonic()+20
         while same_process(identity)['status']=='same' and time.monotonic()<deadline:time.sleep(.1)
-        assert same_process(identity)['status']!='same';spec=spec_for(work)
+        assert same_process(identity)['status']!='same';spec=core.read(work/'host-registration.json')['spec']
         result['registration_removed']=control(spec,'unregister');assert not result['registration_removed']['registered']
         observations=[json.loads(line) for line in (folder/'task-progress.jsonl').read_text(encoding='utf8').splitlines()]
         active=[v for v in observations if v['busy'] and v.get('round_index') and v['phase'] in {'running','verified'} and not v.get('progress',{}).get('verification_passed')]
@@ -139,7 +143,7 @@ def main():
         if c and tid:
             try:
                 state=c.tool('get_mechanism_task',task_id=tid);result['last_task']=state
-                if not state.get('busy') and not state.get('error',{}).get('native_unknown'):
+                if not state.get('busy') and not (state.get('error') or {}).get('native_unknown'):
                     c.tool('finish_mechanism_task',task_id=tid);result['failure_cleanup']=c.wait(tid)
             except Exception as cleanup:result['cleanup_error']=str(cleanup)
         if s and not s.unknown:

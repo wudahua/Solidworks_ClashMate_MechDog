@@ -11,6 +11,8 @@ public partial class Cad {
         public Dictionary<string,string> Roles,References;
         public Dictionary<string,string[]> Groups;public string[] Stationary;
         public Dictionary<string,double[]> Poses;public Dictionary<string,bool> Fixed;
+        public bool CompleteConstraints;public List<Dictionary<string,object>> Completion;
+        public int[] OriginalMateIds;public string OriginalMateParameters;
         public List<ExternalGearAction> Actions=new List<ExternalGearAction>();
         public double Numerator,Denominator;public double[] Axis;
         public int ExistingCount,ExistingGearId=-1;
@@ -99,7 +101,7 @@ public partial class Cad {
             throw new CadFault("EXTERNAL_GEAR_RATIO_INVALID","齿轮比例必须为有限正数，分子分母各不超过1000。");
         var rec=Json.Deserialize<Dictionary<string,object>>(recommendationJson);var m=GetUserModel(id);
         using(var scope=new Scope(this,m.Path,null))using(var batch=new NativeCommandBatch(()=>Sw.CommandInProgress,v=>Sw.CommandInProgress=v)) {
-            var doc=scope.Doc;InspectUserCore(m,doc);RequireMateInitialTime(doc,m);RequireMatesHealthy(doc);
+            var doc=scope.Doc;InspectUserCore(m,doc);bool complete=rec.ContainsKey("constraint_completion");if(!complete)RequireMateInitialTime(doc,m);RequireMatesHealthy(doc);
             if((string)rec["model_id"]!=id||(string)rec["reference_state_signature"]!=MateSignature(m,doc))throw new CadFault("GEAR_PLAN_STALE","推荐已过期，重新只读推荐后再确认。");
             var roles=EGDict(rec["roles"]).ToDictionary(v=>v.Key,v=>Convert.ToString(v.Value));
             if(!roles.Keys.OrderBy(v=>v).SequenceEqual(new[]{"input_shaft","output_shaft","input_gear","output_gear","body"}.OrderBy(v=>v)))throw new CadFault("EXTERNAL_GEAR_REFERENCE_INVALID","角色集合无效。");
@@ -114,7 +116,18 @@ public partial class Cad {
             if(!components[roles["body"]].IsFixed()&&!stationary.Contains(roles["body"])||cs.Any(c=>!moving.Select(v=>components[v].Name2).Contains(c.Name2)&&!c.IsFixed()&&!stationary.Select(v=>components[v].Name2).Contains(c.Name2)))throw new CadFault("EXTERNAL_GEAR_SCOPE_UNSUPPORTED","轴系外未固定件须有明确静止侧声明，未自动固定未归属零件。");
             var p=new ExternalGearPlan{Id=Guid.NewGuid().ToString("N"),ModelId=id,Revision=m.Revision,Signature=MateSignature(m,doc),Roles=roles,Groups=groups,Stationary=stationary,Numerator=numerator,Denominator=denominator,
                 References=new Dictionary<string,string>(),Poses=Transforms(doc),Fixed=cs.ToDictionary(c=>c.Name2,c=>c.IsFixed()),ExistingCount=EGAllMates(doc).Length};
-            foreach(string cid in stationary)if(!components[cid].IsFixed())p.Actions.Add(new ExternalGearAction{Kind="fix_declared_stationary",A=cid});
+            p.CompleteConstraints=complete;
+            if(complete) {
+                p.OriginalMateIds=EGAllMates(doc).Select(f=>f.GetID()).ToArray();p.OriginalMateParameters=CompletionOriginalParameters(doc,p.OriginalMateIds);
+                var completion=EGDict(rec["constraint_completion"]);p.Completion=Json.Deserialize<List<Dictionary<string,object>>>(Json.Serialize(completion["actions"]));
+                if(p.Completion.Count>256||EGStrings(completion["uncompleted_components"]).Length>0||moving.Concat(stationary).Distinct().Count()!=cs.Length)throw new CadFault("EXTERNAL_GEAR_REFERENCE_INVALID","补约束范围不完整或超过预算。");
+                foreach(var action in p.Completion) {
+                    string a=(string)action["component_a"],b=(string)action["component_b"];
+                    if(a==b||!allIds.Contains(a)||!allIds.Contains(b)||!(stationary.Contains(a)&&stationary.Contains(b)||groups.Values.Any(v=>v.Contains(a)&&v.Contains(b))))throw new CadFault("EXTERNAL_GEAR_REFERENCE_INVALID","补约束不能跨机械分组锁定运动。");
+                    action["model_id"]=id;
+                    p.Actions.Add(new ExternalGearAction{Kind="add_completion_"+(string)action["kind"],A=a,B=b});
+                }
+            }else foreach(string cid in stationary)if(!components[cid].IsFixed())p.Actions.Add(new ExternalGearAction{Kind="fix_declared_stationary",A=cid});
             var description=new List<object>();var gearAxes=new List<double[]>();
             foreach(string side in new[]{"input","output"}) {
                 var shaft=components[roles[side+"_shaft"]];var gear=components[roles[side+"_gear"]];
@@ -129,14 +142,14 @@ public partial class Cad {
                 var gearFace=GTCylinder(doc,gear,point,p.Axis);var gearShape=MateGeometry(doc,gearFace,gear);
                 if(GTGap((double[])gearShape["reference_point_global_m"],point,p.Axis)>1e-5)throw new CadFault("EXTERNAL_GEAR_REFERENCE_INVALID","齿轮与轴不同轴。");
                 gearAxes.Add((double[])gearShape["axis_global"]);p.References[side+"_axis"]=GTReference(doc,shaftFace);p.References[side+"_support"]=GTReference(doc,supportFace);p.References[side+"_gear"]=GTReference(doc,gearFace);p.Roles[side+"_support"]=supportId;
-                foreach(string memberId in groups[side].Where(v=>v!=roles[side+"_shaft"])) {
+                foreach(string memberId in groups[side].Where(v=>!complete&&v!=roles[side+"_shaft"])) {
                     var member=ResolveUserComponent(m,doc,memberId);components[memberId]=member;
                     // A fresh pair uses a rigid mate and needs no fabricated key axis.
                     var memberMates=EGPairMates(doc,shaft,member);
                     IFace2 memberFace=memberMates.Length==0||memberMates.Any(f=>((IMate2)f.GetSpecificFeature2()).Type==16)?gearFace:GTCylinder(doc,member,point,p.Axis);
                     EGPlanConnection(doc,p,shaft,member,roles[side+"_shaft"],memberId,p.Axis,shaftFace,memberFace,true);
                 }
-                EGPlanConnection(doc,p,shaft,support,roles[side+"_shaft"],supportId,p.Axis,shaftFace,supportFace,false);
+                if(!complete)EGPlanConnection(doc,p,shaft,support,roles[side+"_shaft"],supportId,p.Axis,shaftFace,supportFace,false);
                 description.Add(new{side=side,shaft=shaft.Name2,gear=gear.Name2,support=support.Name2,axis=shape,support_axis=supportShape,radial_offset_mm=gap*1000});
             }
             if(GTGap((double[])MateGeometry(doc,FaceReference(doc,p.References["input_axis"]),components[roles["input_shaft"]])["reference_point_global_m"],(double[])MateGeometry(doc,FaceReference(doc,p.References["output_axis"]),components[roles["output_shaft"]])["reference_point_global_m"],p.Axis)<1e-4)throw new CadFault("EXTERNAL_GEAR_SCOPE_UNSUPPORTED","两轴重合，不属于普通外齿轮对。");
@@ -157,11 +170,13 @@ public partial class Cad {
             p.Reverse=false;
             int added=p.Actions.Count(a=>a.Kind.StartsWith("add_"))+(p.ExistingGearId<0?1:0);
             p.Description=new{plan_id=p.Id,model_id=id,scope="two_parallel_axis_external_gear_pair_prescribed_ratio_not_contact",roles=p.Roles,groups=p.Groups,
+                constraint_completion=complete,completion_action_count=p.Completion==null?0:p.Completion.Count,
+                initial_state_strategy=complete?"new_motion_from_saved_pose_remove_nonzero_copy_studies_activate_verified_model_scope":"existing_zero_study_requirement",
                 supports=description,actions=p.Actions.Select(a=>a.Describe()).ToArray(),existing_mate_count=p.ExistingCount,expected_added_mates=added,expected_mate_count=p.ExistingCount+added,
                 existing_gear_feature_id=p.ExistingGearId<0?(int?)null:p.ExistingGearId,
                 modified_existing_mate_ids=p.Actions.Where(a=>a.Kind=="suppress_existing_for_rigid"||a.Kind=="unlock_existing_support_rotation").Select(a=>a.ExistingFeatureId).ToArray(),
                 retained_suppressed_mate_ids=p.Actions.Where(a=>a.Kind=="suppress_existing_for_rigid").Select(a=>a.ExistingFeatureId).ToArray(),
-                rigid_conversion="verified_rotor_pair_only_retain_and_suppress_originals_add_one_rigid_no_deletion",
+                rigid_conversion=complete?"no_original_mate_suppression_or_replacement":"verified_rotor_pair_only_retain_and_suppress_originals_add_one_rigid_no_deletion",
                 gear_ratio=new{numerator=numerator,denominator=denominator,expected_output_over_input=-numerator/denominator,creation_reverse_argument=p.Reverse,
                     direction_adapter="SW34_external_pair_world_signed_pose_required_not_cylinder_parameter_axis_sign",gear_reference_parameter_axes=gearAxes.ToArray()},
                 maximum_setup_translation_mm=.01,maximum_setup_rotation_rad=1e-6,moving_components=moving,requires_explicit_confirmation=true,write_dispatched=false,contact_or_tooth_geometry_validated=false};
@@ -180,18 +195,35 @@ public partial class Cad {
         if(p.Consumed)throw new CadFault("GEAR_PLAN_CONSUMED","方案已提交，不重放。");
         if(testFault&&System.Environment.GetEnvironmentVariable("SW_MCP_FAULT_TESTS")!="1")throw new CadFault("FAULT_TESTS_DISABLED","受控故障仅用于本机开发验收。");
         var m=GetUserModel(p.ModelId);using(var s=new Scope(this,m.Path,null))if(m.Revision!=p.Revision||MateSignature(m,s.Doc)!=p.Signature)throw new CadFault("GEAR_PLAN_STALE","初态改变，重新推荐并确认。");
-        p.Consumed=true;bool mutating=false;string checkpoint=null;
+        p.Consumed=true;bool mutating=false;string checkpoint=null;object completionCheckpoint=null,savedInitial=null;var completionEvidence=new List<object>();
         try {
-            var cp=EGDict(Json.DeserializeObject(Json.Serialize(CreateUserCheckpoint(m.Id))));checkpoint=(string)cp["checkpoint_id"];CheckpointProbeWithTiming(m,p.Id,checkpoint);
-            using(var scope=new Scope(this,m.Path,null)) {
-                var doc=scope.Doc;var ad=(IAssemblyDoc)doc;RequireMateInitialTime(doc,m);RequireMatesHealthy(doc);
+            var cp=EGDict(Json.DeserializeObject(Json.Serialize(CreateUserCheckpoint(m.Id))));checkpoint=(string)cp["checkpoint_id"];
+            if(p.CompleteConstraints) {
+                completionCheckpoint=ProbeCompletionSavedCheckpoint(m.Id,checkpoint,p.Poses,p.Fixed);m=GetUserModel(m.Id);
+                using(var checkedScope=new Scope(this,m.Path,null)){p.Revision=m.Revision;p.Signature=MateSignature(m,checkedScope.Doc);}
+            }else CheckpointProbeWithTiming(m,p.Id,checkpoint);
+            using(var scope=new Scope(this,m.Path,null))using(var batch=new NativeCommandBatch(()=>Sw.CommandInProgress,v=>Sw.CommandInProgress=v)) {
+                var doc=scope.Doc;var ad=(IAssemblyDoc)doc;if(!p.CompleteConstraints)RequireMateInitialTime(doc,m);RequireMatesHealthy(doc);
                 if(MateSignature(m,doc)!=p.Signature)throw new CadFault("GEAR_PLAN_STALE","检查点探测后初态变化，未修改。");
                 var all=p.Roles.Values.Concat(p.Groups.Values.SelectMany(v=>v)).Distinct().ToDictionary(v=>v,v=>ResolveUserComponent(m,doc,v));
                 var moving=p.Groups.Values.SelectMany(v=>v).Distinct().ToArray();mutating=true;LastOperationRestoration="pending";
-                foreach(string cid in p.Stationary){var c=ResolveUserComponent(m,doc,cid);if(!c.IsFixed()){doc.ClearSelection2(true);if(!c.Select4(false,null,false))throw new CadFault("GEAR_CONSTRAINT_CREATE_FAILED","静止侧选择失败。");ad.FixComponent();doc.ClearSelection2(true);}if(!c.IsFixed())throw new CadFault("GEAR_FIXED_STATE_UNVERIFIED","已确认的静止侧固定未生效。");}
+                if(p.CompleteConstraints)savedInitial=PrepareCompletionSavedInitial(m,doc);
+                else foreach(string cid in p.Stationary){var c=ResolveUserComponent(m,doc,cid);if(!c.IsFixed()){doc.ClearSelection2(true);if(!c.Select4(false,null,false))throw new CadFault("GEAR_CONSTRAINT_CREATE_FAILED","静止侧选择失败。");ad.FixComponent();doc.ClearSelection2(true);}if(!c.IsFixed())throw new CadFault("GEAR_FIXED_STATE_UNVERIFIED","已确认的静止侧固定未生效。");}
                 foreach(string cid in moving){var c=all[cid];if(c.IsFixed()){doc.ClearSelection2(true);if(!c.Select4(false,null,false))throw new CadFault("GEAR_CONSTRAINT_CREATE_FAILED","解除固定选择失败。");ad.UnfixComponent();doc.ClearSelection2(true);}if(c.IsFixed())throw new CadFault("GEAR_FIXED_STATE_UNVERIFIED","解除指定固定未生效。");}
                 if(testFault)throw new CadFault("CONTROLLED_GEAR_FAULT","验收：普通两轴解除固定后受控回退。");
+                if(p.CompleteConstraints) {
+                    var beforeIds=new HashSet<int>(EGAllMates(doc).Select(f=>f.GetID()));int index=0;
+                    foreach(var action in p.Completion) {
+                        Progress(activeJobId,"assembly_constraint_completion",index,p.Completion.Count,null);
+                        var added=CreateCompletionMate(doc,action);CheckMate(added,"minimum_constraint_supplement");
+                        if(!doc.EditRebuild3())throw new CadFault("GEAR_CONSTRAINT_CREATE_FAILED","最小补约束后重建失败。");RequireMatesHealthy(doc);
+                        completionEvidence.Add(VerifyCompletionPose(doc,p.Poses,added,action));
+                        index++;
+                    }
+                    if(!beforeIds.IsSubsetOf(new HashSet<int>(EGAllMates(doc).Select(f=>f.GetID()))))throw new CadFault("GEAR_PARAMETERS_UNVERIFIED","补齐期间旧配合被移除。");
+                }
                 foreach(var action in p.Actions) {
+                    if(action.Kind.StartsWith("add_completion_"))continue;
                     if(action.Kind.StartsWith("reuse_")||action.Kind=="fix_declared_stationary")continue;
                     if(action.Kind=="suppress_existing_for_rigid") {
                         var feature=EGFeature(doc,action.ExistingFeatureId);
@@ -237,22 +269,29 @@ public partial class Cad {
                 if(p.Groups["output"].Contains(nativeIds[0]))ratio=1/ratio;
                 int count=p.ExistingCount+p.Actions.Count(a=>a.Kind.StartsWith("add_"))+(p.ExistingGearId<0?1:0);
                 var allMates=EGAllMates(doc);var suppressed=p.Actions.Where(a=>a.Kind=="suppress_existing_for_rigid").Select(a=>a.ExistingFeatureId).ToArray();
+                if(p.CompleteConstraints&&CompletionOriginalParameters(doc,p.OriginalMateIds)!=p.OriginalMateParameters)throw new CadFault("GEAR_PARAMETERS_UNVERIFIED","补齐期间旧配合的参数、绑定或压缩状态变化。");
                 if(allMates.Length!=count||suppressed.Any(fid=>!EGSuppressed(EGFeature(doc,fid))))throw new CadFault("GEAR_PARAMETERS_UNVERIFIED","保留的原配合或新增配合数量不符。");
                 if(actual==null||double.IsNaN(ratio)||double.IsInfinity(ratio)||Math.Abs(ratio-p.Numerator/p.Denominator)>1e-8)throw new CadFault("GEAR_PARAMETERS_UNVERIFIED","比例或新配合数量不符。",new{requested_numerator=p.Numerator,requested_denominator=p.Denominator,observed_numerator=actual==null?(double?)null:actual.GearRatioNumerator,observed_denominator=actual==null?(double?)null:actual.GearRatioDenominator,native_reference_components=nativeIds,observed_normalized_ratio=double.IsNaN(ratio)||double.IsInfinity(ratio)?(double?)null:ratio,expected_mates=count,observed_mates=allMates.Length});
                 var poses=Transforms(doc);var budget=MatePosePolicy.Evaluate(p.Poses,poses,.01,1e-6*180/Math.PI);
                 if(!(bool)budget["accepted"])throw new CadFault("GEAR_SETUP_POSE_EXCEEDED","自动补齐后的姿态超过确认预算。",budget);
-                var movingNames=moving.Select(v=>all[v].Name2).ToArray();foreach(var c in UserComponents(doc))if(c.IsFixed()==movingNames.Contains(c.Name2)||!movingNames.Contains(c.Name2)&&!PoseValidation.Matches(p.Poses[c.Name2],poses[c.Name2]))throw new CadFault("GEAR_FIXED_STATE_UNVERIFIED","固定状态或非目标组件姿态变化。");
+                if(p.CompleteConstraints&&!p.Poses.All(v=>poses.ContainsKey(v.Key)&&PoseValidation.Matches(v.Value,poses[v.Key])))throw new CadFault("GEAR_SETUP_POSE_EXCEEDED","配合补齐模式要求保留全部组件保存姿态。");
+                var movingNames=moving.Select(v=>all[v].Name2).ToArray();foreach(var c in UserComponents(doc))if((p.CompleteConstraints?(movingNames.Contains(c.Name2)?c.IsFixed():c.IsFixed()!=p.Fixed[c.Name2]):c.IsFixed()==movingNames.Contains(c.Name2))||!movingNames.Contains(c.Name2)&&!PoseValidation.Matches(p.Poses[c.Name2],poses[c.Name2]))throw new CadFault("GEAR_FIXED_STATE_UNVERIFIED","固定状态或非目标组件姿态变化。");
                 SaveOwnedDocuments(m);Save(doc,m.Path);var saved=Transforms(doc);var savedBudget=MatePosePolicy.Evaluate(p.Poses,saved,.01,1e-6*180/Math.PI);
                 if(!(bool)savedBudget["accepted"])throw new CadFault("GEAR_SETUP_POSE_EXCEEDED","保存后姿态超出预算。",savedBudget);
+                if(p.CompleteConstraints&&!p.Poses.All(v=>saved.ContainsKey(v.Key)&&PoseValidation.Matches(v.Value,saved[v.Key])))throw new CadFault("GEAR_SETUP_POSE_EXCEEDED","补齐成果保存后姿态变化。");
                 m.Revision++;var motorFace=FaceReference(doc,p.References["input_axis"]);var motor=MateGeometry(doc,motorFace,all[p.Roles["input_shaft"]]);string entity=(string)motor["entity_id"];m.Entities[entity]=p.References["input_axis"];m.EntityRegistrationRevisions[entity]=m.Revision;SaveUserModel(m);VerifyUserSources(m);
                 var shaftAxes=new Dictionary<string,object>();var supportAxes=new Dictionary<string,object>();foreach(string side in new[]{"input","output"}){shaftAxes[side]=MateGeometry(doc,FaceReference(doc,p.References[side+"_axis"]),all[p.Roles[side+"_shaft"]]);supportAxes[side]=MateGeometry(doc,FaceReference(doc,p.References[side+"_support"]),all[p.Roles[side+"_support"]]);}
                 LastOperationRestoration="restored";
                 return new{model_id=m.Id,plan_id=p.Id,roles=p.Roles,groups=p.Groups,axis_global=p.Axis,drive=motor,shaft_axes=shaftAxes,support_axes=supportAxes,
+                    constraint_completion=p.CompleteConstraints,completion_checkpoint=completionCheckpoint,new_saved_initial_state=savedInitial,
+                    completion_evidence=completionEvidence,observed_mate_suppression=EGAllMates(doc).ToDictionary(f=>f.GetID().ToString(System.Globalization.CultureInfo.InvariantCulture),f=>EGSuppressed(f)),
+                    observed_fixed_states=UserComponents(doc).ToDictionary(c=>GTComponentId(doc,c),c=>c.IsFixed()),
                     native_parameters=new{verified=true,numerator=p.Numerator,denominator=p.Denominator,native_numerator=actual.GearRatioNumerator,native_denominator=actual.GearRatioDenominator,native_reference_components=nativeIds,observed_normalized_ratio=ratio,native_reverse=actual.Reverse,creation_reverse_argument=p.Reverse,direction_verified=false,mate_count=count,reported_mate_count=BasicMateFeatures(doc).Length,retained_suppressed_mate_ids=suppressed},
                     pose_budget=savedBudget,checkpoint_id=checkpoint,source_files_unchanged=true,restoration_status="restored",original_import_checkpoint_not_restored_yet=true};
             }
         }catch(Exception failure){
             if(!mutating)throw;
+            if(failure is COMException){LastOperationRestoration="unknown";throw new CadFault("GEAR_ROLLBACK_FAILED","原生调用返回异常，未再次派发恢复写入；保留现场。",new{checkpoint_id=checkpoint,original_failure=FailureEvidence(failure),rollback_attempted=false,native_state="unknown"});}
             try{RestoreUserCheckpoint(m.Id,checkpoint);LastOperationRestoration="restored";}catch(Exception rollback){LastOperationRestoration="unknown";throw new CadFault("GEAR_ROLLBACK_FAILED","补齐失败且回退未确认。",new{checkpoint_id=checkpoint,original_failure=FailureEvidence(failure),rollback_failure=FailureEvidence(rollback)});}
             throw new CadFault("GEAR_APPLY_ROLLED_BACK","两轴补齐未通过，已恢复创建前检查点。",new{checkpoint_id=checkpoint,original_failure=FailureEvidence(failure),rollback_verified=true,automatic_retry=false});
         }

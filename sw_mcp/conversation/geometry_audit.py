@@ -35,13 +35,25 @@ def load(path):
             if max(abs(orth[i][j]-(i==j)) for i in range(3) for j in range(3))>1e-6 or abs(det-1)>1e-6:raise ValueError('POSE_NOT_PROPER_RIGID_ROTATION')
             rows[key]=r
     return rows
-def binding(plan,data,moving,reference):
+def binding(plan,data,moving,reference,allow_observed_stationary=False):
     refs={r['component_id']:r for r in (plan['reference_a'],plan['reference_b'])}
-    if set(refs)!={moving,reference} or refs[moving]['fixed_component'] or not refs[reference]['fixed_component']:raise ValueError('PAIR_SCOPE_MISMATCH')
+    if set(refs)!={moving,reference} or refs[moving]['fixed_component']:raise ValueError('PAIR_SCOPE_MISMATCH')
+    proof={'admission':'native_fixed_flag','fixed_flag_not_overridden':True}
+    if not refs[reference]['fixed_component']:
+        if not allow_observed_stationary:raise ValueError('PAIR_SCOPE_MISMATCH')
+        base=data[0,reference];r0=rotation(base);max_t=max_r=0.
+        for frame in sorted({key[0] for key in data}):
+            row=data[frame,reference];rt=rotation(row)
+            max_t=max(max_t,norm(sub(origin(row),origin(base))))
+            max_r=max(max_r,math.acos(max(-1.,min(1.,(sum(r0[i][j]*rt[i][j] for i in range(3) for j in range(3))-1)/2))))
+        if max_t>1e-7 or max_r>1e-6:raise ValueError('REFERENCE_NOT_STATIONARY_IN_SAMPLED_TRAJECTORY')
+        proof={'admission':'observed_stationary_full_sampled_trajectory','fixed_flag_not_overridden':True,
+               'checked_frames':len({key[0] for key in data}),'maximum_translation_m':max_t,'maximum_rotation_rad':max_r,
+               'translation_tolerance_m':1e-7,'rotation_tolerance_rad':1e-6,'DOF_or_global_rigidity_certified':False}
     m,f=data[0,moving],data[0,reference];pm,pf=(refs[c]['reference_point_global_m'] for c in (moving,reference))
     um,uf=(unit(refs[c]['axis_global']) for c in (moving,reference))
     if dot(um,uf)<0:uf=[-x for x in uf]
-    return {'moving':moving,'reference':reference,'moving_axis_local':mv(rotation(m),um),'reference_axis_local':mv(rotation(f),uf),
+    return {'moving':moving,'reference':reference,'reference_stationarity_evidence':proof,'moving_axis_local':mv(rotation(m),um),'reference_axis_local':mv(rotation(f),uf),
         'moving_anchor_local_m':mv(rotation(m),sub(pm,origin(m))),'reference_anchor_local_m':mv(rotation(f),sub(pf,origin(f))),
         'source':'native_selected_edge_geometry_and_bound_frame0_inverse_rigid_transform','automatic_origin_as_shaft_axis':False}
 def series(data,bound):
