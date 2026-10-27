@@ -3,7 +3,27 @@ import hashlib,json,math,time,uuid
 from pathlib import Path
 from .task_engine import TaskEngine,ConversationSession,core,matching_components,mechanical_choices
 from . import mate_motion,startup_gate,source_integrity,task_execution,task_progress
-from sw_mcp.native_grid import require_grid
+from sw_mcp.native_grid import require_grid,MINIMUM_INTERVALS
+
+
+def prepare_limits():
+    """Public card limits, also consumed by gear admission. No CAD inspection."""
+    grid={'minimum_intervals':MINIMUM_INTERVALS,'duration_times_fps_must_be_integer':True}
+    return {
+        'motion':{'maximum_duration_s':5,'minimum_output_fps':5,'maximum_output_fps':120,'maximum_frames':601,**grid},
+        'concentric':{'motion':'rotary','speed_rpm':12,'duration_s':1,'allowed_output_fps':[30],'maximum_frames':31},
+        'gear_transmission':{'motion':'rotary','maximum_speed_rpm':60,'maximum_duration_s':2,
+            'allowed_output_fps':[30,60],'maximum_frames':121,'minimum_travel_must_be_zero':True,**grid},
+        'external_gear_pair':{'motion':'rotary','maximum_speed_rpm':60,'maximum_duration_s':2,
+            'minimum_output_fps':5,'maximum_output_fps':120,'maximum_frames':241,'minimum_travel_must_be_zero':True,
+            'plan_native_grid_confirmation_required':True,'future_native_grid_guaranteed':False,**grid}}
+
+
+def environment_prepare_limits(environment):
+    """Explain the distinction between low-level ceilings and dialogue cards."""
+    return {**environment,'budget_matrix':{**environment.get('budget_matrix',{}),'managed_tasks':prepare_limits()},
+            'budget_matrix_scope':'new_solve_is_low_level_ceiling_managed_tasks_have_separate_card_limits',
+            'sampling_fps_confirmation':'prepare_validates_request_plan_confirms_exact_native_grid_no_interpolation'}
 
 
 def parameters(motion,speed,duration,fps,reverse,minimum):
@@ -32,8 +52,14 @@ def prepare_inputs(path,task_kind='motion',motion='rotary',speed=12,duration_s=1
     if task_kind=='concentric' and (motion!='rotary' or speed!=12 or duration_s!=1 or output_fps!=30 or reverse_direction is not False or minimum_travel!=0):
         raise core.StopBatch('CONCENTRIC_FIXED_CARD_PARAMETERS','圆边首版固定12rpm、1秒30fps；不静默忽略其他运动参数。')
     settings=parameters(motion,speed,duration_s,output_fps,reverse_direction,minimum_travel) if task_kind in {'motion','gear_transmission','external_gear_pair'} else None
-    if task_kind in {'gear_transmission','external_gear_pair'} and (motion!='rotary' or speed>60 or duration_s>2 or output_fps not in {30,60} or minimum_travel!=0):
-        raise core.StopBatch('GEAR_PARAMETERS_INVALID','齿轮比例传动限旋转、60rpm、2秒、30/60fps；minimum_travel保留默认0，验证完整目标角度。')
+    if task_kind in {'gear_transmission','external_gear_pair'}:
+        limits=prepare_limits()[task_kind]
+        fps_allowed=output_fps in limits['allowed_output_fps'] if 'allowed_output_fps' in limits else limits['minimum_output_fps']<=output_fps<=limits['maximum_output_fps']
+        if motion!='rotary' or speed>limits['maximum_speed_rpm'] or duration_s>limits['maximum_duration_s'] or not fps_allowed or minimum_travel!=0:
+            detail=('泵模板gear_transmission限旋转、60rpm、2秒、30/60fps。' if task_kind=='gear_transmission' else
+                    '普通外齿轮external_gear_pair限旋转、60rpm、2秒、整数5–120fps；时长与输出帧须对齐，plan仍须核验并确认原生精确网格。')
+            raise core.StopBatch('GEAR_PARAMETERS_INVALID',detail+'minimum_travel保留默认0，验证完整目标角度。',
+                {'task_kind':task_kind,'limits':limits,'requested':{'motion':motion,'speed':speed,'duration_s':duration_s,'output_fps':output_fps,'minimum_travel':minimum_travel},'cad_dispatched':False,'job_created':False})
     if task_kind in {'gear_transmission','external_gear_pair'}:
         settings.pop('minimum_travel')
         settings.update(requested_minimum_travel=minimum_travel,
