@@ -42,6 +42,8 @@ class UpgradeFailure(RuntimeError):
             instruction = '原生互斥体返回 WAIT_ABANDONED；保留并检查恢复日志，不能视为正常空闲或直接重试升级。'
         if self.code == 'UPGRADE_LEASE_ACCESS_FAILED':
             instruction += ' '+lease_access_instruction()
+        if self.code == 'UPGRADE_PACKAGE_INVALID':
+            instruction += ' 请使用Release的Assets中官方_source.zip及同名.sha256；GitHub自动生成的Source code (zip/tar.gz)不是升级资产。不要删除文件或手工改清单绕过校验。'
         stage = state.get('stage') or self.diagnostics.get('stage')
         return {'ok': False, 'schema_version': 2, 'receipt_schema_version': 2, 'upgrade_result_schema_version': 1, 'code': self.code,
                 **{key: state.get(key) for key in ('stage','failure_stage','python_started','target_mutation_started','backup_created','receipt_path','receipt_stage_persisted','receipt_write_error','committed','rollback_attempted','rollback_verified','rollback_status','recovery_journal_unchanged','installation_state')},
@@ -57,6 +59,7 @@ class UpgradeFailure(RuntimeError):
                                           'original_failure_message': state.get('error'), 'target_directory': state.get('target_directory'),
                                           'mutation_scope': 'managed_source_and_executor_binaries_not_dependency_environment'},
                           'next_action': {'automatic_retry': False, 'instruction': instruction,
+                                          'read_only_executor_review':self.diagnostics.get('executor_journal_hint'),
                                           'receipt_path': state.get('receipt_path')}}}
 
 def package_files(package):
@@ -79,7 +82,10 @@ def package_files(package):
             if entry.is_dir():continue
             name=entry.filename
             prefix, separator, remainder=name.partition('/')
-            if not separator or prefix not in {'Solidworks_ClashMate_MechDog','SolidWorksMotionMCP'}:raise ValueError('Unexpected ZIP root')
+            if not separator or prefix not in {'Solidworks_ClashMate_MechDog','SolidWorksMotionMCP'}:
+                raise UpgradeFailure('UPGRADE_PACKAGE_INVALID','Unexpected ZIP root: '+prefix,
+                    diagnostics={'archive_root':prefix,'expected_roots':['Solidworks_ClashMate_MechDog','SolidWorksMotionMCP'],
+                                 'required_distribution':'official_release_asset_source_zip_and_matching_sha256','embedded_validator_executed':False})
             if archive_root is not None and archive_root!=prefix:raise ValueError('Mixed ZIP roots refused')
             archive_root=prefix
             relative=safe_relative(remainder).as_posix()
@@ -89,8 +95,28 @@ def package_files(package):
             if entry.file_size>8_000_000 or total>100_000_000:raise ValueError('Expanded source package exceeds budget')
             contents[relative]=z.read(entry)
     manifest=json.loads(contents['发布清单.json'].decode('utf-8-sig'));names=validate_manifest(manifest,contents.__getitem__)
-    if set(contents)!=names|{'发布清单.json'}:raise ValueError('ZIP has unlisted files')
+    extra=sorted(set(contents)-(names|{'发布清单.json'}))
+    if extra:
+        raise UpgradeFailure('UPGRADE_PACKAGE_INVALID','ZIP has unlisted files: '+', '.join(extra[:10]),
+            diagnostics={'unlisted_count':len(extra),'unlisted_files':extra[:10],'unlisted_files_truncated':len(extra)>10,
+                         'required_distribution':'official_release_asset_source_zip_and_matching_sha256',
+                         'manifest_not_relaxed':True,'embedded_validator_executed':False})
     return manifest,contents,digest
+
+
+def executor_journal_hint(root):
+    """Read existing metadata only; a PID in a journal is not a proven holder."""
+    path=root/'runs/executor-state.json'
+    value={'journal_path':str(path),'holder_identity_proven':False,'CAD_calls':0,
+           'instruction':'AI只读核对原服务的executor_pid是否仍存活及进程身份；只有原服务无活动受管任务、无运行中旧请求且恢复确认空闲，才调用finish_motion_session安全收尾。不依据PID记录结束进程。'}
+    try:
+        reject_links(path,root)
+        if not path.exists():return {**value,'status':'missing'}
+        if path.stat().st_size>65536:return {**value,'status':'too_large'}
+        data=json.loads(path.read_text('utf-8-sig'))
+        return {**value,'status':'existing_record_not_live_proof',
+                'record':{k:data.get(k) for k in ('executor_pid','solidworks_pid','status','dispatch_state','restoration_status','request_id')}}
+    except (OSError,ValueError,TypeError,AttributeError) as error:return {**value,'status':'unavailable','error_type':type(error).__name__}
 
 @contextmanager
 def idle_installation(root):
@@ -100,7 +126,7 @@ def idle_installation(root):
     path=folder/'executor-owner.lock';reject_links(path,root)
     try:file=open_lease_file(path)
     except OSError as error:
-        diagnostics=lease_diagnostics(path,error,'open_lease')
+        diagnostics={**lease_diagnostics(path,error,'open_lease'),'executor_journal_hint':executor_journal_hint(root)}
         raise UpgradeFailure('UPGRADE_LEASE_BUSY' if diagnostics['sharing_conflict_proven'] else 'UPGRADE_LEASE_ACCESS_FAILED',
                              '锁文件存在共享冲突；停用相关服务或检查占用句柄。' if diagnostics['sharing_conflict_proven'] else '无法打开升级锁；服务句柄拓扑、权限、属性或过滤器原因尚未区分，不证明具体持有者。',diagnostics=diagnostics) from error
     mutex=None;owned=False;locked=False
@@ -113,7 +139,7 @@ def idle_installation(root):
         file.seek(0)
         try:lock_lease_file(file);locked=True
         except OSError as error:
-            diagnostics=lease_diagnostics(path,error,'lock_lease')
+            diagnostics={**lease_diagnostics(path,error,'lock_lease'),'executor_journal_hint':executor_journal_hint(root)}
             raise UpgradeFailure('UPGRADE_LEASE_BUSY' if diagnostics['occupied_proven'] else 'UPGRADE_LEASE_ACCESS_FAILED',
                                  '服务锁存在原生锁冲突；停用相关服务后显式重试。' if diagnostics['occupied_proven'] else '获取升级锁失败；未证明存在占用者。',diagnostics=diagnostics) from error
         mutex=kernel.CreateMutexW(None,False,'Local\\SolidWorksClashMate_MechDog_Executor')

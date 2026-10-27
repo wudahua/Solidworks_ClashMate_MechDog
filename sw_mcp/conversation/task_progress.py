@@ -6,6 +6,49 @@ import threading
 import time
 from . import core
 
+
+def current_view(session, value):
+    """Read current ownership observations, including calls without a watcher.
+
+    This refreshes presentation clocks only; it cannot prove native progress,
+    release isolation, modify the task, or issue a CAD request.
+    """
+    try:
+        if hasattr(session,'current_call_for_observation'):
+            active=session.current_call_for_observation or {}
+        else:
+            # Compatibility for observation fixtures/older session objects;
+            # current production sessions always provide the memory snapshot.
+            owned=core.read(session.folder/'活会话归属.json')
+            active=owned.get('in_flight') or {}
+        pending=getattr(session,'pending_native_response',None) or {}
+        operation=active.get('operation') or pending.get('operation')
+        now=time.time();started=active.get('started')
+        if not operation:
+            if isinstance(value.get('progress'),dict):
+                value['progress']={**value['progress'],'original_request_wait':{},'current_native_call':False}
+            return value
+        if type(started) not in (int,float) or not math.isfinite(started) or started>now:
+            if not pending:return value
+            started=now-max(0,time.monotonic()-pending['started_monotonic'])
+        old=value.get('progress') or {}
+        same=old.get('operation')==operation and abs(old.get('operation_started_at',0)-started)<2
+        progress=dict(old) if same else {'round_index':value.get('round_index'),'round_total':value.get('round_total'),
+            'stage':'native_call_pending','stage_started_at':started,'native_progress_observed':False,
+            'last_native_update_at':None,'native_update_age_s':None,'completed_frames':None,'total_frames':None,'sampling_fraction':None,
+            'stage_source':'owner_current_call_metadata_only','observation_source':'owner_current_call_metadata_only'}
+        progress.update(operation=operation,operation_started_at=started,operation_elapsed_s=max(0,now-started),
+            heartbeat_at=now,stage_elapsed_s=max(0,now-progress.get('stage_started_at',started)),
+            overall_fraction=None,estimated_remaining_s=None,heartbeat_proves_native_progress=False,
+            native_completion_proven_by_observer=False,automatic_retry=False,
+            original_request_wait={k:v for k,v in pending.items() if k in {'request_id','operation','call_wait_budget_s','same_original_request','additional_native_dispatches'}},
+            presentation_clock_refreshed_without_native_call=True,current_native_call=True)
+        if progress.get('last_native_update_at') is not None:progress['native_update_age_s']=max(0,now-progress['last_native_update_at'])
+        value['progress']=progress;value['native_stage']=progress['stage']
+        return value
+    except (OSError,ValueError,TypeError,KeyError,AttributeError):
+        return value
+
 LABELS = {
     'import_full_rebuild':'完整重建隔离副本', 'import_rebuild_snapshot':'核对重建前配合与姿态', 'prepare_gear_copy_metadata':'准备副本标准件标记',
     'initializing_solve': '初始化求解', 'motion_preflight': '检查求解条件',
@@ -103,6 +146,8 @@ def watch_call(session, operation, arguments, interval=2):
                   'overall_fraction': None, 'estimated_remaining_s': None,
                   'heartbeat_proves_native_progress': False, 'automatic_retry': False,
                   'native_completion_proven_by_observer': False,
+                  'original_request_wait': {k:v for k,v in (getattr(session,'pending_native_response',None) or {}).items()
+                                           if k in {'request_id','operation','call_wait_budget_s','same_original_request','additional_native_dispatches'}},
                   'stage_source': 'executor_progress_file' if record else 'owner_wait_heartbeat_only',
                   'observation_source': 'executor_progress_file' if record else 'owner_wait_heartbeat_only'})
 

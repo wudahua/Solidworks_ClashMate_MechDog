@@ -6,7 +6,7 @@ public static class SolverTimeCapture {
     public static object Select(int frame,double requested,double argument,Func<bool> select,Func<double> clock,Func<bool> playing,Action stop,Action pump,Action activate,Dictionary<string,object> profile=null) {
         var steps=new List<object>();
         var timer=System.Diagnostics.Stopwatch.StartNew();var timings=new Dictionary<string,double>();
-        Action<string,Action> measured=(name,action)=>{long before=timer.ElapsedTicks;try{action();}finally{double ms=(timer.ElapsedTicks-before)*1000.0/System.Diagnostics.Stopwatch.Frequency;timings[name]=timings.ContainsKey(name)?timings[name]+ms:ms;}};
+        Action<string,Action> measured=(name,action)=>{long before=timer.ElapsedTicks;if(profile!=null)profile["current_native_step"]=name;try{action();}finally{double ms=(timer.ElapsedTicks-before)*1000.0/System.Diagnostics.Stopwatch.Frequency;timings[name]=timings.ContainsKey(name)?timings[name]+ms:ms;if(profile!=null){profile[name]=timings[name];profile["total_ms"]=timer.Elapsed.TotalMilliseconds;}}};
         for(int attempt=1;attempt<=2;attempt++) {
             double before=0,actual=0;bool native=false,active=false;
             measured("activate_scope_ms",activate);measured("stop_before_ms",stop);measured("clock_before_ms",()=>before=clock());measured("set_time_ms",()=>native=select());measured("pump_after_select_ms",pump);measured("stop_after_ms",stop);measured("pump_after_stop_ms",pump);measured("clock_after_ms",()=>actual=clock());measured("playing_check_ms",()=>active=playing());

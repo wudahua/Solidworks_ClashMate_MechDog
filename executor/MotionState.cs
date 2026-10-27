@@ -15,8 +15,12 @@ public partial class Cad {
     }
     void SaveOwnedDocuments(UserModel model){foreach(var d in (Sw.GetDocuments() as object[]??new object[0]).Cast<IModelDoc2>().Where(d=>model.Files.Contains(d.GetPathName(),StringComparer.OrdinalIgnoreCase)).OrderBy(d=>d.GetType()))if(d.GetSaveFlag()){string path=d.GetPathName(),before=FileHash(path);Save(d,path);Log("OWNED_INPUT_PERSISTED "+Json.Serialize(new{model_id=model.Id,operation_job_id=activeJobId,path=path,hash_before=before,hash_after=FileHash(path),dirty_after_save=d.GetSaveFlag(),model_revision=model.Revision}));}}
     static StudyState[] StudyStates(IModelDoc2 doc) {
-        var manager=(IMotionStudyManager)doc.Extension.GetMotionStudyManager();
-        return Names(manager).Select(n=>{var s=(IMotionStudy)manager.GetMotionStudy(n);return new StudyState{name=n,type=s.StudyType,time_s=s.GetTime(),duration_s=s.GetDuration(),fps=((IMotionStudyProperties)s.GetProperties(s.StudyType)).GetFrameRate(),active=s.IsActive};}).ToArray();
+        string path=doc.GetPathName(),configuration=doc.ConfigurationManager.ActiveConfiguration.Name;
+        var names=Names((IMotionStudyManager)doc.Extension.GetMotionStudyManager());
+        return names.Select(n=>MotionReferenceRead.Read(
+            ()=>{var manager=(IMotionStudyManager)doc.Extension.GetMotionStudyManager();var s=(IMotionStudy)manager.GetMotionStudy(n);int type=s.StudyType;return new StudyState{name=n,type=type,time_s=s.GetTime(),duration_s=s.GetDuration(),fps=((IMotionStudyProperties)s.GetProperties(type)).GetFrameRate(),active=s.IsActive};},
+            ()=>{if(doc.GetPathName()!=path||doc.ConfigurationManager.ActiveConfiguration.Name!=configuration||!Names((IMotionStudyManager)doc.Extension.GetMotionStudyManager()).OrderBy(v=>v).SequenceEqual(names.OrderBy(v=>v)))throw new Exception("SESSION_CONFLICT: motion state read identity changed");},
+            observation=>Log("MOTION_STATE_READ "+Json.Serialize(new{document=path,study=n,observation=observation})))).ToArray();
     }
     static object PoseDifference(Dictionary<string,double[]> before,Dictionary<string,double[]> after) {
         if(!before.Keys.OrderBy(n=>n).SequenceEqual(after.Keys.OrderBy(n=>n)))throw new Exception("CHECKPOINT_COMPONENT_SET_MISMATCH");
