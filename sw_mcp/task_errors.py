@@ -162,6 +162,15 @@ def task_failure(code, message, diagnostics=None, *, task_id='', asynchronous=Fa
             action.update(tool='get_recovery_state',arguments={},instruction='AI先读取原请求状态；请求未结束时不释放执行器。')
     else:
         action.update(tool='get_mechanism_task', arguments={'collect_evidence': True} if host else {'task_id': task_id} if task_id else {})
+    if code=='EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE' and diag.get('requested_initial_state')=='study_zero' and diag.get('old_study_frame_zero_supported_in_this_task') is False:
+        suggestion=diag.get('next_action') or {};arguments=suggestion.get('arguments') or {}
+        selected=arguments.get('task_id','')
+        if re.fullmatch('[a-f0-9]{32}',selected):
+            action.update(tool='plan_mechanism_task',arguments={**arguments,'task_id':selected,'initial_state':'saved'},
+                options_status='initial_state_selection_required',instruction=suggestion.get('instruction',message),
+                previous_role_ratio_and_group_arguments_must_be_preserved=True,
+                initial_state_change_is_not_execution_authorization=True,
+                recovery_state_query={'tool':'get_mechanism_task','arguments':{'task_id':selected}})
     if host:
         action['recovery_state_query'] = {'tool': 'get_mechanism_task', 'arguments': {'collect_evidence': True}}
     elif code == 'PRIOR_TASK_UNCONFIRMED' or code.startswith('ORPHAN_'):

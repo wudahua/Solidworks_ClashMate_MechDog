@@ -13,6 +13,60 @@ from unittest.mock import patch
 
 
 class ConstraintTests(unittest.TestCase):
+    def test_saved_initial_plan_exposes_copy_only_discard_and_grid_before_confirmation(self):
+        folder=Path(__file__).resolve().parents[1]/'runs'/('saved-initial-'+uuid.uuid4().hex[:8]);folder.mkdir()
+        raw=survey();recommendation=eg.recommend(raw)
+        studies=[{'name':'historical','time_s':.5,'fps':2500,'duration_s':.5,'type':4}]
+        core.write(folder/'导入.json',{'checkpoint':{'studies':studies}})
+        preparation={'required':True,'starting_pose':'saved_imported_assembly_pose',
+                     'nonzero_copy_studies_to_remove':studies,'old_study_frame_zero_verified':False,
+                     'source_and_import_checkpoint_preserved':True,'public_checkpoint_or_reset_tools_required':False}
+        def native(operation,**args):
+            self.assertEqual(operation,'_preview_external_gear_pair')
+            return {'plan_id':'read-only','initial_state_preparation':preparation}
+        session=SimpleNamespace(folder=folder,model=raw['model_id'],external_survey=raw,external_recommendation=recommendation,call=Mock(side_effect=native))
+        state={'task_id':'a'*32,'phase':'proposal_ready','motion_parameters':{'speed':60,'duration_s':2,'output_fps':30,'reverse_direction':False,'signed_target_travel_deg':720}}
+        def submit(t,phase,operation):operation();return t
+        engine=SimpleNamespace(sessions={state['task_id']:session},_require_session=Mock(),_submit=submit)
+        task.propose(engine,state,'','saved','strict','','',0,0,{},None,None)
+        self.assertEqual(state['phase'],'awaiting_confirmation')
+        self.assertEqual(state['proposal']['initial_state_preparation'],preparation)
+        motion=state['proposal']['motion'];self.assertEqual(motion['output_fps'],50)
+        self.assertEqual(motion['native_grid_recommendation']['requested_output_fps'],30)
+        self.assertFalse(motion['native_grid_recommendation']['interpolation_allowed'])
+        self.assertIn('不是重算历史零时刻',state['next_action']['instruction'])
+        self.assertNotIn('execution_consumed',state)
+        self.assertEqual([c.args[0] for c in session.call.call_args_list],['_preview_external_gear_pair'])
+        self.assertEqual(core.read(folder/'导入.json')['checkpoint']['studies'],studies)
+
+    def test_study_zero_refusal_explains_saved_pose_alternative_without_dispatch(self):
+        t={'task_id':'b'*32,'phase':'proposal_ready'}
+        engine=SimpleNamespace(_require_session=Mock(),_submit=Mock())
+        with self.assertRaises(core.StopBatch) as error:
+            task.propose(engine,t,'candidate-1','study_zero','strict','rotor','body',2,3,{'input_shaft':'rotorA'},['附件甲'])
+        e=error.exception;self.assertEqual(e.code,'EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE')
+        self.assertFalse(e.diagnostics['old_study_frame_zero_supported_in_this_task'])
+        arguments=e.diagnostics['next_action']['arguments']
+        self.assertEqual(arguments['task_id'],t['task_id']);self.assertEqual(arguments['initial_state'],'saved')
+        self.assertEqual(arguments['candidate_id'],'candidate-1');self.assertEqual(arguments['input_shaft_hint'],'rotorA')
+        self.assertEqual(arguments['stationary_component_hints'],['附件甲'])
+        self.assertEqual((arguments['gear_ratio_numerator'],arguments['gear_ratio_denominator']),(2,3))
+        self.assertIn('保留本次角色',e.diagnostics['next_action']['instruction'])
+        engine._submit.assert_not_called();self.assertEqual(t['phase'],'proposal_ready')
+        envelope=task_failure(e.code,str(e),e.diagnostics,task_id=t['task_id'])
+        self.assertEqual(envelope['next_action']['tool'],'plan_mechanism_task')
+        self.assertEqual(envelope['next_action']['options_status'],'initial_state_selection_required')
+        self.assertEqual(envelope['next_action']['arguments'],arguments)
+        self.assertTrue(envelope['next_action']['initial_state_change_is_not_execution_authorization'])
+        self.assertFalse(envelope['next_action']['automatic_retry'])
+
+    def test_impossible_known_grid_fails_before_native_plan_not_rounded_or_defaulted(self):
+        folder=Path(__file__).resolve().parents[1]/'runs'/('saved-grid-'+uuid.uuid4().hex[:8]);folder.mkdir()
+        core.write(folder/'导入.json',{'checkpoint':{'studies':[{'fps':2503,'type':4}]}})
+        with self.assertRaises(core.StopBatch) as error:
+            task.motion_settings({'motion_parameters':{'duration_s':2,'output_fps':30}},SimpleNamespace(folder=folder),80)
+        self.assertEqual(error.exception.code,'EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE')
+
     def test_gear_import_keeps_long_operation_budget_without_native_dispatch(self):
         root=Path(__file__).resolve().parents[1]/'runs'/('gear-budget-'+uuid.uuid4().hex[:8]);root.mkdir()
         bridge=Bridge(root,timeout=5,motion_scan_timeout=600);self.addCleanup(bridge.close)
@@ -126,7 +180,9 @@ class ConstraintTests(unittest.TestCase):
                 if not value['busy']:return value
                 time.sleep(.005)
             self.fail('fixture timeout')
-        self.assertEqual(wait()['phase'],'scope_review_required')
+        prepared=wait();self.assertEqual(prepared['phase'],'scope_review_required')
+        self.assertIn('assembly_intent',prepared['next_action']['instruction'])
+        self.assertIn('完整stationary/input/output',prepared['next_action']['instruction'])
         with self.assertRaises(core.StopBatch):engine.plan(tid)
         engine.plan(tid,stationary_component_hints=['附件甲']);planned=wait()
         self.assertEqual(planned['phase'],'awaiting_confirmation')

@@ -198,7 +198,7 @@ class MotionTaskEngine(TaskEngine):
                 next_action={'tool':'plan_mechanism_task','arguments':{'task_id':t['task_id']},
                     'instruction':'AI解释两轴、齿轮、键和固定支承推荐及比例依据；唯一方案自动采用推荐。只在角色或比例无法确定时用自然语言澄清，不让用户填写实体ID。'})
             if suggestion.get('requires_stationary_scope_review'):
-                t['next_action']['instruction']='AI先读取assembly_constraint_review及scope_review，解释已有配合能证明的关系、局部约束缺口与运动归属歧义；集中澄清需要随动或静止的机械分组，不让用户逐个填写73个名称或ID。优先复用已有约束并补最小必要配合；stationary_component_hints只用于用户明确授权的静止仿真简化，不等同于配合补齐，不默认固定附件，不重复改名称试错。'
+                t['next_action']['instruction']='AI先读取assembly_constraint_review及scope_review，解释已有配合能证明的关系、局部约束缺口与运动归属歧义；集中澄清需要随动或静止的机械分组，不让用户逐个填写73个名称或ID。目标为补齐或保留原配合时，AI使用plan_mechanism_task的assembly_intent参数填入完整stationary/input/output三组，优先复用已有约束并补最小必要配合。initial_state=saved可在方案确认后仅在副本移除非零历史算例并采用保存姿态建立新运动，不要求调用公共checkpoint/reset工具，也不证明历史零时刻。stationary_component_hints只用于用户明确授权的静止仿真简化，不等同于配合补齐，不默认固定附件，不重复改名称试错。'
             if len(suggestion['proposals'])==1:t['next_action']['arguments']['candidate_id']=suggestion['proposals'][0]['candidate_id']
             return
         if t.get('task_kind')=='gear_transmission':
