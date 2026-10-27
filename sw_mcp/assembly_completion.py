@@ -50,24 +50,44 @@ class SparseBasis:
         return delta
 
 
+class IntentValidationError(ValueError):
+    def __init__(self,reason,**diagnostics):
+        self.diagnostics=diagnostics
+        super().__init__(reason)
+
+
 def declared_groups(components, intent):
     """Exact names, complete disjoint ownership; no substring substitutions."""
     if not isinstance(intent,dict) or 'stationary' not in intent or not 1<=len(intent)<=128 or any(not isinstance(k,str) or not 1<=len(k)<=64 for k in intent):
-        raise ValueError('intent_requires_named_groups_and_stationary_reference')
+        raise IntentValidationError('intent_requires_named_groups_and_stationary_reference',required_group='stationary')
     by_name={}
-    for c in components:by_name.setdefault(c['instance'].casefold(),[]).append(c['component_id'])
-    groups={};seen=set()
+    for c in components:by_name.setdefault(c['instance'].casefold(),[]).append(c)
+    groups={};seen=set();owners={};unexpected=[];ambiguous=[];invalid=[];invalid_groups=[]
     for key,names in intent.items():
-        if not isinstance(names,list) or not names:raise ValueError('empty_or_invalid_intent_group')
+        if not isinstance(names,list) or not names:
+            invalid_groups.append(key);continue
         groups[key]=[]
-        for name in names:
-            if not isinstance(name,str) or len(by_name.get(name.casefold(),[]))!=1:raise ValueError('intent_name_not_unique')
-            cid=by_name[name.casefold()][0]
-            if cid in seen:raise ValueError('intent_groups_overlap')
+        for index,name in enumerate(names):
+            if not isinstance(name,str):
+                invalid.append({'group':key,'index':index,'type':type(name).__name__});continue
+            matches=by_name.get(name.casefold(),[])
+            if not matches:unexpected.append(name);continue
+            if len(matches)!=1:
+                ambiguous.append({'name':name,'matches':[{'instance':c['instance'],'component_id':c['component_id']} for c in matches]});continue
+            cid=matches[0]['component_id']
+            owners.setdefault(cid,[]).append({'group':key,'index':index})
             seen.add(cid);groups[key].append(cid)
-    if seen!={c['component_id'] for c in components}:raise ValueError('intent_inventory_incomplete')
+    missing=sorted(c['instance'] for c in components if c['component_id'] not in seen)
+    overlaps=[{'instance':next(c['instance'] for c in components if c['component_id']==cid),'component_id':cid,'occurrences':where}
+              for cid,where in owners.items() if len(where)>1]
+    diagnostics={'missing':missing,'unexpected':sorted(set(unexpected)),'ambiguous':ambiguous,'overlaps':overlaps,
+                 'invalid_entries':invalid,'invalid_groups':invalid_groups,'inventory_component_count':len(components),
+                 'matched_component_count':len(seen),'matching_rule':'casefold_exact_full_instance_name_no_substring_or_automatic_assignment'}
+    reason=('empty_or_invalid_intent_group' if invalid_groups else 'intent_name_not_unique' if invalid or unexpected or ambiguous
+            else 'intent_groups_overlap' if overlaps else 'intent_inventory_incomplete' if missing else None)
+    if reason:raise IntentValidationError(reason,**diagnostics)
     if not any(c.get('fixed_component') for c in components if c['component_id'] in groups['stationary']):
-        raise ValueError('stationary_group_has_no_existing_ground')
+        raise IntentValidationError('stationary_group_has_no_existing_ground',**diagnostics)
     return groups
 
 

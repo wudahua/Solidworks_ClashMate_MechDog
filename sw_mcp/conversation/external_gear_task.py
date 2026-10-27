@@ -57,9 +57,23 @@ def propose(engine,t,candidate,initial_state,alignment_mode,moving,reference,rat
     if assembly_intent is not None:
         if stationary_hints is not None:raise core.StopBatch('EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE','配合补齐的运动分组与固定简化声明不能混用。')
         try:
-            if set(assembly_intent)!={'stationary','input','output'}:raise ValueError('external_pair_requires_three_named_groups')
+            required={'stationary','input','output'}
+            if not isinstance(assembly_intent,dict) or set(assembly_intent)!=required:
+                actual=set(assembly_intent) if isinstance(assembly_intent,dict) else set()
+                raise assembly_completion.IntentValidationError('external_pair_requires_three_named_groups',
+                    required_groups=sorted(required),missing_groups=sorted(required-actual),unexpected_groups=sorted(k for k in actual-required if isinstance(k,str)),
+                    invalid_group_key_types=sorted({type(k).__name__ for k in actual if not isinstance(k,str)}))
             intent_groups=assembly_completion.declared_groups(s.external_survey['components'],assembly_intent)
-        except (ValueError,TypeError) as error:raise core.StopBatch('EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE','AI须给出完整、互不重叠且精确匹配的静止/输入/输出机械分组。',{'reason':str(error)}) from error
+        except (ValueError,TypeError) as error:
+            diagnostics={'reason':str(error),**getattr(error,'diagnostics',{}),'cad_dispatched':False,'task_queued':False,
+                         'automatic_group_assignment':False}
+            diagnostics['diagnostic_record_path']=str(s.folder/'机械分组校验失败.json')
+            diagnostics['diagnostic_record_status']='written'
+            try:core.write(s.folder/'机械分组校验失败.json',diagnostics)
+            except OSError as audit_error:
+                diagnostics.update(diagnostic_record_status='write_failed',diagnostic_record_error={'type':type(audit_error).__name__,'winerror':getattr(audit_error,'winerror',None)})
+            raise core.StopBatch('EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE',
+                '机械分组未通过；AI按missing/unexpected/ambiguous/overlaps或分组名称差集修正，须完整且互不重叠，不自动改变机械归属。',diagnostics) from error
         def completion_operation():
             s.state('planning','正在读取补约束参考；复用原配合和阵列，不批量固定附件…')
             survey=s.call('_survey_external_gear_pair',model_id=s.model,include_completion_references=True)
@@ -128,8 +142,16 @@ def motion_settings(t,s,count):
     imported=core.read(s.folder/'导入.json') if (s.folder/'导入.json').exists() else {}
     rates=[state.get('fps') for state in imported.get('checkpoint',{}).get('studies',[]) if state.get('type')==4]
     try:grid=recommend_exact_native_subset(motion['duration_s'],motion['output_fps'],count,rates)
-    except ValueError as error:raise core.StopBatch('EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE','已知原生高帧率无法在当前时长和姿态预算内精确采样，须显式调整方案。',{'reason':str(error)}) from error
+    except ValueError as error:raise core.StopBatch('EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE','请求虽通过prepare范围检查，但已知原生结果无法在当前时长和姿态预算内提供精确采样网格，须显式调整方案。',
+        {'reason':str(error),'requested_output_fps':motion['output_fps'],'duration_s':motion['duration_s'],
+         'observed_historical_native_rates':rates,'maximum_sampling_fps':120,'maximum_pose_samples':100000,
+         'automatic_fps_change':False,'cad_dispatched':False,'write_dispatched':False}) from error
     if grid:motion['output_fps']=grid['recommended_sampling_fps'];motion['native_grid_recommendation']=grid
+    frames=round(motion['duration_s']*motion['output_fps'])+1
+    if frames*count>100000:
+        raise core.StopBatch('EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE','请求采样网格超过全组件姿态预算，须显式调整方案；未派发写入。',
+            {'reason':'pose_sample_budget_exceeded','component_count':count,'requested_frames':frames,'pose_samples':frames*count,
+             'maximum_pose_samples':100000,'cad_dispatched':False,'write_dispatched':False})
     return motion
 
 

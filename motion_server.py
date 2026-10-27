@@ -25,7 +25,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.23", instructions="日常优先纯AI对话：先get_mechanism_task找回任务，无任务再prepare_mechanism_task，按推荐plan，仅机械歧义或具体写入授权需要用户回答。motion支持旋转/直线，concentric支持受限圆边同轴配合，external_gear_pair支持普通两平行轴外齿轮的比例联动，自动推荐轴/齿轮/键/固定支承和比例依据，复用支承同轴及轴向配合；轴系组内既有约束经确认保留压缩后改用刚性连接；名称或比例证据不足才用自然语言澄清，不能用孔径或外径猜齿数；plan列明新增/复用/旋转锁修改，取得具体授权后一次执行。gear_transmission保留命名泵两轴六动件的完整1∶1反向模板；先plan说明解除固定、9项约束及装配位移预算，确认后仅驱动长轴，不做齿面接触；execute一次，get查询，finish恢复并核对退出再开始第二轮。客户端断连不结束活任务；持有进程丢失只读旧记录及orphan_review，不循环查询死亡COM；全部原owner/CAD/执行器身份和退出、绑定旧日志与门禁核对通过且用户明确同意后，才用close_unrestored=true、keep_result=false异常归档，恢复仍未验证，不重放令牌。get_mechanism_task(collect_evidence=True)自动读已有诊断，无需用户命令或网页。prepare自动核对并通过EOF交接已证明空闲的本宿主旧执行器，无需先finish_motion_session；忙碌、未知或归属不明仍保留。get_recovery_state的session_admission区分请求空闲与允许重新选实例。以下保留原有工具用法：先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。配合关联mate_context_complete=false时只作几何参考，不推断没有配合；可按mate_context_next_query显式从空cursor重扫，保留原几何待办，改变mate_context_budget_s后重新分页。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求；成功后可核对baseline_candidate的新运行ID用于新预演，旧基线失配时不得自动改绑。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.24", instructions="日常优先纯AI对话：先get_mechanism_task找回任务，无任务再prepare_mechanism_task，按推荐plan，仅机械歧义或具体写入授权需要用户回答。motion支持旋转/直线，concentric支持受限圆边同轴配合，external_gear_pair支持普通两平行轴外齿轮的比例联动，自动推荐轴/齿轮/键/固定支承和比例依据，复用支承同轴及轴向配合；轴系组内既有约束经确认保留压缩后改用刚性连接；名称或比例证据不足才用自然语言澄清，不能用孔径或外径猜齿数；plan列明新增/复用/旋转锁修改，取得具体授权后一次执行。gear_transmission保留命名泵两轴六动件的完整1∶1反向模板；先plan说明解除固定、9项约束及装配位移预算，确认后仅驱动长轴，不做齿面接触；execute一次，get查询，finish恢复并核对退出再开始第二轮。客户端断连不结束活任务；持有进程丢失只读旧记录及orphan_review，不循环查询死亡COM；全部原owner/CAD/执行器身份和退出、绑定旧日志与门禁核对通过且用户明确同意后，才用close_unrestored=true、keep_result=false异常归档，恢复仍未验证，不重放令牌。get_mechanism_task(collect_evidence=True)自动读已有诊断，无需用户命令或网页。prepare自动核对并通过EOF交接已证明空闲的本宿主旧执行器，无需先finish_motion_session；忙碌、未知或归属不明仍保留。get_recovery_state的session_admission区分请求空闲与允许重新选实例。以下保留原有工具用法：先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。配合关联mate_context_complete=false时只作几何参考，不推断没有配合；可按mate_context_next_query显式从空cursor重扫，保留原几何待办，改变mate_context_budget_s后重新分页。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求；成功后可核对baseline_candidate的新运行ID用于新预演，旧基线失配时不得自动改绑。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 _task_engine=None
 _formal_engine=None
@@ -44,7 +44,7 @@ async def dialogue_call(method,*args,**kwargs):
 async def prepare_mechanism_task(assembly_path:str,moving_component_hint:str='',reference_component_hint:str='',
         task_kind:Literal['motion','concentric','gear_transmission','external_gear_pair']='motion',motion:Literal['rotary','linear']='rotary',speed:float=12,
         duration_s:float=1,output_fps:int=30,reverse_direction:bool=False,minimum_travel:float=0):
-    """AI对话首选：专用CAD实例及隔离副本，自动推荐驱动、圆边或两轴齿轮比例传动。external_gear_pair：普通平行轴外齿轮，自动推荐角色与比例证据，支持独立齿轮轴；要求解析的顶层零件和可核验固定同轴支承，已有约束仅复用明确支持类型，未知约束不删除。比例不足在plan澄清，明确设计齿数优先，阵列数仅建议；不从孔径猜比例，非任意机构。motion限5秒601帧，speed为rpm/mm/s；concentric固定12rpm/1秒30fps。gear_transmission首版限18件无配合泵：长轴—键—主动齿轮—1∶1反向齿轮配合—从动齿轮—键—短轴，六动件其余固定；60rpm/2秒/30或60fps，minimum_travel=0，自动推荐角色并在plan解释解除固定、9项约束和0.01mm预算，确认前不写。只驱动长轴，不检查齿形接触/摩擦/受力。名称线索可留空，实体ID由AI管理，finish默认恢复。"""
+    """AI对话首选：专用CAD实例及隔离副本，自动推荐驱动、圆边或两轴齿轮比例传动。external_gear_pair：普通平行轴外齿轮，旋转最多60rpm/2秒，整数5–120fps（含50fps），须帧对齐及至少10间隔；plan另核验原生精确网格、姿态预算并确认，不保证任意请求网格可求解；自动推荐角色与比例证据，支持独立齿轮轴；要求解析的顶层零件和可核验固定同轴支承，已有约束仅复用明确支持类型，未知约束不删除。比例不足在plan澄清，明确设计齿数优先，阵列数仅建议；不从孔径猜比例，非任意机构。motion限5秒601帧，speed为rpm/mm/s；concentric固定12rpm/1秒30fps。gear_transmission首版限18件无配合泵：长轴—键—主动齿轮—1∶1反向齿轮配合—从动齿轮—键—短轴，六动件其余固定；60rpm/2秒/30或60fps，minimum_travel=0，自动推荐角色并在plan解释解除固定、9项约束和0.01mm预算，确认前不写。只驱动长轴，不检查齿形接触/摩擦/受力。名称线索可留空，实体ID由AI管理，finish默认恢复。"""
     return await dialogue_call('prepare',assembly_path,moving_component_hint,reference_component_hint,task_kind,motion,
                                speed,duration_s,output_fps,reverse_direction,minimum_travel)
 
@@ -101,7 +101,11 @@ def grid_refusal(tool, arguments, duration_key="duration_s", fps_key="output_fps
 
 async def call(operation, **params):
     try:
-        return packed({"ok": True, "result": await asyncio.to_thread(bridge.request, operation, **params)})
+        result=await asyncio.to_thread(bridge.request, operation, **params)
+        if operation=='get_environment' and isinstance(result,dict):
+            from sw_mcp.conversation.motion_tasks import environment_prepare_limits
+            result=environment_prepare_limits(result)
+        return packed({"ok": True, "result": result})
     except CadError as exc:
         return packed({"ok": False, "error": operational_error(exc.code, str(exc), exc.restoration_status, exc.diagnostics, exc.document_context_restoration_status, job_created=False)}, True)
 
@@ -127,7 +131,7 @@ def history_refusal(exc, fallback, tool, arguments):
 
 @mcp.tool()
 async def get_environment(solidworks_pid: str = "") -> CallToolResult:
-    """读取环境。可显式传正整数PID字符串或auto纠正首次连接：只允许本服务尚未派发任何CAD请求、无未知恢复且旧启动进程已结束时重新选择；不修改客户端配置，不自动换实例。"""
+    """读取环境；budget_matrix.new_solve是底层上限，managed_tasks列出各对话任务实际限制。可显式传正整数PID字符串或auto纠正首次连接：只允许本服务尚未派发任何CAD请求、无未知恢复且旧启动进程已结束时重新选择；不修改客户端配置，不自动换实例。"""
     if solidworks_pid:
         try:
             await asyncio.to_thread(bridge.select_startup_session, solidworks_pid)
