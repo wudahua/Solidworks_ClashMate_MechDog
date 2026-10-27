@@ -100,6 +100,14 @@ def main():
             ratio=v['gear_ratio']['numerator']/v['gear_ratio']['denominator'];target=v['motion']['signed_target_travel_deg']
             for run in v['runs']:
                 a=run['audit'];assert a['passed']
+                # A sub-second Calculate may finish between frontend polls.
+                # Verify its durable native receipt, rather than requiring a
+                # particular transient stage to appear in sampled progress.
+                native_dir=Path(core.read(Path(verified['directory'])/'session'/'活会话归属.json')['runtime'])/'runs'/run['run_id']
+                native=core.read(native_dir/'solve.json');timing=core.read(native_dir/'solve-performance.json')
+                assert native['run_id']==run['run_id'] and native['calculate_returned_success']
+                assert native['solver_status']=='completed' and native['sampling_status']=='completed'
+                assert timing['execution_completed'] and timing['phase_totals_ms']['native_calculate']>=0
                 assert abs(a['signed_final_degrees'][v['roles']['input_shaft']]-target)<.1
                 assert abs(a['signed_final_degrees'][v['roles']['output_shaft']]+target*ratio)<.1
             try:c.tool('execute_mechanism_task',task_id=tid,plan_token='0'*32,confirmed=True,scope_confirmed=True);raise AssertionError('duplicate accepted')
@@ -133,9 +141,11 @@ def main():
         assert {v['round_index'] for v in active}=={1,2},'both independent rounds must be visible'
         assert all(v['phase']=='running' for v in active),'per-round native results cannot mark the whole task verified'
         records=[v['progress'] for v in active if v.get('progress',{}).get('native_progress_observed')]
-        assert records and any(v['stage']=='native_calculate' for v in records)
+        assert records
         assert all(v['overall_fraction'] is None and v['estimated_remaining_s'] is None and not v['heartbeat_proves_native_progress'] for v in records)
         result['progress_acceptance']={'observations':len(observations),'rounds_observed':[1,2],
+            'calculate_observed_by_frontend_poll':any(v['stage']=='native_calculate' for v in records),
+            'calculate_verified_by_native_receipts':True,
             'native_stages':sorted({v['stage'] for v in records}),'task_not_prematurely_verified':True,'no_native_progress_inferred_from_heartbeat':True}
         result.update(status='pass',same_owner=True,source_files_unchanged=True)
     except Exception as error:

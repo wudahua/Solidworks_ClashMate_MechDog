@@ -37,7 +37,19 @@ def propose(engine,t,candidate,initial_state,alignment_mode,moving,reference,rat
     engine._require_session(t['task_id'])
     if stationary_hints is not None and not isinstance(stationary_hints,list):raise core.StopBatch('EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE','静止侧声明须为名称列表。')
     if t['phase'] not in {'proposal_ready','scope_review_required'}:raise core.StopBatch('TASK_NOT_READY_FOR_PLAN')
-    if initial_state!='saved' or alignment_mode!='strict':raise core.StopBatch('EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE','普通两轴任务使用保存初态；不借用圆边小幅对齐授权。')
+    if initial_state!='saved':
+        alternative={'task_id':t['task_id'],'initial_state':'saved','alignment_mode':alignment_mode,
+                     'candidate_id':candidate,'moving_component_hint':moving,'reference_component_hint':reference,
+                     'gear_ratio_numerator':ratio_numerator,'gear_ratio_denominator':ratio_denominator,
+                     **{key+'_hint':value for key,value in role_hints.items()}}
+        if stationary_hints is not None:alternative['stationary_component_hints']=stationary_hints
+        if assembly_intent is not None:alternative['assembly_intent']=assembly_intent
+        raise core.StopBatch('EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE',
+            '普通两轴任务从导入保存姿态建立新的运动；这不同于恢复历史算例的零时刻。可用initial_state=saved重新只读规划，方案列出仅在副本移除的非零历史算例，明确确认后才执行。',
+            {'requested_initial_state':initial_state,'old_study_frame_zero_supported_in_this_task':False,'CAD_called':False,
+             'next_action':{'tool':'plan_mechanism_task','arguments':alternative,
+                            'instruction':'保留本次角色、比例和静止分组参数，仅将initial_state改为saved重新规划；这不是执行授权。若必须使用历史零时刻，请先准备已核验的独立输入，不能把保存姿态冒充历史零时刻。'}})
+    if alignment_mode!='strict':raise core.StopBatch('EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE','普通两轴任务不借用圆边小幅对齐授权。')
     for x in (ratio_numerator,ratio_denominator):
         if type(x) not in (int,float) or not math.isfinite(x) or not 0<=x<=1000:raise core.StopBatch('EXTERNAL_GEAR_RATIO_INVALID')
     if bool(ratio_numerator)!=bool(ratio_denominator):raise core.StopBatch('EXTERNAL_GEAR_RATIO_INVALID','比例分子、分母须一起提供或同时留0使用推荐。')
@@ -63,14 +75,7 @@ def propose(engine,t,candidate,initial_state,alignment_mode,moving,reference,rat
             selected['constraint_completion']=supplements
             n,d=(ratio_numerator,ratio_denominator) if ratio_numerator else (selected['gear_ratio'].get('numerator'),selected['gear_ratio'].get('denominator'))
             if not n or not d:raise core.StopBatch('EXTERNAL_GEAR_RATIO_REQUIRED')
-            motion=dict(t['motion_parameters']);motion['native_grid_policy']='exact_grid_or_exact_native_subset'
-            from ..native_grid import recommend_exact_native_subset
-            imported=core.read(s.folder/'导入.json')
-            rates=[state.get('fps') for state in imported.get('checkpoint',{}).get('studies',[]) if state.get('type')==4]
-            try:grid=recommend_exact_native_subset(motion['duration_s'],motion['output_fps'],len(survey['components']),rates)
-            except ValueError as error:raise core.StopBatch('EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE','已知原生高帧率无法在当前时长和姿态预算内精确采样，须显式调整方案。',{'reason':str(error)}) from error
-            if grid:
-                motion['output_fps']=grid['recommended_sampling_fps'];motion['native_grid_recommendation']=grid
+            motion=motion_settings(t,s,len(survey['components']))
             ratio_abs=n/d;requested=motion['speed'];safe=min(60,40*motion['output_fps']/(6*max(1,ratio_abs)))
             motion['speed']=min(requested,safe);motion.update(signed_target_travel_deg=motion['speed']*motion['duration_s']*6*(-1 if motion['reverse_direction'] else 1),
                 expected_travel=motion['speed']*motion['duration_s']*6,requested_speed_rpm=requested,speed_recommendation_changed=motion['speed']!=requested,
@@ -97,7 +102,7 @@ def propose(engine,t,candidate,initial_state,alignment_mode,moving,reference,rat
     ratio_abs=n/d
     # A proposed slower validation speed is visible in the plan and requires the
     # same explicit confirmation. It never silently changes an executed request.
-    motion=dict(t['motion_parameters']);requested_speed=motion['speed'];safe=min(60,40*motion['output_fps']/(6*max(1,ratio_abs)))
+    motion=motion_settings(t,s,len(s.external_survey['components']));requested_speed=motion['speed'];safe=min(60,40*motion['output_fps']/(6*max(1,ratio_abs)))
     if motion['speed']>safe:motion['speed']=safe;motion['signed_target_travel_deg']=safe*motion['duration_s']*6*(-1 if motion['reverse_direction'] else 1)
     motion.update(expected_travel=motion['speed']*motion['duration_s']*6,
                   requested_speed_rpm=requested_speed,speed_recommendation_changed=motion['speed']!=requested_speed,
@@ -111,9 +116,21 @@ def propose(engine,t,candidate,initial_state,alignment_mode,moving,reference,rat
             'motion':motion,'one_input_motor_only':True,'requires_explicit_assembly_and_ratio_confirmation':True,
             'constraint_strategy':'reuse_supports_retain_suppress_verified_rotor_pair_mates_and_add_one_rigid_where_needed','pre_setup_motion_preservation_certified':False},
             next_action={'tool':'execute_mechanism_task','arguments':{'task_id':t['task_id'],'plan_token':None},
-                'instruction':'AI须逐项说明stationary_scope中的拟固定组件；静止侧声明不是写入授权，仍须确认当前完整方案。AI说明推荐输入/输出轴、齿轮、键和支承及比例依据，逐项列出复用/新增配合、转子组既有配合的保留压缩及刚性替换、支承旋转锁修改、解除固定及0.01mm预算；若建议降低试算转速明确说明前后值。取得具体方案授权后一次执行，不声称接触或任意齿轮已支持。'})
+                'instruction':'若initial_state_preparation.required=true，先逐项说明nonzero_copy_studies_to_remove：仅在副本移除这些历史算例，按导入保存姿态建立新运动；不是重算历史零时刻，原文件和导入检查点保留，不调用公开checkpoint/reset入口。若motion含native_grid_recommendation，明确请求与推荐采样率以及只选精确原生时间点、不插值的规则。AI须逐项说明stationary_scope中的拟固定组件；静止侧声明不是写入授权，仍须确认当前完整方案。AI说明推荐输入/输出轴、齿轮、键和支承及比例依据，逐项列出复用/新增配合、转子组既有配合的保留压缩及刚性替换、支承旋转锁修改、解除固定及0.01mm预算；若建议降低试算转速明确说明前后值。取得具体方案授权后一次执行，不声称接触或任意齿轮已支持。'})
         t['next_action']['arguments']['plan_token']=t['plan_token'];core.write(s.folder/'两轴齿轮待确认方案.json',t['proposal'])
     return engine._submit(t,'planning',operation)
+
+
+
+def motion_settings(t,s,count):
+    motion=dict(t['motion_parameters']);motion['native_grid_policy']='exact_grid_or_exact_native_subset'
+    from ..native_grid import recommend_exact_native_subset
+    imported=core.read(s.folder/'导入.json') if (s.folder/'导入.json').exists() else {}
+    rates=[state.get('fps') for state in imported.get('checkpoint',{}).get('studies',[]) if state.get('type')==4]
+    try:grid=recommend_exact_native_subset(motion['duration_s'],motion['output_fps'],count,rates)
+    except ValueError as error:raise core.StopBatch('EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE','已知原生高帧率无法在当前时长和姿态预算内精确采样，须显式调整方案。',{'reason':str(error)}) from error
+    if grid:motion['output_fps']=grid['recommended_sampling_fps'];motion['native_grid_recommendation']=grid
+    return motion
 
 
 def audit(path,roles,groups,axis,settings,initial_components,native_axes,ratio_abs):

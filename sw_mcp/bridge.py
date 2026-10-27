@@ -12,6 +12,7 @@ import ctypes
 import re
 import hashlib
 import stat
+import math
 from pathlib import Path
 from sw_mcp.startup import executor_diagnostics
 
@@ -33,6 +34,40 @@ class Bridge:
         "restore_model_checkpoint", "apply_mate", "create_motion_study", "convert_motion_study",
         "reset_study_time", "create_model_checkpoint", "probe_motion_compatibility", "_preview_gear_transmission", "_apply_gear_transmission", "_test_gear_transmission_rollback"})
     ASYNC_QUERIES = frozenset({"inspect_model", "list_mate_references", "list_drive_candidates"})
+    RESTORATION_WAIT_S = 60
+
+    def _bound_request_progress(self, request_id, operation, params, dispatched_at):
+        """Offline progress bound to this dispatch, never a second native request."""
+        job_id = params.get('job_id')
+        if not isinstance(job_id, str) or not re.fullmatch(r'[a-f0-9]{32}', job_id):
+            return {}
+        try:
+            mapping = json.loads((self.root/'runs/jobs'/(job_id+'.request.json')).read_text('utf-8'))
+            observed = json.loads((self.root/'runs/progress'/(job_id+'.json')).read_text('utf-8'))
+            if mapping != {'job_id':job_id, 'request_id':request_id, 'operation':operation}:
+                return {}
+            stamp = observed.get('updated_at')
+            if type(stamp) not in (int, float) or not math.isfinite(stamp) or stamp < dispatched_at or stamp > time.time()+1:
+                return {}
+            if observed.get('job_id') != job_id:
+                return {}
+            if operation == 'run_user_study':
+                # RunUserStudy progress carries job_id/run_id, not model_id.
+                if params.get('run_id') != job_id or observed.get('run_id') != job_id:
+                    return {}
+            elif observed.get('model_id') != params.get('model_id') or observed.get('plan_id') != params.get('plan_id'):
+                return {}
+            return {k:observed.get(k) for k in ('stage','checkpoint_id','run_id','updated_at')}
+        except (OSError, ValueError, TypeError, AttributeError):
+            return {}
+
+    def _record_restoration_wait(self, request_id, observation):
+        folder = self.root/'runs/request-waits'
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder/(request_id+'.json')
+        temporary = path.with_suffix('.tmp')
+        temporary.write_text(json.dumps(observation, ensure_ascii=False, indent=2), encoding='utf-8')
+        temporary.replace(path)
 
     def _wait_budget(self, operation, params):
         queued_query = operation in self.ASYNC_QUERIES and isinstance(params.get("job_id"), str) and re.fullmatch(r"[a-f0-9]{32}", params["job_id"])
@@ -558,6 +593,8 @@ class Bridge:
                 params = {**params, "model_id": self._mate_model(params)}
             request_id = uuid.uuid4().hex
             future = concurrent.futures.Future()
+            wait_observation = None
+            restoration_wait_started = False
             with self._state_lock:
                 self._pending[request_id] = future
             try:
@@ -595,23 +632,53 @@ class Bridge:
                     temporary.replace(mapping)
                 self._process.stdin.write(wire)
                 self._process.stdin.flush()
+                dispatched_at = time.time()
                 deadline = self._wait_budget(operation, params)
-                response = future.result(timeout=deadline)
+                try:
+                    response = future.result(timeout=deadline)
+                except concurrent.futures.TimeoutError:
+                    progress = self._bound_request_progress(request_id, operation, params, dispatched_at)
+                    if operation != 'run_user_study' or progress.get('stage') not in {'restore_solve_scope','finalize_solve_evidence'}:
+                        raise
+                    wait_observation = {'request_id':request_id,'operation':operation,'job_id':params['job_id'],
+                        'primary_wait_budget_s':deadline,'restoration_wait_budget_s':self.RESTORATION_WAIT_S,
+                        'native_progress_at_primary_deadline':progress,'same_original_future':True,
+                        'additional_native_dispatches':0,'automatic_recalculate':False,'forcibly_cancelled':False,
+                        'status':'waiting_for_original_restoration_response'}
+                    try:
+                        self._record_restoration_wait(request_id, wait_observation)
+                    except OSError as audit_error:
+                        wait_observation.update(status='restoration_wait_not_started_audit_unavailable',audit_write_error=type(audit_error).__name__)
+                        raise concurrent.futures.TimeoutError() from audit_error
+                    restoration_wait_started = True
+                    response = future.result(timeout=self.RESTORATION_WAIT_S)
+                    wait_observation['status'] = 'original_terminal_response_received'
+                    try:
+                        self._record_restoration_wait(request_id, wait_observation)
+                    except OSError as audit_error:
+                        wait_observation['audit_write_error'] = type(audit_error).__name__
             except concurrent.futures.TimeoutError as exc:
                 with self._state_lock:
                     # The late response clears quarantine only after the executor actually finishes.
                     if not future.done():
                         self._quarantined_request = request_id
-                progress = {}
+                progress = self._bound_request_progress(request_id, operation, params, dispatched_at)
                 job_id = params.get("job_id")
                 if isinstance(job_id, str) and re.fullmatch(r"[a-f0-9]{32}", job_id):
                     try:
                         observed = json.loads((self.root / "runs/progress" / (job_id + ".json")).read_text(encoding="utf-8"))
                         if observed.get("job_id") == job_id and observed.get("model_id") == model_id and observed.get("plan_id") == params.get("plan_id"):
-                            progress = {k: observed.get(k) for k in ("stage", "checkpoint_id")}
+                            if not progress: progress = {k: observed.get(k) for k in ("stage", "checkpoint_id")}
                     except (OSError, ValueError, AttributeError):
                         pass
-                raise CadError("CAD_TIMEOUT", "调用超时；CAD 操作可能继续，不能重复写入。查询 get_job 或 get_recovery_state 的最终响应。", diagnostics={"request_id": request_id, "operation": operation, "model_id": model_id, "plan_id": params.get("plan_id"), "job_id": job_id, "wait_budget_s": deadline, "client_wait_expired": True, "cad_operation_finished": False, "native_call_forcibly_cancelled": False, "late_response_expected_or_possible": True, "last_native_progress": progress, "next_tools": ["get_job", "get_recovery_state"] if job_id else ["get_recovery_state"], "next_call": {"tool": "get_recovery_state", "arguments": {"request_id": request_id}}, "retry_write_allowed": False}) from exc
+                if wait_observation:
+                    if restoration_wait_started:
+                        wait_observation['status'] = 'restoration_wait_expired_original_request_still_unconfirmed'
+                        try:
+                            self._record_restoration_wait(request_id, wait_observation)
+                        except OSError as audit_error:
+                            wait_observation['audit_write_error'] = type(audit_error).__name__
+                raise CadError("CAD_TIMEOUT", "调用超时；CAD 操作可能继续，不能重复写入。查询 get_job 或 get_recovery_state 的最终响应。", diagnostics={"request_id": request_id, "operation": operation, "model_id": model_id, "plan_id": params.get("plan_id"), "job_id": job_id, "wait_budget_s": deadline+(self.RESTORATION_WAIT_S if restoration_wait_started else 0), "primary_wait_budget_s":deadline,"restoration_wait":wait_observation,"client_wait_expired": True, "cad_operation_finished": False, "native_call_forcibly_cancelled": False, "late_response_expected_or_possible": True, "last_native_progress": progress, "next_tools": ["get_job", "get_recovery_state"] if job_id else ["get_recovery_state"], "next_call": {"tool": "get_recovery_state", "arguments": {"request_id": request_id}}, "retry_write_allowed": False}) from exc
             except (BrokenPipeError, OSError) as exc:
                 state_after = self.recovery_state()
                 if state_after.get("request_id") == request_id and state_after.get("status") == "active":
@@ -621,6 +688,8 @@ class Bridge:
                 error = response.get("error", {})
                 raise CadError(error.get("code", "CAD_ERROR"), error.get("message", "CAD operation failed"), error.get("restoration_status", "unknown"), error.get("diagnostics"), error.get("document_context_restoration_status", "not_required"))
             result = response["result"]
+            if wait_observation and isinstance(result, dict):
+                result = {**result, 'transport_restoration_wait':wait_observation}
             if replacement:
                 result = {**result, "recovery_session": {"previous_solidworks_pid": state.get("solidworks_pid"), "current_solidworks_pid": self._startup.result().get("process_id"), "replacement": True}}
             return result

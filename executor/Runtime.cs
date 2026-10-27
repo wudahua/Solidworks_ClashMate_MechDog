@@ -80,10 +80,14 @@ public partial class Cad {
             } catch(Exception failure) { try{Dispose();}catch(Exception rollback){owner.LastOperationRestoration="unknown";throw new CadFault("RESTORATION_FAILED","打开或激活失败，且无法核验原窗口恢复。",new{original_error=failure.ToString(),rollback_error=rollback.ToString()});}if(failure is COMException)owner.LastOperationRestoration="unknown";throw; }
         }
         public void RefreshStudy() {
-            EnsureActive();var current=cad.Sw.GetOpenDocumentByName(expectedPath) as IModelDoc2;
-            if(current==null||current.ConfigurationManager.ActiveConfiguration.Name!=expectedConfiguration)throw new Exception("SESSION_CONFLICT: study refresh input changed");
-            Doc=current;Study=(IMotionStudy)((IMotionStudyManager)Doc.Extension.GetMotionStudyManager()).GetMotionStudy(targetStudyName);
-            if(Study==null||!Study.IsActive)throw new Exception("SESSION_CONFLICT: expected study is not active");
+            // Rebuild/Calculate can invalidate the old document/study proxies.
+            // Resolve the recorded input first; never activate or select another input.
+            var current=cad.Sw.GetOpenDocumentByName(expectedPath) as IModelDoc2;
+            var active=cad.Sw.ActiveDoc as IModelDoc2;
+            if(current==null||active==null||!string.Equals(current.GetPathName(),expectedPath,StringComparison.OrdinalIgnoreCase)||!string.Equals(active.GetPathName(),expectedPath,StringComparison.OrdinalIgnoreCase)||current.ConfigurationManager.ActiveConfiguration.Name!=expectedConfiguration||active.ConfigurationManager.ActiveConfiguration.Name!=expectedConfiguration)throw new Exception("SESSION_CONFLICT: study refresh input changed");
+            var selected=(IMotionStudy)((IMotionStudyManager)current.Extension.GetMotionStudyManager()).GetMotionStudy(targetStudyName);
+            if(selected==null||!selected.IsActive)throw new Exception("SESSION_CONFLICT: expected study is not active");
+            Doc=current;Study=selected;
         }
         public void EnsureActive() {
             var active=(IModelDoc2)cad.Sw.ActiveDoc;

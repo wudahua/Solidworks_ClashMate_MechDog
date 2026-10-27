@@ -9,7 +9,7 @@ from . import core
 LABELS = {
     'import_full_rebuild':'完整重建隔离副本', 'import_rebuild_snapshot':'核对重建前配合与姿态', 'prepare_gear_copy_metadata':'准备副本标准件标记',
     'initializing_solve': '初始化求解', 'motion_preflight': '检查求解条件',
-    'native_calculate': '原生 Motion 求解', 'capture_solver_poses': '采集全组件姿态',
+    'native_calculate': '原生 Motion 求解', 'verify_native_time_axis': '读取并核对原生结果时间轴', 'capture_solver_poses': '采集全组件姿态',
     'postprocess_motion': '整理轨迹与验证驱动', 'restore_solve_scope': '恢复求解前状态',
     'finalize_solve_evidence': '核对恢复并保存证据',
 }
