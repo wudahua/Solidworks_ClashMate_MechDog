@@ -2,9 +2,9 @@
 
 **SolidWorks ClashMate MechDog MCP**：通过 AI 对话，在本机 SolidWorks 中检查装配体、推荐驱动、运行运动仿真、导出曲线，并验证与恢复副本。
 
-版本：`v0.4.3-alpha.22`。保留原有 24 个工具，新增 6 个对话任务与收尾工具，共 30 项。日常使用不需要网页或另一套桌面助手。
+版本：`v0.4.3-alpha.23`。保留原有 24 个工具，新增 6 个对话任务与收尾工具，共 30 项。日常使用不需要网页或另一套桌面助手。
 
-[项目与下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases) · [本轮说明](发布说明_v0.4.3-alpha.22.md) · [AI客户端与开发者契约](CONTRACT.md)
+[项目与下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases) · [本轮说明](发布说明_v0.4.3-alpha.23.md) · [AI客户端与开发者契约](CONTRACT.md)
 
 ## 用户如何使用
 
@@ -12,7 +12,7 @@
 
 安装与升级工作可以交给 AI 完成，入口仍是项目虚拟环境的 Python 和 `motion_server.py`，配置键仍为 `solidworks-clashmate-mechdog`。保留已有正式服务，更新同一个安装目录即可；不要同时启用旧测试服务或旧桌面助手的执行器。
 
-升级由AI执行：下载新发布的ZIP和同名SHA256，核验后解压到独立临时目录，**运行新包里的 `upgrade.ps1`，以原安装目录作为 `TargetDir`**。先预演，通过后再按同一路径升级；升级器负责租约、备份、逐字节验证及失败回滚，原配置继续指向原目录。alpha.7及更早安装目录中的旧升级器不认识 `sw_mcp/conversation/`，不能用它直接审查新包；不要先手工覆盖旧校验器，也不执行尚未核验ZIP内的校验代码。升级回执列出实际运行入口及 `path_policy_source=running_upgrade_entry`。普通用户不需要手输命令或手改JSON。
+升级由AI执行：从Release的Assets下载官方`Solidworks_ClashMate_MechDog_v版本_source.zip`及同名`.zip.sha256`；不要把GitHub自动生成的`Source code (zip/tar.gz)`或自行裁剪的tag包用作升级资产。下载匹配的ZIP和SHA256，核验后解压到独立临时目录，**运行新包里的 `upgrade.ps1`，以原安装目录作为 `TargetDir`**。先预演，通过后再按同一路径升级；升级器负责租约、备份、逐字节验证及失败回滚，原配置继续指向原目录。alpha.7及更早安装目录中的旧升级器不认识 `sw_mcp/conversation/`，不能用它直接审查新包；不要先手工覆盖旧校验器，也不执行尚未核验ZIP内的校验代码。升级回执列出实际运行入口及 `path_policy_source=running_upgrade_entry`。普通用户不需要手输命令或手改JSON。
 
 所有30项工具都经同一托管宿主派发（原始JSON schema拒绝及已有证据离线收集除外）。已修正Windows将Principal.UserId回写为账户名时的身份自检：优先核对定义XML的真实SID，必要时将限定账户名解析到SID；不能核实身份时明确拒绝，并保留失败字段。宿主基础设施错误会引导AI离线整理诊断，不再让不可达的普通任务查询反复调用。
 
@@ -132,3 +132,5 @@ alpha.21另对历史失败快照增加error_context/historical_errors标注；PR
 
 
 alpha.21本机完成19项归档专项及493项回归（492通过、1项8.3环境跳过）。实际OS进程夹具验证“仅CAD退出仍拒绝、全部原资源结束后异常归档”，这些夹具进程为Python，不作为真实CAD孤儿恢复通过。归档后同一正式MCP宿主完成18组件准备泵样本两轮正反向运动、约±72°、共1116行姿态、恢复和CAD/执行器退出0，源文件不变。远端反馈的原记录仍需在原电脑由AI读取全部退出证据后核验，不能将本机夹具归档当成已经解除该条远端记录。
+
+alpha.23修订：受管原生调用超过底层等待后保持原请求、原连接及心跳，最多等待至每次调用累计3600秒，不重发、不把第一轮原生成功当作整项验证通过；达到上限仍只读接收迟到结论，再正常恢复收尾。升级包拒绝列出清单外文件，锁失败附带已有日志线索，日志不是当前持有者证明。验收以本版发布说明及独立回执为准。

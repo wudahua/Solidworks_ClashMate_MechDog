@@ -22,6 +22,7 @@ class NativeAxisErrorTests(unittest.TestCase):
  Console.OutputEncoding=new UTF8Encoding(false);
  var error=new COMException("stale native result",unchecked((int)0x80010108));
  error.Data["time_axis_read_failure"]=new Dictionary<string,object>{{"time_axis_file","fixture/time-axis.json"},{"verified",false},{"automatic_recalculate",false},{"stage","native_plot_get_values"}};
+ error.Data["sampling_failure_file"]="fixture/sampling-failure.json";
  Console.WriteLine(new JavaScriptSerializer().Serialize(new[]{Error(error,"restored"),Error(new Exception("MOTION_RESULTS_INCOMPLETE"),"restored")}));
 }'''
         helper=folder/'FormatterCheck.cs';helper.write_text(header+'class FormatterCheck{\n'+method+main+'\n}',encoding='utf-8')
@@ -40,6 +41,7 @@ class NativeAxisErrorTests(unittest.TestCase):
         self.assertEqual(details['time_axis_file'],'fixture/time-axis.json')
         self.assertEqual(details['stage'],'native_plot_get_values')
         self.assertFalse(details['verified']);self.assertFalse(details['automatic_recalculate'])
+        self.assertEqual(com['diagnostics']['details']['sampling_failure_file'],'fixture/sampling-failure.json')
         self.assertEqual(ordinary['code'],'MOTION_RESULTS_INCOMPLETE')
         self.assertIsNone(ordinary['diagnostics']['native_hresult'])
         self.assertIsNone(ordinary['diagnostics']['details']['time_axis_read_failure'])

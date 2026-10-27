@@ -56,6 +56,7 @@ def release_executor(bridge,folder,timeout=8):
 
 class ConversationSession(mate_worker.Session):
     def __init__(self,project,folder,runtime_base,moving='',reference='',on_stage=None,on_progress=None):
+        self.current_call_for_observation={}
         self.moving_hint=moving;self.reference_hint=reference;self.on_stage=on_stage;self.on_progress=on_progress;self.initial_inspection=None
         super().__init__(project,folder,runtime_base)
     def state(self,status,message,**kw):
@@ -80,17 +81,29 @@ class ConversationSession(mate_worker.Session):
             'runtime':str(self.runtime),'model_id':getattr(self,'model',None),
             'checkpoint_id':getattr(self,'checkpoint',None),'native_unknown':getattr(self,'unknown',False),
             'in_flight':in_flight if in_flight is not None else prior.get('in_flight'),
+            'pending_native_response':{k:v for k,v in (getattr(self,'pending_native_response',None) or {}).items() if k!='started_monotonic'},
             'committed':getattr(self,'committed',False),'ended':getattr(self,'ended',False),'observed_at':time.time()}
         core.write(path,value)
+        # Publish an immutable-by-convention observation snapshot only after
+        # the durable record commits. Pollers must not hold a Windows read
+        # handle on the file while this writer atomically replaces it.
+        self.current_call_for_observation=dict(value['in_flight'] or {})
     def call(self,operation,**kw):
         if operation=='run_user_study':kw={**kw,'job_id':kw['run_id']}
         self.persist_ownership({'operation':operation,'started':time.time()})
         try:
             with task_progress.watch_call(self,operation,kw):
-                return super().call(operation,**kw)
+                started=time.monotonic()
+                try:return super().call(operation,**kw)
+                except Exception as error:
+                    if getattr(error,'code',None)!='CAD_TIMEOUT':raise
+                    from . import managed_wait
+                    return managed_wait.wait(self,error,operation,kw,started)
         finally:
             self.persist_ownership({})
     def require_live_idle(self):
+        from . import managed_wait
+        managed_wait.reconcile(self)
         if self.unknown:raise core.StopBatch('NATIVE_STATE_UNKNOWN','原生状态未知，未重新派发。')
         if not self.proc or self.proc.poll() is not None or not self.bridge or not self.bridge._process or self.bridge._process.poll() is not None:
             self.unknown=True;self.persist_ownership()
@@ -220,6 +233,21 @@ class TaskEngine:
         with self.lock:
             if task_id not in self.tasks:raise core.StopBatch('TASK_NOT_IN_CURRENT_SERVER','没有该任务记录；可不传task_id查询已有任务。')
             t=self.tasks[task_id]
+            s=self.sessions.get(task_id)
+            if s and not t.get('busy') and not t.get('closed') and getattr(s,'pending_native_response',None):
+                from . import managed_wait
+                try:
+                    managed_wait.reconcile(s)
+                    proof=getattr(s,'late_response_reconciled',None)
+                    if proof and proof['native_state_known'] and (t.get('error') or {}).get('code')=='CAD_TIMEOUT':
+                        t['original_failure']=t.pop('error')
+                        t.update(phase='incomplete_after_late_response',late_native_outcome=proof,
+                            task_outcome='native_request_ended_whole_task_incomplete',
+                            next_action={'tool':'finish_mechanism_task','arguments':{'task_id':task_id},
+                                'instruction':'原请求迟到响应已核对，原连接可安全收尾；整项任务未完成，不宣告两轮验证通过。不重放execute，默认恢复导入检查点后结束。'})
+                        self.save(t)
+                except Exception as error:
+                    t['late_response_review_error']={'code':getattr(error,'code',type(error).__name__),'message':str(error)}
             # Bound only the presentation. Integrity still uses and persists
             # the complete admission inventory; evidence collection keeps it.
             workspace=t.get('source_workspace_files')
@@ -261,7 +289,9 @@ class TaskEngine:
                             'then_if_same_live_handles_and_original_request_ended':{'tool':'restore_model_checkpoint',
                                 'arguments':{'model_id':s.model,'checkpoint_id':s.checkpoint}},
                             'instruction':'用户授权恢复原状态后，仅在原活连接和旧请求结束均核对通过时恢复导入检查点；不换实例、不重放写入。'}
-            return value
+            from . import task_views
+            if s and not t.get('closed'):value=task_progress.current_view(s,value)
+            return task_views.present(value)
     def mark_recovered(self,task_id,value):
         with self.lock:
             t=self.tasks[task_id]
