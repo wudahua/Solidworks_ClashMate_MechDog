@@ -2,6 +2,8 @@
 
 本文件随源码包交付。正式入口为 `motion_server.py`，协议握手名称为 `SolidWorks ClashMate MechDog`，推荐配置键为 `solidworks-clashmate-mechdog`，共30项工具。实际字段、枚举和默认值以当前连接的 `tools/list` 为准；不要用历史发布说明替代当前 schema。
 
+升级维护：`upgrade.ps1`继承宿主Python环境，不为完成升级清除`PYTHONPATH`、禁用`sitecustomize`、替换文件API或调用另一种删除入口。alpha.27在包与目标校验后、预检和租约前，以及正式租约内观察`Path.unlink`实现来源；外部包装或无法确认时，仅用宿主原API检查自建32字节文件及实际移除结果，允许且通过才继续，不一概拒绝包装器。拒绝、退出或静默不执行时返回`UPGRADE_FILE_API_CHECK_FAILED`、`python_runtime`、`file_api_checks`和`target_mutation_started=false`；托管源码及备份未写，自建`runs/upgrade-api-checks`预检记录和被拒绝的文件保留。这是单文件能力检查，不是对所有运行时钩子或未来批量操作的认证。AI应核对宿主支持的授权维护渠道，不能据此自动关闭其保护。事务中`SystemExit`及键盘中断进入逐文件回滚：先恢复所有可恢复旧文件，再清理新增托管文件，保留每项拒绝的类型/路径；任何残留仍是`UPGRADE_FAILED_ROLLBACK_INCOMPLETE`。回执写入失败单列`UPGRADE_RECOVERY_RECEIPT_FAILED`，旧回执与真实字节结论分别保留，不自动重试或宣称可启动MCP。历史执行器PID只作线索，租约和原生互斥体才用于当前占用核对，不删除陈旧恢复日志。
+
 ## 输入与单位
 
 所有工具输入均为封闭 JSON 对象（`additionalProperties=false`）；未知键拒绝，不改名、不丢弃。原始 JSON 按 schema 校验，布尔值不能代替数字，字符串不能代替数值，枚举非法值及非有限数值拒绝，返回 `INVALID_ARGUMENT` 或相应专用参数码。只有 schema 明确允许时才可传 null；空字符串与 null 不等价。

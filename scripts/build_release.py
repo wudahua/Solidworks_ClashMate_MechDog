@@ -8,13 +8,13 @@ from pathlib import Path
 from verify_release import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.3-alpha.26"
+VERSION = "0.4.3-alpha.27"
 
 
 def build(candidate=False):
     # Keep the installed/CI regression suite identical to the development suite.
-    sources = [ROOT/name for name in ("README.md", "CONTRACT.md", "发布说明_v0.4.3-alpha.26.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
-    sources += [ROOT/'tests/test_managed_late_response.py',ROOT/'tests/test_managed_feedback.py']
+    sources = [ROOT/name for name in ("README.md", "CONTRACT.md", "发布说明_v0.4.3-alpha.27.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
+    sources += [ROOT/'tests/test_managed_late_response.py',ROOT/'tests/test_managed_feedback.py',ROOT/'tests/test_upgrade_host_runtime.py']
     sources += [ROOT/'tests/test_motion_reference_read.py']
     sources += [ROOT/'tests/test_interface_consistency.py',ROOT/'tests/test_assembly_group_recommendations.py',ROOT/'tests/test_assembly_connections.py',ROOT/'tests/BasicConnectionFixture.cs',ROOT/'tests/basic_connections_native.py']
     sources += [ROOT/'tests'/name for name in ('test_external_gears.py','external_gears_native.py','ExternalGearFixture.cs','test_task_execution.py','test_external_gear_constraints.py','test_assembly_constraints.py','test_restoration_wait.py','test_native_axis_error.py')]

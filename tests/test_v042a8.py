@@ -107,17 +107,21 @@ class UpgradeReceiptTests(unittest.TestCase):
         from upgrade_powershell_checks import check
         self.assertTrue(check()['all_passed'])
 
-    def test_uncatchable_interruption_leaves_pending_receipt(self):
+    def test_catchable_keyboard_interrupt_verifies_rollback_and_receipt(self):
+        from scripts.upgrade import UpgradeFailure
         fixture = fixtures.ReleaseUpgradeTests(); fixture.setUp()
         try:
             fixture.write_zip()
             with patch('scripts.upgrade.idle_installation', return_value=nullcontext()), patch('scripts.upgrade.verify', side_effect=KeyboardInterrupt):
-                with self.assertRaises(KeyboardInterrupt):
+                with self.assertRaises(UpgradeFailure) as caught:
                     fixtures.upgrade(fixture.package, fixture.target, sys.executable, install=False)
             receipt = json.loads(next((fixture.target/'upgrade-backups').glob('*/receipt.json')).read_text(encoding='utf-8'))
-            self.assertEqual(receipt['stage'], 'copying_sources')
+            self.assertEqual(caught.exception.code,'UPGRADE_FAILED_ROLLBACK_VERIFIED')
+            self.assertEqual(receipt['stage'], 'failed_rollback_verified')
             self.assertFalse(receipt['committed'])
-            self.assertFalse(receipt['rollback_verified'])
+            self.assertTrue(receipt['rollback_verified'])
+            self.assertEqual(receipt['original_failure']['type'],'KeyboardInterrupt')
+            self.assertEqual((fixture.target/'motion_server.py').read_bytes(),b'old source')
         finally: fixture.doCleanups()
 
 
