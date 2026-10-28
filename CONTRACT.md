@@ -210,3 +210,11 @@ alpha.24：budget_matrix.new_solve仅表示底层创建/求解上限，managed_t
 alpha.25：范围复核可返回assembly_group_recommendation，含assembly_intent_draft、mechanical_questions及当前证据绑定。支持的局部约束关系和阵列种子只用于推荐；不同组的可达证据冲突、无依据组件和整件轴承不自动归组。AI解释推荐并补齐已有明确意图，必要时集中询问，禁止默认把所有剩余件归静止。规划和执行仍分别需要完整互斥清单与具体方案授权，未知归属不部分派发。
 
 外齿轮推荐复用完整原生survey的组件/配合/姿态作为恢复对照，跳过重复full inspect；预检失败或survey不完整仍保留原独立检查。求解后从采样到名称身份核验、总览和驱动读取共用局部CommandInProgress批处理；嵌套读取保留true，在finally恢复调用前原值，范围不跨Calculate、配合创建、原生保存或快照恢复。所有组件、逐帧姿态、持久身份解析及恢复检查继续执行，不跨请求缓存。总耗时包含进入和退出批处理，不以阶段耗时转移声称提速。
+# 通用基础连接任务
+
+`prepare_mechanism_task(task_kind="assembly_constraints")` 创建隔离副本并体检。`plan_mechanism_task.connection_intent` 是1至8项严格对象列表：`component_a`、`component_b` 为实例名称线索，`kind` 为 `rigid/revolute/prismatic`，可选 `axis_hint` 装配全局坐标系中的三维非零方向及 `candidate_id`。AI优先采用已有轴线证据；方向本身不能生成材料转轴。不能混用齿轮分组、圆边对齐或马达参数。
+
+原生全约束观察与运动目标冲突时返回 `CONNECTION_GOAL_CONFLICT`，不是要求操作者改工具参数。只读不完整、未知几何、已有锁定配合的移动后端边界均保持可见，不等于无配合。新方案撤销旧令牌；确认仍不授权执行未列出的补充。
+
+补齐后验证小幅允许运动与禁止方向、固定件及原有受支持连接，并逐次核对全部恢复。临时距离试验约束以成果检查点恢复移除，原配合和固定标志不变。`verification.declared_scope_passed` 限本次声明的小位移范围；`native_motion_study_solved=false`，不声称全局DOF或完整Motion求解。默认finish恢复导入检查点；明确保留已验证副本才keep_result。
+

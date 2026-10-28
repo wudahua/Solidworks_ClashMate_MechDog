@@ -72,8 +72,9 @@ class Session:
         self.bridge=Bridge(self.runtime)
         self.bridge._selected_startup_pid=str(self.proc.pid)
         self.state('importing','正在创建并核验隔离副本，原文件不写入…')
-        gear_import=getattr(self,'task_kind',None)=='external_gear_pair'
-        imported=self.call('_import_gear_assembly' if gear_import else 'import_assembly',path=str(path),materialize_virtual_components=materialize,**({'import_id':uuid.uuid4().hex} if gear_import else {}))
+        kind=getattr(self,'task_kind',None)
+        named_import=kind in {'external_gear_pair','assembly_constraints'}
+        imported=self.call('_import_constraint_assembly' if kind=='assembly_constraints' else '_import_gear_assembly' if named_import else 'import_assembly',path=str(path),materialize_virtual_components=materialize,**({'import_id':uuid.uuid4().hex} if named_import else {}))
         self.model=imported['model_id'];self.checkpoint=imported['checkpoint']['checkpoint_id'];self.import_preflight=imported.get('preflight');core.write(self.folder/'导入.json',imported)
         return self.rescan(hint)
     def rescan(self,hint=''):

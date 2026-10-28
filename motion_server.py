@@ -9,6 +9,15 @@ import re
 import os
 from pathlib import Path
 from typing import Literal
+from pydantic import BaseModel,ConfigDict,Field
+
+class ConnectionIntent(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    component_a:str=Field(min_length=1,max_length=512)
+    component_b:str=Field(min_length=1,max_length=512)
+    kind:Literal['rigid','revolute','prismatic']
+    axis_hint:list[float]|None=Field(default=None,min_length=3,max_length=3)
+    candidate_id:str=Field(default='',max_length=40)
 
 from sw_mcp.validation import StrictMCPServer, InputRefusal, refuse, packed
 from sw_mcp.errors import operational_error
@@ -25,7 +34,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.25", instructions="日常优先纯AI对话：先get_mechanism_task找回任务，无任务再prepare_mechanism_task，按推荐plan，仅机械歧义或具体写入授权需要用户回答。motion支持旋转/直线，concentric支持受限圆边同轴配合，external_gear_pair支持普通两平行轴外齿轮的比例联动，自动推荐轴/齿轮/键/固定支承和比例依据，复用支承同轴及轴向配合；轴系组内既有约束经确认保留压缩后改用刚性连接；名称或比例证据不足才用自然语言澄清，不能用孔径或外径猜齿数；plan列明新增/复用/旋转锁修改，取得具体授权后一次执行。gear_transmission保留命名泵两轴六动件的完整1∶1反向模板；先plan说明解除固定、9项约束及装配位移预算，确认后仅驱动长轴，不做齿面接触；execute一次，get查询，finish恢复并核对退出再开始第二轮。客户端断连不结束活任务；持有进程丢失只读旧记录及orphan_review，不循环查询死亡COM；全部原owner/CAD/执行器身份和退出、绑定旧日志与门禁核对通过且用户明确同意后，才用close_unrestored=true、keep_result=false异常归档，恢复仍未验证，不重放令牌。get_mechanism_task(collect_evidence=True)自动读已有诊断，无需用户命令或网页。prepare自动核对并通过EOF交接已证明空闲的本宿主旧执行器，无需先finish_motion_session；忙碌、未知或归属不明仍保留。get_recovery_state的session_admission区分请求空闲与允许重新选实例。以下保留原有工具用法：先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。配合关联mate_context_complete=false时只作几何参考，不推断没有配合；可按mate_context_next_query显式从空cursor重扫，保留原几何待办，改变mate_context_budget_s后重新分页。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求；成功后可核对baseline_candidate的新运行ID用于新预演，旧基线失配时不得自动改绑。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
+mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.26", instructions="assembly_constraints提供角色无关的配合体检与刚性/转动/滑动目标补齐，自动推荐原生参考；plan用connection_intent传组件名称，明确方案确认后小位移验证并恢复，不当作完整Motion或全局DOF认证，已有锁定配合目标仅体检。日常优先纯AI对话：先get_mechanism_task找回任务，无任务再prepare_mechanism_task，按推荐plan，仅机械歧义或具体写入授权需要用户回答。motion支持旋转/直线，concentric支持受限圆边同轴配合，external_gear_pair支持普通两平行轴外齿轮的比例联动，自动推荐轴/齿轮/键/固定支承和比例依据，复用支承同轴及轴向配合；轴系组内既有约束经确认保留压缩后改用刚性连接；名称或比例证据不足才用自然语言澄清，不能用孔径或外径猜齿数；plan列明新增/复用/旋转锁修改，取得具体授权后一次执行。gear_transmission保留命名泵两轴六动件的完整1∶1反向模板；先plan说明解除固定、9项约束及装配位移预算，确认后仅驱动长轴，不做齿面接触；execute一次，get查询，finish恢复并核对退出再开始第二轮。客户端断连不结束活任务；持有进程丢失只读旧记录及orphan_review，不循环查询死亡COM；全部原owner/CAD/执行器身份和退出、绑定旧日志与门禁核对通过且用户明确同意后，才用close_unrestored=true、keep_result=false异常归档，恢复仍未验证，不重放令牌。get_mechanism_task(collect_evidence=True)自动读已有诊断，无需用户命令或网页。prepare自动核对并通过EOF交接已证明空闲的本宿主旧执行器，无需先finish_motion_session；忙碌、未知或归属不明仍保留。get_recovery_state的session_admission区分请求空闲与允许重新选实例。以下保留原有工具用法：先 import_assembly 创建隔离副本，再 inspect_model、preflight_motion、list_motion_studies。已有 Motion Analysis 可直接求解；与原生驱动对比时先 list_motion_studies(inspect_native_drives=True)，核对实际组件、轴线位置、相对组件和参数，方向相同不等于同一驱动输入；添加单一恒速驱动时先分页 list_drive_candidates，让用户指定组件、几何参考和方向。两种几何查询不完整时必须读取next_cursor并按geometry_scan.next_queries续查，保留父查询兄弟待办，直到客户端队列为空；单组件scope_geometry_complete不代表模型完成；next_queries_truncated时从inspect_model组件清单查询其余组件，不能把缺席解释为无圆柱面；若仍有skipped/unresolved则报告不完整，不无限重试。配合关联mate_context_complete=false时只作几何参考，不推断没有配合；可按mate_context_next_query显式从空cursor重扫，保留原几何待办，改变mate_context_budget_s后重新分页。不得将候选几何解释为设计意图。补配合先list_mate_references、preview_mate，用户明确确认具体方案后apply_mate；同心默认不锁旋转。verify_motion_preservation是显式试算，仅验证声明的采样运动要求；成功后可核对baseline_candidate的新运行ID用于新预演，旧基线失配时不得自动改绑。长任务返回 job_id，get_job 不调用 COM。未知请求状态先 get_recovery_state，然后恢复该模型检查点。get_run_artifacts 和 read_run_poses 可离线读取失败任务，但不得将 inconclusive 解释为通过。reset_study_time 是显式归零操作，不能解除隔离；缺失历史 PID 时须由操作者按官方 CLI 核对，不得自动确认操作已结束。运动曲线来自求解姿态及数值导数，不证明受力或接触精度。")
 
 _task_engine=None
 _formal_engine=None
@@ -42,9 +51,9 @@ async def dialogue_call(method,*args,**kwargs):
 
 @mcp.tool()
 async def prepare_mechanism_task(assembly_path:str,moving_component_hint:str='',reference_component_hint:str='',
-        task_kind:Literal['motion','concentric','gear_transmission','external_gear_pair']='motion',motion:Literal['rotary','linear']='rotary',speed:float=12,
+        task_kind:Literal['motion','concentric','gear_transmission','external_gear_pair','assembly_constraints']='motion',motion:Literal['rotary','linear']='rotary',speed:float=12,
         duration_s:float=1,output_fps:int=30,reverse_direction:bool=False,minimum_travel:float=0):
-    """AI对话首选：专用CAD实例及隔离副本，自动推荐驱动、圆边或两轴齿轮比例传动。external_gear_pair：普通平行轴外齿轮，旋转最多60rpm/2秒，整数5–120fps（含50fps），须帧对齐及至少10间隔；plan另核验原生精确网格、姿态预算并确认，不保证任意请求网格可求解；自动推荐角色与比例证据，支持独立齿轮轴；要求解析的顶层零件和可核验固定同轴支承，已有约束仅复用明确支持类型，未知约束不删除。比例不足在plan澄清，明确设计齿数优先，阵列数仅建议；不从孔径猜比例，非任意机构。motion限5秒601帧，speed为rpm/mm/s；concentric固定12rpm/1秒30fps。gear_transmission首版限18件无配合泵：长轴—键—主动齿轮—1∶1反向齿轮配合—从动齿轮—键—短轴，六动件其余固定；60rpm/2秒/30或60fps，minimum_travel=0，自动推荐角色并在plan解释解除固定、9项约束和0.01mm预算，确认前不写。只驱动长轴，不检查齿形接触/摩擦/受力。名称线索可留空，实体ID由AI管理，finish默认恢复。"""
+    """assembly_constraints：通用配合体检及刚性/转动/滑动连接补齐，最多128个解析顶层零件；prepare只读调查，plan用connection_intent选择名称和机械目标，自动推荐原生参考；具体确认后才补必要约束及有界小位移验证，不认证全局自由度/全行程。无需网页或新服务。AI对话首选：专用CAD实例及隔离副本，自动推荐驱动、圆边或两轴齿轮比例传动。external_gear_pair：普通平行轴外齿轮，旋转最多60rpm/2秒，整数5–120fps（含50fps），须帧对齐及至少10间隔；plan另核验原生精确网格、姿态预算并确认，不保证任意请求网格可求解；自动推荐角色与比例证据，支持独立齿轮轴；要求解析的顶层零件和可核验固定同轴支承，已有约束仅复用明确支持类型，未知约束不删除。比例不足在plan澄清，明确设计齿数优先，阵列数仅建议；不从孔径猜比例，非任意机构。motion限5秒601帧，speed为rpm/mm/s；concentric固定12rpm/1秒30fps。gear_transmission首版限18件无配合泵：长轴—键—主动齿轮—1∶1反向齿轮配合—从动齿轮—键—短轴，六动件其余固定；60rpm/2秒/30或60fps，minimum_travel=0，自动推荐角色并在plan解释解除固定、9项约束和0.01mm预算，确认前不写。只驱动长轴，不检查齿形接触/摩擦/受力。名称线索可留空，实体ID由AI管理，finish默认恢复。"""
     return await dialogue_call('prepare',assembly_path,moving_component_hint,reference_component_hint,task_kind,motion,
                                speed,duration_s,output_fps,reverse_direction,minimum_travel)
 
@@ -62,10 +71,11 @@ async def get_mechanism_task(task_id:str='',collect_evidence:bool=False):
 
 @mcp.tool()
 async def plan_mechanism_task(task_id:str,candidate_id:str='',moving_component_hint:str='',reference_component_hint:str='',initial_state:Literal['saved','study_zero']='saved',alignment_mode:Literal['strict','small_translation']='strict',
-    gear_ratio_numerator:float=0,gear_ratio_denominator:float=0,input_shaft_hint:str='',output_shaft_hint:str='',input_gear_hint:str='',output_gear_hint:str='',stationary_component_hints:list[str]|None=None,assembly_intent:dict[str,list[str]]|None=None):
-    """AI解释推荐并形成一次性待确认方案，不创建马达或配合。圆边默认strict卡不允许重定位；若返回小幅平移建议，可用small_translation只读规划，最多0.01mm横移、不纠正倾斜，须向用户单独说明并确认，对齐后旋转不证明对齐前运动保留。名称歧义用自然语言澄清。external_gear_pair用initial_state=saved从导入保存姿态建立新运动；非零历史算例仅在副本按具体方案确认后移除，不冒充恢复历史零时刻，也不引导调用被受管门禁阻断的公开checkpoint/reset工具。默认采用唯一角色和比例推荐，只有必要才提供四个角色名称hint；比例分子/分母同时正值可明确覆盖推荐，否则同时留0。assembly_intent仅用于external_gear_pair的配合补齐，AI按已澄清意图填写完整stationary/input/output名称分组；保留旧配合和静止侧固定标志，不能与stationary_component_hints混用。方案必须说明最小补充及副本以保存姿态建立新运动初态、移除非零历史算例，原文件及原检查点保留；仍须确认后执行。stationary_component_hints仅用于external_gear_pair的固定简化：AI先按已有约束证据解释并取得静止侧机械归属声明，再传精确组件名称列表；该声明不授权写入，方案仍需单独确认。不得默认固定全部附件。方案逐项列出解除固定、配合新增/复用、转子组原约束的保留压缩与刚性替换及比例来源；高传动比需降试算速度时明确前后值再确认。"""
+    gear_ratio_numerator:float=0,gear_ratio_denominator:float=0,input_shaft_hint:str='',output_shaft_hint:str='',input_gear_hint:str='',output_gear_hint:str='',stationary_component_hints:list[str]|None=None,assembly_intent:dict[str,list[str]]|None=None,connection_intent:list[ConnectionIntent]|None=Field(default=None,min_length=1,max_length=8)):
+    """assembly_constraints用connection_intent列出1–8项组件名称和rigid/revolute/prismatic目标，可选axis_hint方向或候选轴线；优先从已有约束自动推荐，不要求用户抄ID。保留历史算例和时钟，切换装配模型作用域须验证保存姿态及旧配合不变。仅补必要约束，不自动解固定或删旧配合。有界试验验证小位移、固定件和全部恢复，不能当作完整Motion Analysis。AI解释推荐并形成一次性待确认方案，不创建马达或配合。圆边默认strict卡不允许重定位；若返回小幅平移建议，可用small_translation只读规划，最多0.01mm横移、不纠正倾斜，须向用户单独说明并确认，对齐后旋转不证明对齐前运动保留。名称歧义用自然语言澄清。external_gear_pair用initial_state=saved从导入保存姿态建立新运动；非零历史算例仅在副本按具体方案确认后移除，不冒充恢复历史零时刻，也不引导调用被受管门禁阻断的公开checkpoint/reset工具。默认采用唯一角色和比例推荐，只有必要才提供四个角色名称hint；比例分子/分母同时正值可明确覆盖推荐，否则同时留0。assembly_intent仅用于external_gear_pair的配合补齐，AI按已澄清意图填写完整stationary/input/output名称分组；保留旧配合和静止侧固定标志，不能与stationary_component_hints混用。方案必须说明最小补充及副本以保存姿态建立新运动初态、移除非零历史算例，原文件及原检查点保留；仍须确认后执行。stationary_component_hints仅用于external_gear_pair的固定简化：AI先按已有约束证据解释并取得静止侧机械归属声明，再传精确组件名称列表；该声明不授权写入，方案仍需单独确认。不得默认固定全部附件。方案逐项列出解除固定、配合新增/复用、转子组原约束的保留压缩与刚性替换及比例来源；高传动比需降试算速度时明确前后值再确认。"""
     return await dialogue_call('plan',task_id,candidate_id,moving_component_hint,reference_component_hint,initial_state,alignment_mode,
-                               gear_ratio_numerator,gear_ratio_denominator,input_shaft_hint,output_shaft_hint,input_gear_hint,output_gear_hint,stationary_component_hints,assembly_intent)
+                               gear_ratio_numerator,gear_ratio_denominator,input_shaft_hint,output_shaft_hint,input_gear_hint,output_gear_hint,stationary_component_hints,assembly_intent,
+                               [r.model_dump() for r in connection_intent] if connection_intent is not None else None)
 
 @mcp.tool()
 async def execute_mechanism_task(task_id:str,plan_token:str,confirmed:bool=False,scope_confirmed:bool=False,alignment_confirmed:bool=False):

@@ -72,6 +72,8 @@ def _shape(entity):
 def _rows(mate, entities, origin, scale):
     """Relative spatial-twist rows [linear_at_origin / scale, angular]."""
     t = mate['type']
+    if t==5 and 'limit' in (mate.get('native_feature_type') or '').lower():
+        raise ValueError('limit_distance_is_not_an_equality_constraint')
     if t == 16:  # Native lock mate, six relative coordinates.
         return [[float(i == j) for i in range(6)] for j in range(6)]
     kind_a, axis_a, point_a = _shape(entities[0])

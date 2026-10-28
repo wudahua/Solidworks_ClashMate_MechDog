@@ -1,5 +1,8 @@
 """Check entry point classification; native CAD is always an explicit workflow."""
 ENTRIES = {
+  "basic_connections_native": {"mode": "native_cad", "scope": "explicit local cards, rigid/revolute/prismatic creation and preserved observed joints, same-owner real MCP reuse/reconnect and safe cleanup; no human WorkBuddy claim"},
+  "BasicConnectionFixture": {"mode": "native_cad", "scope": "empty owned instance only, generated two-cylinder test truth; no user CAD loaded"},
+  "test_assembly_connections": {"mode": "unittest", "caller": "test_assembly_connections.py", "scope": "generic rigid/revolute/prismatic planning, material-bound trial audit and typed public contracts; no CAD"},
   "external_gears_native": {"mode": "native_cad", "scope": "explicit supplied isolated assemblies, controlled rollback, same-owner ratio tasks and saved-result reuse; no physical contact claim"},
   "test_external_gears": {"mode": "unittest", "caller": "test_external_gears.py", "scope": "evidence-based two-axis roles/ratio and synthetic variable groups, signed ratio and drift counterexamples; no CAD"},
   "ExternalGearFixture": {"mode": "native_cad", "scope": "development-only explicit own CAD helper, actual part copies and generated references with declared trial weights; not a production entry"},

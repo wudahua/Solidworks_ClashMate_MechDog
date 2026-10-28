@@ -6,11 +6,17 @@ using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 
 public partial class Cad {
-    // Only the managed, newly owned, empty gear session uses this import policy.
+    // Shared copy isolation policy; this does not infer gear roles or intent.
     public object ImportGearAssembly(string source,bool materializeVirtual,string copyId=null) {
+        return ImportNamedOwnedAssembly(source,materializeVirtual,copyId,false);
+    }
+    public object ImportConstraintAssembly(string source,bool materializeVirtual,string copyId=null) {
+        return ImportNamedOwnedAssembly(source,materializeVirtual,copyId,true);
+    }
+    object ImportNamedOwnedAssembly(string source,bool materializeVirtual,string copyId,bool constraintScope) {
         if((Sw.GetDocuments() as object[]??new object[0]).Length!=0)
-            throw new CadFault("MODEL_PREFLIGHT_FAILED","齿轮保名导入要求本次专用空实例，未关闭或替换任何已有文档。");
-        if(materializeVirtual)throw new CadFault("EXTERNAL_GEAR_SCOPE_UNSUPPORTED","保名齿轮导入目前要求外部零件，不静默外部化虚拟组件。");
+            throw new CadFault("MODEL_PREFLIGHT_FAILED","保名导入要求本次专用空实例，未关闭或替换任何已有文档。");
+        if(materializeVirtual)throw new CadFault(constraintScope?"CONNECTION_SCOPE_UNSUPPORTED":"EXTERNAL_GEAR_SCOPE_UNSUPPORTED","保名导入目前要求外部零件，不静默外部化虚拟组件。");
         int option=(int)swUserPreferenceToggle_e.swUseFolderAsDefaultSearchLocation;
         bool original=Sw.GetUserPreferenceToggle(option);
         try {
