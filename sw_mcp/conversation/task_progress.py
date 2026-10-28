@@ -115,7 +115,7 @@ def _native_record(path, job_id, run_id, started):
 @contextmanager
 def watch_call(session, operation, arguments, interval=2):
     callback = getattr(session, 'on_progress', None)
-    if callback is None or operation not in {'run_user_study','_apply_external_gear_pair','_apply_gear_transmission','restore_model_checkpoint','import_assembly','_import_gear_assembly'}:
+    if callback is None or operation not in {'_survey_assembly_connections','_apply_assembly_connections','_probe_assembly_connection_pose','run_user_study','_apply_external_gear_pair','_apply_gear_transmission','restore_model_checkpoint','import_assembly','_import_gear_assembly','_import_constraint_assembly'}:
         yield
         return
     started = time.time()

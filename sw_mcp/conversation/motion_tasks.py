@@ -10,6 +10,9 @@ def prepare_limits():
     """Public card limits, also consumed by gear admission. No CAD inspection."""
     grid={'minimum_intervals':MINIMUM_INTERVALS,'duration_times_fps_must_be_integer':True}
     return {
+        'assembly_constraints':{'maximum_top_level_components':128,'maximum_connection_goals':8,'maximum_added_mates':64,
+            'native_motion_study_solved':False,'saved_pose_model_context_only':True,
+            'translation_trial_m':.0001,'rotation_trial_deg':.05,'global_DOF_certified':False},
         'motion':{'maximum_duration_s':5,'minimum_output_fps':5,'maximum_output_fps':120,'maximum_frames':601,**grid},
         'concentric':{'motion':'rotary','speed_rpm':12,'duration_s':1,'allowed_output_fps':[30],'maximum_frames':31},
         'gear_transmission':{'motion':'rotary','maximum_speed_rpm':60,'maximum_duration_s':2,
@@ -48,7 +51,9 @@ def prepare_inputs(path,task_kind='motion',motion='rotary',speed=12,duration_s=1
     lease, task record, executor, COM call or startup-gate mutation belongs here.
     The task handler repeats this check so direct calls cannot bypass admission.
     """
-    if task_kind not in {'motion','concentric','gear_transmission','external_gear_pair'}:raise core.StopBatch('INVALID_TASK_KIND')
+    if task_kind not in {'motion','concentric','gear_transmission','external_gear_pair','assembly_constraints'}:raise core.StopBatch('INVALID_TASK_KIND')
+    if task_kind=='assembly_constraints' and (motion!='rotary' or speed!=12 or duration_s!=1 or output_fps!=30 or reverse_direction is not False or minimum_travel!=0):
+        raise core.StopBatch('CONNECTION_INTENT_INVALID','配合体检不使用马达参数，须保留默认值；具体连接目标在plan填写。')
     if task_kind=='concentric' and (motion!='rotary' or speed!=12 or duration_s!=1 or output_fps!=30 or reverse_direction is not False or minimum_travel!=0):
         raise core.StopBatch('CONCENTRIC_FIXED_CARD_PARAMETERS','圆边首版固定12rpm、1秒30fps；不静默忽略其他运动参数。')
     settings=parameters(motion,speed,duration_s,output_fps,reverse_direction,minimum_travel) if task_kind in {'motion','gear_transmission','external_gear_pair'} else None
@@ -143,6 +148,9 @@ def frame_zero(path):
 class MotionSession(ConversationSession):
     task_kind='concentric'
     def rescan(self,hint=''):
+        if self.task_kind=='assembly_constraints':
+            from .connection_task import discover
+            return discover(self)
         if self.task_kind=='external_gear_pair':
             from .external_gear_task import discover
             return discover(self)
@@ -217,6 +225,9 @@ class MotionTaskEngine(TaskEngine):
         return self._submit(t,'preparing',operation)
 
     def _proposals(self,t,value):
+        if t.get('task_kind')=='assembly_constraints':
+            from .connection_task import publish_review
+            return publish_review(self,t,value)
         if t.get('task_kind')=='external_gear_pair':
             from .external_gears import public_card
             source_integrity.bind(t,self.sessions[t['task_id']]);suggestion=value['external_gear_pair']
@@ -252,8 +263,14 @@ class MotionTaskEngine(TaskEngine):
         t.pop('component_selection',None)
 
     def plan(self,task_id,candidate_id='',moving_component_hint='',reference_component_hint='',initial_state='saved',alignment_mode='strict',
-             gear_ratio_numerator=0,gear_ratio_denominator=0,input_shaft_hint='',output_shaft_hint='',input_gear_hint='',output_gear_hint='',stationary_component_hints=None,assembly_intent=None):
+             gear_ratio_numerator=0,gear_ratio_denominator=0,input_shaft_hint='',output_shaft_hint='',input_gear_hint='',output_gear_hint='',stationary_component_hints=None,assembly_intent=None,connection_intent=None):
         t=self.tasks[task_id]
+        if t.get('task_kind')=='assembly_constraints':
+            if candidate_id or moving_component_hint or reference_component_hint or initial_state!='saved' or alignment_mode!='strict' or assembly_intent is not None or stationary_component_hints is not None or gear_ratio_numerator or gear_ratio_denominator or input_shaft_hint or output_shaft_hint or input_gear_hint or output_gear_hint:
+                raise core.StopBatch('CONNECTION_INTENT_INVALID','通用连接目标使用connection_intent，不混用齿轮分组、运动初态或圆边对齐参数。')
+            from .connection_task import propose
+            return propose(self,t,connection_intent)
+        if connection_intent is not None:raise core.StopBatch('CONNECTION_INTENT_INVALID','connection_intent仅用于assembly_constraints，不静默忽略。')
         if t.get('task_kind')=='external_gear_pair':
             from .external_gear_task import propose
             return propose(self,t,candidate_id,initial_state,alignment_mode,moving_component_hint,reference_component_hint,
@@ -299,6 +316,9 @@ class MotionTaskEngine(TaskEngine):
 
     def execute(self,task_id,plan_token,confirmed=False,scope_confirmed=False,alignment_confirmed=False):
         t=self.tasks[task_id]
+        if t.get('task_kind')=='assembly_constraints':
+            from .connection_task import execute
+            return execute(self,t,plan_token,confirmed,scope_confirmed,alignment_confirmed)
         if t.get('task_kind')=='external_gear_pair':
             from .external_gear_task import execute
             return execute(self,t,plan_token,confirmed,scope_confirmed,alignment_confirmed)
@@ -392,7 +412,7 @@ class MotionTaskEngine(TaskEngine):
         def operation():
             s=self.sessions[task_id]
             restored_result=None
-            if t.get('task_kind') in {'concentric','gear_transmission','external_gear_pair'}:
+            if t.get('task_kind') in {'concentric','gear_transmission','external_gear_pair','assembly_constraints'}:
                 if not getattr(s,'result_checkpoint',None):raise core.StopBatch('RESULT_CHECKPOINT_UNAVAILABLE')
                 restored_result=s.call('restore_model_checkpoint',model_id=s.model,checkpoint_id=s.result_checkpoint)
                 if not core.restored_ok(restored_result):s.unknown=True;raise core.StopBatch('RESULT_RESTORE_NOT_VERIFIED')
@@ -417,6 +437,6 @@ class MotionTaskEngine(TaskEngine):
                 'result_checkpoint_restore':restored_result,'session':receipt,'native_exit':native,'executor_exit':executor,
                 'cleanup_status':'pass' if native.get('normal_zero_exit') is True else 'warning_nonzero_native_exit',
                 'result_assembly_path':str(result_path),
-                'result_assembly_sha256':core.digest(result_path),'includes_test_motion_study':True,
-                'result_scope':'verified_declared_motion_or_concentric_scope_not_whole_mechanism_or_DOF'},integrity)
+                'result_assembly_sha256':core.digest(result_path),'includes_test_motion_study':t.get('task_kind')!='assembly_constraints',
+                'result_scope':'verified_declared_basic_joint_small_trials_not_global_DOF_or_full_travel' if t.get('task_kind')=='assembly_constraints' else 'verified_declared_motion_or_concentric_scope_not_whole_mechanism_or_DOF'},integrity)
         return self._submit(t,'keeping_result',operation)

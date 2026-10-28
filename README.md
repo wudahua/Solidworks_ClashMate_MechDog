@@ -2,11 +2,19 @@
 
 **SolidWorks ClashMate MechDog MCP**：通过 AI 对话，在本机 SolidWorks 中检查装配体、推荐驱动、运行运动仿真、导出曲线，并验证与恢复副本。
 
-版本：`v0.4.3-alpha.25`。保留原有 24 个工具，新增 6 个对话任务与收尾工具，共 30 项。日常使用不需要网页或另一套桌面助手。
+版本：`v0.4.3-alpha.26`。保留原有 24 个工具，新增 6 个对话任务与收尾工具，共 30 项。日常使用不需要网页或另一套桌面助手。
 
-[项目与下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases) · [本轮说明](发布说明_v0.4.3-alpha.25.md) · [AI客户端与开发者契约](CONTRACT.md)
+[项目与下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases) · [本轮说明](发布说明_v0.4.3-alpha.26.md) · [AI客户端与开发者契约](CONTRACT.md)
 
 alpha.24统一外齿轮任务帧率口径：`external_gear_pair`可请求整数5–120fps（旋转、最多60rpm/2秒，须满足帧对齐与最小网格），50fps可直接提出；`gear_transmission`泵模板仍限30/60fps，圆边卡仍为30fps。`get_environment`的`budget_matrix.managed_tasks`给出各任务限制，`new_solve`仅为底层上限。prepare通过不代表未来原生网格已核验；plan仍检查原生精确子集与全组件姿态预算，任何推荐变更须随具体方案确认。机械分组拒绝列出missing/unexpected/ambiguous/overlaps；AI修正清单，不让操作者逐项比对或默认固定遗漏件。
+
+## 通用配合体检与基础连接补齐
+
+新增 `assembly_constraints` 任务，复用同一个正式MCP的30项工具。AI只读检查原生配合、局部运动线索及未知项，按用户目标自动推荐刚性、转动、滑动连接和参考；只在必要歧义及具体写入授权时询问。`connection_intent` 使用组件名称，用户不用抄实体ID。确认后保留旧配合和固定标志，只补必要几何约束，再验证0.1mm／0.05°小幅运动、已有受支持连接及全部恢复；不替代完整Motion Analysis或全局自由度认证。
+
+首批限最多128个完整解析、单位尺度的顶层外部零件，每次1–8项连接目标。目标与原生全约束观察冲突、参考不足或移动后端尚不能认证已有锁定配合时，只报告并收尾；不删除旧配合、不自动解除固定，也不把历史算例通过解释为当前装配作用域通过。详细范围见本轮发布说明。
+
+直接说：“检查这个装配体，滑块沿导轨运动，轴与支座保留转动；自动推荐需要补的配合，我确认后在副本执行并验证，结束恢复。”
 
 ## 用户如何使用
 

@@ -335,6 +335,12 @@ public partial class Cad {
         string op=(string)request["op"];var p=(Dictionary<string,object>)request["params"];
         activeJobId=p.ContainsKey("job_id")?(string)p["job_id"]:null;activeRequestId=request.ContainsKey("id")?request["id"] as string:null;
         switch(op) {
+            case "_survey_assembly_connections": return SurveyAssemblyConnections((string)p["model_id"]);
+            case "_preview_assembly_connections": return PreviewAssemblyConnections((string)p["model_id"],(string)p["proposal_json"]);
+            case "_apply_assembly_connections": return ApplyAssemblyConnections((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));
+            case "_test_connection_rollback": return ApplyAssemblyConnections((string)p["plan_id"],true,true);
+            case "_test_connection_suppression": return TestConnectionSuppression((string)p["model_id"],Convert.ToInt32(p["native_feature_id"]));
+            case "_probe_assembly_connection_pose": return ProbeAssemblyConnectionPose((string)p["model_id"],(string)p["component_id"],(string)p["target_json"],(string)p["checkpoint_id"],(string)p["probe_id"],p.ContainsKey("goal_index")?Convert.ToInt32(p["goal_index"]):-1,p.ContainsKey("allowed_trial")&&Convert.ToBoolean(p["allowed_trial"]));
             case "_survey_external_gear_pair": return SurveyExternalGearPair((string)p["model_id"],p.ContainsKey("include_completion_references")&&Convert.ToBoolean(p["include_completion_references"]));
             case "_preview_external_gear_pair": return PreviewExternalGearPair((string)p["model_id"],(string)p["recommendation_json"],Convert.ToDouble(p["numerator"]),Convert.ToDouble(p["denominator"]));
             case "_apply_external_gear_pair": return ApplyExternalGearPair((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));
@@ -350,6 +356,7 @@ public partial class Cad {
             case "verify_motion_preservation": return VerifyRequestedMotion((string)p["model_id"],(string)p["study"],(string)p["component_id"],(string)p["entity_id"],(string)p["expected_motion"],Convert.ToDouble(p["minimum_travel"]),Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"],(string)p["plan_id"],p.ContainsKey("reference_component_id")?(string)p["reference_component_id"]:"");
             case "_test_mate_rollback": return ApplyBasicMate((string)p["plan_id"],true,true);
             case "_import_gear_assembly": return ImportGearAssembly((string)p["path"],p.ContainsKey("materialize_virtual_components")&&Convert.ToBoolean(p["materialize_virtual_components"]),p.ContainsKey("import_id")?(string)p["import_id"]:null);
+            case "_import_constraint_assembly": return ImportConstraintAssembly((string)p["path"],p.ContainsKey("materialize_virtual_components")&&Convert.ToBoolean(p["materialize_virtual_components"]),p.ContainsKey("import_id")?(string)p["import_id"]:null);
             case "import_assembly": return ImportUserAssembly((string)p["path"],p.ContainsKey("configuration")?(string)p["configuration"]:null,null,null,p.ContainsKey("import_id")?(string)p["import_id"]:null,p.ContainsKey("materialize_virtual_components")&&Convert.ToBoolean(p["materialize_virtual_components"]));
             case "list_models": return UserListModels();
             case "inspect_model": return InspectUserModel((string)p["model_id"],p.ContainsKey("detail_level")?(string)p["detail_level"]:"full");
