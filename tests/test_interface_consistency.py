@@ -127,7 +127,7 @@ class InterfaceTests(unittest.TestCase):
         fixture=TaskTests('test_plan_recommends_ratio_and_confirmation_stays_exactly_once')
         fixture.setUp();self.addCleanup(fixture.doCleanups)
         first=fixture.tid;fixture.engine.finish(first);self.assertTrue(fixture.wait()['closed'])
-        with patch.object(ms,'_task_engine',fixture.engine):
+        with patch.object(ms,'_task_engine',fixture.engine), patch('sw_mcp.conversation.startup_gate.require_idle'):
             response=asyncio.run(ms.mcp.call_tool('prepare_mechanism_task',{'assembly_path':str(fixture.source),'task_kind':'external_gear_pair','output_fps':50}))
             self.assertFalse(response.is_error);fixture.tid=response.structured_content['result']['task_id'];prepared=fixture.wait()
             self.assertEqual(prepared['motion_parameters']['output_fps'],50)

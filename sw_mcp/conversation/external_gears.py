@@ -134,7 +134,7 @@ def pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints=N
         matches=[c for c in survey['components'] if c['instance'].casefold()==hint.casefold()]
         if len(matches)!=1:raise core.StopBatch('EXTERNAL_GEAR_SELECTION_REQUIRED','静止侧名称无法唯一匹配，未模糊替换。',{'hint':hint})
         if matches[0]['component_id'] not in stationary:stationary.append(matches[0]['component_id'])
-    components=survey['components'];gears={a['component_id'],b['component_id']};groups={};axes={};supports={};reasons={}
+    components=survey['components'];gears={a['component_id'],b['component_id']};groups={};axes={};supports={};reasons={};shaft_ids={}
     for side,gear,axis in [('input',a,aa),('output',b,ba)]:
         candidates=[]
         for c in components:
@@ -158,7 +158,7 @@ def pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints=N
         if not candidates:candidates=[(0,gear,axis)]
         if not candidates or (len(candidates)>1 and abs(candidates[0][0]-candidates[1][0])<1):
             raise core.StopBatch('EXTERNAL_GEAR_SELECTION_REQUIRED','同轴零件不能唯一推荐为轴，请按用途澄清。',{'side':side,'choices':[c['instance'] for score,c,shape in candidates]})
-        _,shaft,shape=candidates[0];axes[side]=shape['faces'][0];groups[side]=list(dict.fromkeys([shaft['component_id'],gear['component_id']]))
+        _,shaft,shape=candidates[0];axes[side]=shape['faces'][0];shaft_ids[side]=shaft['component_id'];groups[side]=list(dict.fromkeys([shaft['component_id'],gear['component_id']]))
         reasons[side]={'shaft_name':shaft['instance'],'gear_name':gear['instance'],'shaft_evidence':'gear_own_axis_no_separate_shaft_found' if shaft['component_id']==gear['component_id'] else 'coaxial_native_cylinders_and_name_or_slender_shape'}
         fixed=[]
         for c in components:
@@ -208,16 +208,16 @@ def pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints=N
     if chosen==[False,False]:raise core.StopBatch('EXTERNAL_GEAR_SELECTION_REQUIRED','输入名称线索未匹配到任一推荐轴系。',{'hint':moving_hint})
     proposed_ratio=ratio_recommendation(a,b,survey['design_evidence'],survey['mates'],groups)
     equal=bool(proposed_ratio.get('numerator')) and proposed_ratio.get('numerator')==proposed_ratio.get('denominator')
-    swap=chosen==[False,True] if chosen is not None else (not any(role_hints.values()) and equal and by_id[groups['input'][0]]['fixed_component'] and not by_id[groups['output'][0]]['fixed_component'])
+    swap=chosen==[False,True] if chosen is not None else (not any(role_hints.values()) and equal and by_id[shaft_ids['input']]['fixed_component'] and not by_id[shaft_ids['output']]['fixed_component'])
     if swap:
         a,b=b,a
-        for data in (groups,axes,supports,reasons):data['input'],data['output']=data['output'],data['input']
+        for data in (groups,axes,supports,reasons,shaft_ids):data['input'],data['output']=data['output'],data['input']
     reference=supports['input']['component_id']
     ratio=ratio_recommendation(a,b,survey['design_evidence'],survey['mates'],groups)
     if ratio['numerator']:ratio['expected_output_over_input']=-ratio['numerator']/ratio['denominator']
     return {'scope':SCOPE,'model_id':survey['model_id'],'reference_state_signature':survey['reference_state_signature'],
             'stationary_components':stationary,'stationary_scope':[{'component_id':c['component_id'],'instance':c['instance'],'currently_fixed':c['fixed_component']} for c in components if c['component_id'] in stationary],
-            'roles':{'input_shaft':groups['input'][0],'input_gear':a['component_id'],'output_shaft':groups['output'][0],
+            'roles':{'input_shaft':shaft_ids['input'],'input_gear':a['component_id'],'output_shaft':shaft_ids['output'],
                      'output_gear':b['component_id'],'body':reference},'groups':groups,'shaft_axes':axes,'supports':supports,
             'gear_ratio':ratio,'recommendation_evidence':reasons,'moving_components':[
                 {'component_id':c['component_id'],'instance':c['instance'],'currently_fixed':c['fixed_component']} for c in components if c['component_id'] in moving],
