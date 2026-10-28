@@ -44,23 +44,93 @@ class UpgradeFailure(RuntimeError):
             instruction += ' '+lease_access_instruction()
         if self.code == 'UPGRADE_PACKAGE_INVALID':
             instruction += ' 请使用Release的Assets中官方_source.zip及同名.sha256；GitHub自动生成的Source code (zip/tar.gz)不是升级资产。不要删除文件或手工改清单绕过校验。'
+        if self.code == 'UPGRADE_FILE_API_CHECK_FAILED':
+            instruction = '外部包装或来源未知的文件API未通过自建小文件检查，升级在源码写入前停止。请AI核对python_runtime、file_api_checks和预检记录，通过宿主支持的授权维护渠道处理兼容性；不自动清除PYTHONPATH、不替换API、不绕过删除保护或重试升级。'
         stage = state.get('stage') or self.diagnostics.get('stage')
         return {'ok': False, 'schema_version': 2, 'receipt_schema_version': 2, 'upgrade_result_schema_version': 1, 'code': self.code,
                 **{key: state.get(key) for key in ('stage','failure_stage','python_started','target_mutation_started','backup_created','receipt_path','receipt_stage_persisted','receipt_write_error','committed','rollback_attempted','rollback_verified','rollback_status','recovery_journal_unchanged','installation_state')},
                 'processes_stopped': any(x.get('cooperative_shutdown_requested') for x in state.get('retired_host_tasks',[])), 'automatic_retry': False,
                 'retired_host_tasks':state.get('retired_host_tasks',[]),'backup_host_review':state.get('backup_host_review'),
                 'dry_run': state.get('dry_run'), 'target_directory': state.get('target_directory'),
+                'python_runtime': state.get('python_runtime'),
+                'file_api_checks': state.get('file_api_checks',[]),
                 'stage': stage, 'failure_stage': state.get('failure_stage') or stage,
                 'safe_to_start_mcp': False if state.get('target_mutation_started') else None,
                 'mcp_start_admission': 'not_evaluated_use_normal_lease_recovery_and_COM_handshake',
-                'managed_files_consistent': not state.get('target_mutation_started', False) or rollback == 'verified',
+                'managed_files_consistent': not state.get('target_mutation_started', False) or rollback == 'verified' or bool(state.get('committed')),
                 'error': {'code': self.code, 'message': str(self), 'stage': stage,
                           'diagnostics': {**self.diagnostics, 'rollback_errors': state.get('rollback_errors', []),
-                                          'original_failure_message': state.get('error'), 'target_directory': state.get('target_directory'),
+                                          'original_failure_message': state.get('error'), 'original_failure': state.get('original_failure'),
+                                          'rollback_failures': state.get('rollback_failures', []), 'target_directory': state.get('target_directory'),
                                           'mutation_scope': 'managed_source_and_executor_binaries_not_dependency_environment'},
                           'next_action': {'automatic_retry': False, 'instruction': instruction,
                                           'read_only_executor_review':self.diagnostics.get('executor_journal_hint'),
                                           'receipt_path': state.get('receipt_path')}}}
+
+
+def exception_details(error):
+    """Include termination exceptions without treating them as successful work."""
+    result={'type':type(error).__name__,'message':str(error)}
+    if isinstance(error,SystemExit):result['exit_code']=error.code if isinstance(error.code,(str,int,type(None))) else repr(error.code)
+    return result
+
+
+def file_api_observation():
+    """Provenance observation, not a sandbox or a guarantee about all hooks.
+
+    Keep host policies intact. Observe external wrappers and check them through
+    the same API on an owned small file; never select a lower-level delete API.
+    A benign sitecustomize or PYTHONPATH by itself is not a reason to refuse.
+    """
+    function=Path.unlink
+    module_name=getattr(function,'__module__',None)
+    module=sys.modules.get(module_name) if isinstance(module_name,str) else None
+    origin=getattr(getattr(module,'__spec__',None),'origin',None)
+    code_file=getattr(getattr(function,'__code__',None),'co_filename',None)
+    def canonical(value):return os.path.normcase(os.path.abspath(value)) if isinstance(value,str) else None
+    standard_module=isinstance(module_name,str) and (module_name=='pathlib' or module_name.startswith('pathlib.'))
+    supported=bool(standard_module and origin and code_file and canonical(origin)==canonical(code_file))
+    return {'path_unlink':{'module':module_name,'name':getattr(function,'__qualname__',type(function).__name__),
+                           'code_file':code_file,'module_origin':origin,'standard_library_provenance_observed':supported},
+            'standard_path_unlink_observed':supported,'sitecustomize_loaded':'sitecustomize' in sys.modules,
+            'pythonpath_present':bool(os.environ.get('PYTHONPATH')),'pythonhome_present':bool(os.environ.get('PYTHONHOME')),
+            'host_guards_bypassed':False,'python_environment_modified':False,
+            'scope':'Path.unlink_implementation_provenance_only_not_all_runtime_hooks'}
+
+
+def require_file_api(state,target):
+    state['python_runtime']=file_api_observation()
+    if state['python_runtime']['standard_path_unlink_observed']:
+        state['python_runtime']['file_api_admission']='native_provenance_observed'
+        return
+    function=Path.unlink
+    folder=target/'runs/upgrade-api-checks'/uuid.uuid4().hex
+    probe=folder/'owned-probe.bin';record=folder/'result.json'
+    check={'stage':state['stage'],'record_path':str(record),'probe_path':str(probe),
+           'status':'pending','same_host_api_used':True,'probe_bytes':32,'managed_source_written':False,
+           'host_guards_bypassed':False,'python_environment_modified':False}
+    state.setdefault('file_api_checks',[]).append(check)
+    try:
+        reject_links(folder,target);folder.mkdir(parents=True)
+        reject_links(probe,target);probe.write_bytes(uuid.uuid4().hex.encode('ascii'))
+        check['host_delete_called']=True
+        probe.unlink()  # Respect the active host wrapper and any approval/denial.
+        reject_links(probe,target)
+        if probe.exists():raise RuntimeError('Host API returned without removing the owned probe')
+        if Path.unlink is not function:raise RuntimeError('Path.unlink implementation changed during the owned probe')
+        check.update(status='pass',probe_removed=True)
+        state['python_runtime']['file_api_admission']='guarded_probe_passed'
+        record.write_text(json.dumps(check,ensure_ascii=False,indent=2),encoding='utf-8')
+    except (Exception,SystemExit,KeyboardInterrupt) as error:
+        check.update(status='failed',failure=exception_details(error))
+        state['python_runtime']['file_api_admission']='guarded_probe_failed'
+        # No alternate removal, retry or cleanup: a denied probe is evidence.
+        try:
+            reject_links(record,target)
+            record.write_text(json.dumps(check,ensure_ascii=False,indent=2),encoding='utf-8')
+        except (Exception,SystemExit,KeyboardInterrupt) as receipt_error:
+            check['record_write_failure']=exception_details(receipt_error)
+        raise UpgradeFailure('UPGRADE_FILE_API_CHECK_FAILED','Host file API did not complete the owned small-file check; managed sources were not changed.',diagnostics={'python_runtime':state['python_runtime'],'file_api_checks':state['file_api_checks']}) from error
 
 def package_files(package):
     package=Path(package);sidecar=package.with_suffix(package.suffix+'.sha256')
@@ -167,13 +237,13 @@ def upgrade(package,target,python,solidworks_dir='',dry_run=False,install=True):
            'path_policy_version':PATH_POLICY_VERSION,'embedded_validator_executed':False,
            'retired_host_tasks':[],'backup_host_review':None}
     try:return _upgrade(package,target,python,solidworks_dir,dry_run,install,state)
-    except Exception as error:
+    except (Exception,SystemExit,KeyboardInterrupt) as error:
         code=error.code if isinstance(error,UpgradeFailure) else {
             'validating_target':'UPGRADE_TARGET_INVALID','validating_package':'UPGRADE_PACKAGE_INVALID',
             'installation_preflight':'UPGRADE_PREFLIGHT_FAILED'}.get(state['stage'],'UPGRADE_FAILED')
         if isinstance(error,ValueError) and re.match(r'^[A-Z][A-Z0-9_]+:',str(error)):
             code=str(error).split(':',1)[0]
-        raise UpgradeFailure(code,str(error),state,{**state.get('path_resolution', {}), **getattr(error,'diagnostics',{'error_type':type(error).__name__,'errno':getattr(error,'errno',None),'winerror':getattr(error,'winerror',None)})}) from error
+        raise UpgradeFailure(code,str(error),state,{**state.get('path_resolution', {}), **getattr(error,'diagnostics',{'exception':exception_details(error),'error_type':type(error).__name__,'errno':getattr(error,'errno',None),'winerror':getattr(error,'winerror',None)})}) from error
 
 
 def installation_target(target, state):
@@ -210,6 +280,8 @@ def _upgrade(package,target,python,solidworks_dir,dry_run,install,state):
     manifest,contents,digest=package_files(package)
     for name in contents:reject_links(target/safe_relative(name),target)
     for protected in ('.venv','runs','experiments','upgrade-backups','executor/bin'):reject_links(target/protected,target)
+    state['stage']='checking_python_file_api'
+    require_file_api(state,target)
     plan={'version':manifest['version'],'zip_sha256':digest,'source_files':len(manifest['files']),'preserved_directories':['.venv','runs','experiments'],'dry_run':dry_run}
     state['stage']='installation_preflight'
     if install:
@@ -231,6 +303,8 @@ def _upgrade(package,target,python,solidworks_dir,dry_run,install,state):
         return {**state,**plan,'stage':'dry_run_complete'}
     state['stage']='checking_installation_lease'
     with idle_installation(target):
+        state['stage']='checking_python_file_api_under_lease'
+        require_file_api(state,target)
         if install:
             state['stage']='installation_preflight_under_lease'
             preflight(target,python,solidworks_dir)
@@ -246,8 +320,9 @@ def _upgrade(package,target,python,solidworks_dir,dry_run,install,state):
             try:
                 temporary.write_text(json.dumps({**status,'receipt_stage_persisted':stage},ensure_ascii=False,indent=2),encoding='utf-8')
                 temporary.replace(backup/'receipt.json')
-            except OSError as error:
+            except (Exception,SystemExit,KeyboardInterrupt) as error:
                 status['receipt_write_error']=str(error)
+                status['receipt_write_error_details']=exception_details(error)
                 raise
             status['receipt_stage_persisted']=stage
         receipt('backing_up')
@@ -297,39 +372,55 @@ def _upgrade(package,target,python,solidworks_dir,dry_run,install,state):
             after=journal.read_bytes() if journal.exists() else None
             if before!=after:raise RuntimeError('Recovery journal changed unexpectedly; preserve backup and inspect')
             status.update(committed=True,installation_state='upgraded',rollback_status='not_required',recovery_journal_unchanged=True,source_integrity_verified=True,final_source_files=final_integrity['source_files'],environment_scope='existing_venv_validated_by_install_not_snapshot_rollback',executor_compiled=install)
-        except Exception as error:
-            # Delete only newly introduced managed files, with bounds checked individually.
+        except (Exception,SystemExit,KeyboardInterrupt) as error:
+            # Restore originals first, then remove only newly introduced managed
+            # files. A host denial never selects an alternate deletion API.
             status.update(failure_stage=status['stage'],rollback_attempted=True,rollback_status='unknown')
-            rollback_errors=[]
+            rollback_errors=[];rollback_failures=[]
+            def failed(operation,name,failure):
+                detail={'operation':operation,'path':name,**exception_details(failure)}
+                rollback_failures.append(detail)
+                rollback_errors.append(operation+' '+str(name)+': '+detail['type']+': '+detail['message'])
             try:originals=read_backup(state)
-            except Exception as failure:originals={};rollback_errors.append(str(failure))
+            except (Exception,SystemExit,KeyboardInterrupt) as failure:originals={};failed('read_backup',str(backup),failure)
             for name,p in managed.items():
+                if name not in existing:continue
                 try:
                     reject_links(p,target)
-                    if name in existing:write_restored_file(p,originals[name])
-                    elif p.is_file():p.unlink()
-                except Exception as failure:rollback_errors.append(str(failure))
+                    write_restored_file(p,originals[name])
+                except (Exception,SystemExit,KeyboardInterrupt) as failure:failed('restore_original',name,failure)
+            for name,p in managed.items():
+                if name in existing:continue
+                try:
+                    reject_links(p,target)
+                    if p.is_file():p.unlink()
+                except (Exception,SystemExit,KeyboardInterrupt) as failure:failed('remove_new_managed_file',name,failure)
             for name,p in managed.items():
                 try:
                     reject_links(p,target)
                     if name in existing:
                         if p.read_bytes()!=originals[name]:raise RuntimeError('Restored bytes mismatch: '+name)
                     elif p.exists():raise RuntimeError('New managed file remains: '+name)
-                except Exception as failure:rollback_errors.append(str(failure))
+                except (Exception,SystemExit,KeyboardInterrupt) as failure:failed('verify_restoration',name,failure)
             try:journal_unchanged=(journal.read_bytes() if journal.exists() else None)==before
-            except OSError as journal_error:
+            except (Exception,SystemExit,KeyboardInterrupt) as journal_error:
                 journal_unchanged=None;status['journal_observation_error']=str(journal_error)
-            status.update(error=str(error),rollback_verified=not rollback_errors,rollback_errors=rollback_errors,
+                failed('observe_recovery_journal','runs/executor-state.json',journal_error)
+            status.update(error=str(error),original_failure=exception_details(error),rollback_verified=not rollback_errors,rollback_errors=rollback_errors,rollback_failures=rollback_failures,
                           rollback_status='verified' if not rollback_errors else 'incomplete',installation_state='restored_managed_files' if not rollback_errors else 'mixed_or_unknown',
                           recovery_journal_unchanged=journal_unchanged)
-            receipt('failed_rollback_verified' if not rollback_errors else 'failed_rollback_incomplete')
+            try:receipt('failed_rollback_verified' if not rollback_errors else 'failed_rollback_incomplete')
+            except (Exception,SystemExit,KeyboardInterrupt) as failure:
+                # Keep the last persisted receipt and the actual byte verdict.
+                # The stdout envelope must not silently claim receipt success.
+                raise UpgradeFailure('UPGRADE_RECOVERY_RECEIPT_FAILED','Upgrade failed; recovery receipt could not be persisted. Preserve backup and inspect byte verdict and receipt_write_error.',diagnostics={'receipt_failure':exception_details(failure)}) from failure
             raise UpgradeFailure('UPGRADE_FAILED_ROLLBACK_VERIFIED' if not rollback_errors else 'UPGRADE_FAILED_ROLLBACK_INCOMPLETE',
                                  'Upgrade failed; source/binary rollback verified; inspect receipt before retry' if not rollback_errors else 'Upgrade failed; rollback INCOMPLETE. Do not start MCP; preserve backup and receipt for manual repair') from error
         if install:
             try:status['post_upgrade_host_review']=audit_backup_hosts(target,target/'runs/host-maintenance'/uuid.uuid4().hex,apply=True)
-            except Exception as error:
+            except (Exception,SystemExit,KeyboardInterrupt) as error:
                 status['post_upgrade_host_review']={'status':'review_required','retired_host_tasks':[],
-                    'reason':str(error),'automatic_retry':False,'force_termination':False}
+                    'reason':str(error),'exception':exception_details(error),'automatic_retry':False,'force_termination':False}
             status['retired_host_tasks']+=status['post_upgrade_host_review']['retired_host_tasks']
             status['host_cleanup_status']=status['post_upgrade_host_review']['status']
         else:status['host_cleanup_status']='not_requested_source_only_install_false'

@@ -2,9 +2,11 @@
 
 **SolidWorks ClashMate MechDog MCP**：通过 AI 对话，在本机 SolidWorks 中检查装配体、推荐驱动、运行运动仿真、导出曲线，并验证与恢复副本。
 
-版本：`v0.4.3-alpha.26`。保留原有 24 个工具，新增 6 个对话任务与收尾工具，共 30 项。日常使用不需要网页或另一套桌面助手。
+版本：`v0.4.3-alpha.27`。保留原有 24 个工具，新增 6 个对话任务与收尾工具，共 30 项。日常使用不需要网页或另一套桌面助手。
 
-[项目与下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases) · [本轮说明](发布说明_v0.4.3-alpha.26.md) · [AI客户端与开发者契约](CONTRACT.md)
+[项目与下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases) · [本轮说明](发布说明_v0.4.3-alpha.27.md) · [AI客户端与开发者契约](CONTRACT.md)
+
+alpha.27维护修订：升级器观察当前`Path.unlink`实现来源；外部包装或来源未知时，通过宿主原API检查一个自建32字节文件。允许且结果核验通过才能继续；拒绝、退出或静默不执行时返回`UPGRADE_FILE_API_CHECK_FAILED`，在托管源码写入和备份前停止，附`python_runtime`、`file_api_checks`及预检记录。正常包装器、`PYTHONPATH`或无害`sitecustomize`不被一概拒绝；预检只写入自建的`runs/upgrade-api-checks`，拒绝后的文件保留。事务中出现`SystemExit`、中断或宿主拒绝时，先逐项恢复旧文件，再通过原API清理本次新增文件并核验；拒绝原因和残留分别写入回执，不改用低层删除API或自动移除宿主保护。若恢复回执自身不能写入，返回`UPGRADE_RECOVERY_RECEIPT_FAILED`，保留上一份回执及真实字节恢复结论。该修订防止静默中断及不安全升级，不等于已兼容所有宿主包装器；遇到拒绝应由AI核对宿主支持的授权维护渠道，不能清除环境变量或替换API绕过。
 
 alpha.24统一外齿轮任务帧率口径：`external_gear_pair`可请求整数5–120fps（旋转、最多60rpm/2秒，须满足帧对齐与最小网格），50fps可直接提出；`gear_transmission`泵模板仍限30/60fps，圆边卡仍为30fps。`get_environment`的`budget_matrix.managed_tasks`给出各任务限制，`new_solve`仅为底层上限。prepare通过不代表未来原生网格已核验；plan仍检查原生精确子集与全组件姿态预算，任何推荐变更须随具体方案确认。机械分组拒绝列出missing/unexpected/ambiguous/overlaps；AI修正清单，不让操作者逐项比对或默认固定遗漏件。
 
