@@ -2,9 +2,9 @@
 
 **SolidWorks ClashMate MechDog MCP**：通过 AI 对话，在本机 SolidWorks 中检查装配体、推荐驱动、运行运动仿真、导出曲线，并验证与恢复副本。
 
-版本：`v0.4.3-alpha.24`。保留原有 24 个工具，新增 6 个对话任务与收尾工具，共 30 项。日常使用不需要网页或另一套桌面助手。
+版本：`v0.4.3-alpha.25`。保留原有 24 个工具，新增 6 个对话任务与收尾工具，共 30 项。日常使用不需要网页或另一套桌面助手。
 
-[项目与下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases) · [本轮说明](发布说明_v0.4.3-alpha.24.md) · [AI客户端与开发者契约](CONTRACT.md)
+[项目与下载](https://github.com/wudahua/Solidworks_ClashMate_MechDog/releases) · [本轮说明](发布说明_v0.4.3-alpha.25.md) · [AI客户端与开发者契约](CONTRACT.md)
 
 alpha.24统一外齿轮任务帧率口径：`external_gear_pair`可请求整数5–120fps（旋转、最多60rpm/2秒，须满足帧对齐与最小网格），50fps可直接提出；`gear_transmission`泵模板仍限30/60fps，圆边卡仍为30fps。`get_environment`的`budget_matrix.managed_tasks`给出各任务限制，`new_solve`仅为底层上限。prepare通过不代表未来原生网格已核验；plan仍检查原生精确子集与全组件姿态预算，任何推荐变更须随具体方案确认。机械分组拒绝列出missing/unexpected/ambiguous/overlaps；AI修正清单，不让操作者逐项比对或默认固定遗漏件。
 
@@ -59,6 +59,9 @@ AI 应定位文件、读取任务、检查与推荐；只有零件/轴线/机械
 alpha.19将导入重建错误与静止侧归属分开处理。齿轮专用副本保留文件名、清理副本 Toolbox 标记并核验实际引用；必要的完整重建只在隔离副本进行，记录全部姿态和配合核对。静止侧不明时进入`scope_review_required`；AI根据约束证据解释附件归属，只有用户明确哪些应静止后才传`stationary_component_hints`名称列表生成方案。该声明不等于写入授权，拟固定清单、传动比和配合修改仍须一起确认。`fixed=false`不等于已证明存在自由运动，也不会触发默认批量固定。
 
 alpha.20增加通用装配约束检查与配合补齐模式。AI先读取现有配合与阵列、推荐轴系和支承，澄清哪些附件应静止或跟转，再通过`plan_mechanism_task(assembly_intent=...)`生成保留旧配合的补充方案。名称分组由AI填入，用户无需填写实体ID。该模式保持原固定标志，不以批量固定代替补配合；与旧`stationary_component_hints`的固定简化路径明确分开。普通两轴外齿轮为首个执行适配，不能据此承诺任意机构自动补齐。
+
+alpha.25在范围复核中返回`assembly_group_recommendation`：按已观测的约束路径和阵列种子推荐完整名称清单草稿，AI集中澄清`mechanical_questions`中的剩余机械归属。草稿不是已有刚性或运动证明，不把未归类附件默认固定；整件轴承单列说明内外圈无法分开运动。AI可复用当前对话已明确的机械目标补全`assembly_intent`，再展示当前具体补配合方案取得执行确认。推荐阶段复用一次完整原生调查，失败预检仍保留独立诊断。
+
 
 alpha.22统一两轴齿轮的保存初态路径：普通分支遇到非零历史算例，也可先只读生成方案。方案明确列出仅在副本移除的算例、保存姿态起点及采样建议；用户确认后，内部检查点回读并核对姿态、固定状态、配合与算例，再在模型作用域补配合。无需把受管副本交给公共检查点或归零工具，不修改原文件，结束仍默认恢复导入检查点。这不是重建历史算例的零时刻或认证历史缓存。`initial_state=study_zero`在此任务中仍不支持，但返回明确的`saved`规划替代说明；普通运动任务的归零能力保持原边界。
 

@@ -2,17 +2,23 @@
 import csv,json,math,shutil,uuid
 from pathlib import Path
 from . import core,external_gears as eg,gear_transmission as gt,geometry_audit as g,concentric_card as card,task_execution,task_progress,component_constraints
-from .. import assembly_constraints,assembly_completion
+from .. import assembly_constraints,assembly_completion,assembly_groups
 
 
 def discover(s):
-    s.initial_inspection=s.call('inspect_model',model_id=s.model,detail_level='full')
-    scope=component_constraints.inventory(s.initial_inspection['components'],s.initial_inspection['mates'])
-    core.write(s.folder/'组件约束分类.json',scope)
-    component_constraints.require_import_health(getattr(s,'import_preflight',None),s.folder/'导入.json')
+    try:component_constraints.require_import_health(getattr(s,'import_preflight',None),s.folder/'导入.json')
+    except core.StopBatch:
+        s.initial_inspection=s.call('inspect_model',model_id=s.model,detail_level='full')
+        core.write(s.folder/'组件约束分类.json',component_constraints.inventory(s.initial_inspection['components'],s.initial_inspection['mates']))
+        raise
     s.state('recommending','正在读取齿轮设计参数、两轴及固定支承，推荐缺失配合与传动比…')
     survey=s.call('_survey_external_gear_pair',model_id=s.model);s.external_survey=survey
     core.write(s.folder/'两轴齿轮原生证据.json',survey)
+    # The native survey already reads the complete component/mate inventory in
+    # one owned scope. Reuse that same observation for restoration comparison;
+    # do not precede it with an identical full inspection traversal.
+    s.initial_inspection=({'components':survey['components'],'mates':survey['mates']}
+        if survey.get('inventory_complete') else s.call('inspect_model',model_id=s.model,detail_level='full'))
     review=assembly_constraints.analyze(survey['components'],survey['mates'],inventory_complete=survey.get('inventory_complete',False),structural_relations=survey.get('structural_relations'))
     core.write(s.folder/'装配约束检查与配合缺口.json',review)
     core.write(s.folder/'组件约束分类.json',component_constraints.inventory(survey['components'],survey['mates']))
@@ -24,6 +30,11 @@ def discover(s):
                 core.write(s.folder/'装配约束检查与配合缺口.json',review)
             value={'proposals':[],'requires_selection':False,'requires_stationary_scope_review':True,'blocking_code':error.code,'scope':eg.SCOPE,
                    'scope_review':error.diagnostics,'assembly_constraint_review':assembly_constraints.summary(review),'write_dispatched':False}
+            if error.diagnostics.get('proposed_motion_groups'):
+                grouping=assembly_groups.recommend(survey,error.diagnostics['proposed_motion_groups'],review)
+                core.write(s.folder/'机械分组推荐.json',grouping)
+                value['assembly_group_recommendation']={k:v for k,v in grouping.items() if k not in {'component_recommendations','pending_components'}}
+                value['assembly_group_recommendation']['evidence_path']=str(s.folder/'机械分组推荐.json')
             s.external_recommendation=value;core.write(s.folder/'两轴齿轮推荐.json',value)
             return {'external_gear_pair':value}
         if error.code not in {'EXTERNAL_GEAR_SELECTION_REQUIRED','EXTERNAL_GEAR_RATIO_AMBIGUOUS'}:raise
