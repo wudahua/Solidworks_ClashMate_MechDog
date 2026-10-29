@@ -3,7 +3,7 @@ import json
 import uuid
 from . import core,source_integrity,task_execution
 from .task_engine import matching_components,mechanical_choices
-from .. import assembly_connections as joints,connection_trials as trials
+from .. import assembly_connections as joints,connection_trials as trials,connection_recommendations as recommendations
 
 
 def discover(s):
@@ -12,12 +12,14 @@ def discover(s):
     s.connection_survey=survey;s.initial_inspection=survey if survey.get('inventory_complete') else s.call('inspect_model',model_id=s.model,detail_level='full')
     core.write(s.folder/'通用配合原生调查.json',survey)
     review=joints.review(survey);core.write(s.folder/'通用配合体检.json',review)
-    return {'connection_review':review}
+    draft=recommendations.draft(survey,review,binding=str(s.folder.parent.absolute()));s.connection_draft=draft
+    core.write(s.folder/'装配连接自动草案.json',draft)
+    return {'connection_review':review,'connection_draft':draft}
 
 
 def publish_review(engine,t,value):
     s=engine.sessions[t['task_id']];source_integrity.bind(t,s)
-    t.update(model_id=s.model,phase='constraint_review_ready',connection_review=value['connection_review'],
+    t.update(model_id=s.model,phase='constraint_review_ready',connection_review=value['connection_review'],connection_draft=value['connection_draft'],
         next_action={'tool':'plan_mechanism_task','arguments':{'task_id':t['task_id']},
             'instruction':'AI先解释原生配合故障、压缩项及局部连接线索。按用户已说明的机械目标，用connection_intent填写组件名称及rigid/revolute/prismatic；可自动采用唯一几何轴线，仅真实歧义才集中询问。不把局部秩当全机构自由度，不为消除浮动而锁死运动。若仅体检，可直接finish恢复收尾。'})
 
@@ -53,8 +55,9 @@ def propose(engine,t,intents):
     if t['phase'] not in {'constraint_review_ready','awaiting_confirmation'}:raise core.StopBatch('TASK_NOT_READY_FOR_PLAN')
     s=engine.sessions[t['task_id']]
     if intents is None:return {'task_id':t['task_id'],'needs_connection_intent':True,
+        'connection_draft':getattr(s,'connection_draft',None) or recommendations.draft(s.connection_survey),
         'connection_review':t['connection_review'],'write_dispatched':False,
-        'instruction':'AI依据用户已陈述的机械目标选择推荐连接，用组件名称填写connection_intent；只有目标或轴线真有歧义才询问。'}
+        'instruction':'AI读取connection_draft，用候选connection_intent及推荐依据形成整组方案；已有机械目标可直接选择，真正歧义集中询问。草案不是原生预演或执行授权，实际plan仍须传具体connection_intent。现有方案不因只读草案查询自动撤销。'}
     if t['phase']=='awaiting_confirmation':
         t['previous_plan_id']=(t.get('proposal') or {}).get('plan_id')
         t.pop('plan_token',None);t.pop('proposal',None)

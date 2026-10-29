@@ -1,6 +1,10 @@
 # AI 客户端与开发者契约
 
+迟到退出：`get_mechanism_task`返回`native_close_pending=true`时，原退出请求已经发出，AI应继续查询原任务，不再次恢复、退出或prepare。仅原宿主仍保留同一个进程句柄、执行器结束且既有恢复/成果核对充分时，实际退出后补齐`finish.late_exit_observation`及退出码，释放任务；非零退出和源文件变化仍分别报告。该等待标志不表示另一次写入正在排队，也不代表会强制取消原生操作。宿主重启后的孤儿归档仍按原确认与证据规则执行。
+
 本文件随源码包交付。正式入口为 `motion_server.py`，协议握手名称为 `SolidWorks ClashMate MechDog`，推荐配置键为 `solidworks-clashmate-mechdog`，共30项工具。实际字段、枚举和默认值以当前连接的 `tools/list` 为准；不要用历史发布说明替代当前 schema。
+
+alpha.28通用草案：`prepare_mechanism_task(task_kind="assembly_constraints")`返回`connection_draft`；`plan_mechanism_task`不传`connection_intent`只读返回同类候选，不创建或撤销已有令牌。候选按已知约束及当前几何列出名称式输入、依据、歧义及只读阻断。明显长轴且横向包围盒相交只能支持导向假设，不能断言设计用途；同轴的转动/滑动/刚性等备选须与用户目标核对，不能把所有浮动件改刚性。每页扫描最多64对、返回最多8组；`next_cursor`原样传`get_mechanism_task(task_id=...,draft_cursor=...)`，不得与`collect_evidence`混用。游标绑定任务目录及完整调查快照，续查不访问COM，可读持久快照；按`pair_range_start/end_exclusive`累计前页，`complete_for_remaining_suffix`只表示该后缀结束。几何截断、未知约束和轴线选项截断分别保留，候选缺席不证明无需配合。草案来自prepare时刻，实际plan必须传1至8项具体`connection_intent`并重新核对原生引用、状态与机械目标；仍经具体方案确认才执行。
 
 升级维护：`upgrade.ps1`继承宿主Python环境，不为完成升级清除`PYTHONPATH`、禁用`sitecustomize`、替换文件API或调用另一种删除入口。alpha.27在包与目标校验后、预检和租约前，以及正式租约内观察`Path.unlink`实现来源；外部包装或无法确认时，仅用宿主原API检查自建32字节文件及实际移除结果，允许且通过才继续，不一概拒绝包装器。拒绝、退出或静默不执行时返回`UPGRADE_FILE_API_CHECK_FAILED`、`python_runtime`、`file_api_checks`和`target_mutation_started=false`；托管源码及备份未写，自建`runs/upgrade-api-checks`预检记录和被拒绝的文件保留。这是单文件能力检查，不是对所有运行时钩子或未来批量操作的认证。AI应核对宿主支持的授权维护渠道，不能据此自动关闭其保护。事务中`SystemExit`及键盘中断进入逐文件回滚：先恢复所有可恢复旧文件，再清理新增托管文件，保留每项拒绝的类型/路径；任何残留仍是`UPGRADE_FAILED_ROLLBACK_INCOMPLETE`。回执写入失败单列`UPGRADE_RECOVERY_RECEIPT_FAILED`，旧回执与真实字节结论分别保留，不自动重试或宣称可启动MCP。历史执行器PID只作线索，租约和原生互斥体才用于当前占用核对，不删除陈旧恢复日志。
 

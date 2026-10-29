@@ -67,7 +67,29 @@ def main():
             assert owner==state['server_instance_id']
             case={'label':card['label'],'task_id':tid,'prepared_record':str(folder/f'{index+1}-prepared.json')}
             if not card.get('read_only'):
-                client.tool('plan_mechanism_task',task_id=tid,connection_intent=card['connection_intent'])
+                intents=card.get('connection_intent')
+                if card.get('draft_goals'):
+                    draft_reply=client.tool('plan_mechanism_task',task_id=tid)
+                    page=draft_reply['connection_draft'];pages=[page];candidates=list(page['candidates']);seen=set()
+                    while page.get('next_cursor'):
+                        cursor=page['next_cursor'];assert cursor not in seen;seen.add(cursor)
+                        page=client.tool('get_mechanism_task',task_id=tid,draft_cursor=cursor)['connection_draft']
+                        assert page['snapshot_id']==pages[0]['snapshot_id']
+                        assert page['search']['pair_range_start']==pages[-1]['search']['pair_range_end_exclusive']
+                        pages.append(page);candidates.extend(page['candidates'])
+                    assert len({c['candidate_id'] for c in candidates})==len(candidates)
+                    intents=[];selected=[]
+                    for wanted in card['draft_goals']:
+                        candidate=next(c for c in candidates if {c['instance_a'],c['instance_b']}=={wanted['component_a'],wanted['component_b']})
+                        assert not candidate['blocker']
+                        choices=[o for o in candidate['options'] if o['kind']==wanted['kind']]
+                        assert len(choices)==1,'Mechanical axis ambiguity must not be guessed by the harness'
+                        intents.append(choices[0]['connection_intent'])
+                        selected.append({'candidate':candidate,'selected_option':choices[0]})
+                    core.write(folder/f'{index+1}-automatic-draft.json',{'pages':pages,'selected':selected,'actual_public_intents':intents,
+                        'scope':'developer_declared_mechanical_goals_not_live_LLM_intent_inference','axis_hint_supplied_in_card':False})
+                    case['automatic_draft_record']=str(folder/f'{index+1}-automatic-draft.json')
+                client.tool('plan_mechanism_task',task_id=tid,connection_intent=intents)
                 planned=client.wait(tid,1800);core.write(folder/f'{index+1}-plan.json',planned)
                 assert planned['phase']=='awaiting_confirmation',planned
                 assert planned['proposal']['expected_added_mates']==card['expected_added_mates'],planned['proposal']

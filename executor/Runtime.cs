@@ -340,6 +340,7 @@ public partial class Cad {
             case "_apply_assembly_connections": return ApplyAssemblyConnections((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));
             case "_test_connection_rollback": return ApplyAssemblyConnections((string)p["plan_id"],true,true);
             case "_test_connection_suppression": return TestConnectionSuppression((string)p["model_id"],Convert.ToInt32(p["native_feature_id"]));
+            case "_test_connection_deletion": return TestConnectionDeletion((string)p["model_id"],Convert.ToInt32(p["native_feature_id"]));
             case "_probe_assembly_connection_pose": return ProbeAssemblyConnectionPose((string)p["model_id"],(string)p["component_id"],(string)p["target_json"],(string)p["checkpoint_id"],(string)p["probe_id"],p.ContainsKey("goal_index")?Convert.ToInt32(p["goal_index"]):-1,p.ContainsKey("allowed_trial")&&Convert.ToBoolean(p["allowed_trial"]));
             case "_survey_external_gear_pair": return SurveyExternalGearPair((string)p["model_id"],p.ContainsKey("include_completion_references")&&Convert.ToBoolean(p["include_completion_references"]));
             case "_preview_external_gear_pair": return PreviewExternalGearPair((string)p["model_id"],(string)p["recommendation_json"],Convert.ToDouble(p["numerator"]),Convert.ToDouble(p["denominator"]));

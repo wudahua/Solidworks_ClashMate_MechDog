@@ -277,6 +277,28 @@ public partial class Cad {
             throw;
         }
     }
+    // Development fixture only. Native deletion API documented by SOLIDWORKS:
+    // https://help.solidworks.com/2021/english/api/sldworksapi/SolidWorks.Interop.sldworks~SolidWorks.Interop.sldworks.ICoincidentMateFeatureData.html
+    public object TestConnectionDeletion(string id,int featureId) {
+        if(System.Environment.GetEnvironmentVariable("SW_MCP_FAULT_TESTS")!="1")throw new CadFault("FAULT_TESTS_DISABLED","仅用于自建删除配合夹具。");
+        var m=GetUserModel(id);
+        using(var scope=new Scope(this,m.Path,null)) {
+            var doc=scope.Doc;Fingerprint(doc,m.Path);var saved=PrepareConnectionModelScope(m,doc);
+            var features=EGAllMates(doc).ToArray();var feature=features.SingleOrDefault(f=>f.GetID()==featureId);
+            if(feature==null||EGSuppressed(feature))throw new CadFault("CONNECTION_REFERENCE_INVALID","夹具配合ID不存在或已压缩。");
+            var ids=features.Select(f=>f.GetID()).OrderBy(v=>v).ToArray();var before=Transforms(doc);LastOperationRestoration="pending";
+            doc.ClearSelection2(true);
+            try {if(!feature.Select2(false,0)||!doc.Extension.DeleteSelection2(0))throw new CadFault("CONNECTION_CREATE_FAILED","受控删除配合未成功。");}
+            finally {doc.ClearSelection2(true);}
+            var remaining=EGAllMates(doc).Select(f=>f.GetID()).OrderBy(v=>v).ToArray();
+            if(!remaining.SequenceEqual(ids.Where(v=>v!=featureId))||!doc.EditRebuild3())throw new CadFault("CONNECTION_CREATE_FAILED","删除影响了目标外配合或重建失败。");
+            RequireMatesHealthy(doc);var after=Transforms(doc);
+            if(before.Count!=after.Count||!before.All(v=>after.ContainsKey(v.Key)&&PoseValidation.Matches(v.Value,after[v.Key])))throw new CadFault("CONNECTION_CREATE_FAILED","受控删除改变初态，停止后续夹具操作。");
+            SaveOwnedDocuments(m);m.Revision++;SaveUserModel(m);LastOperationRestoration="restored";
+            return new{model_id=id,deleted_native_feature_id=featureId,original_mate_count=ids.Length,remaining_mate_count=remaining.Length,
+                test_only=true,source_files_unchanged=UserSourcesUnchanged(m),preparation=saved};
+        }
+    }
     public object TestConnectionSuppression(string id,int featureId) {
         if(System.Environment.GetEnvironmentVariable("SW_MCP_FAULT_TESTS")!="1")throw new CadFault("FAULT_TESTS_DISABLED","仅用于本机受控缺配合副本。");
         var m=GetUserModel(id);
