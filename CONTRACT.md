@@ -18,7 +18,7 @@ alpha.29基础连接工件：`request_target_sha256`必须匹配解析前实际�
 
 本文件随源码包交付。正式入口为 `motion_server.py`，协议握手名称为 `SolidWorks ClashMate MechDog`，推荐配置键为 `solidworks-clashmate-mechdog`，共30项工具。实际字段、枚举和默认值以当前连接的 `tools/list` 为准；不要用历史发布说明替代当前 schema。
 
-alpha.28通用草案：`prepare_mechanism_task(task_kind="assembly_constraints")`返回`connection_draft`；`plan_mechanism_task`不传`connection_intent`只读返回同类候选，不创建或撤销已有令牌。候选按已知约束及当前几何列出名称式输入、依据、歧义及只读阻断。明显长轴且横向包围盒相交只能支持导向假设，不能断言设计用途；同轴的转动/滑动/刚性等备选须与用户目标核对，不能把所有浮动件改刚性。每页扫描最多64对、返回最多8组；`next_cursor`原样传`get_mechanism_task(task_id=...,draft_cursor=...)`，不得与`collect_evidence`混用。游标绑定任务目录及完整调查快照，续查不访问COM，可读持久快照；按`pair_range_start/end_exclusive`累计前页，`complete_for_remaining_suffix`只表示该后缀结束。几何截断、未知约束和轴线选项截断分别保留，候选缺席不证明无需配合。草案来自prepare时刻，实际plan必须传1至8项具体`connection_intent`并重新核对原生引用、状态与机械目标；仍经具体方案确认才执行。
+alpha.28通用草案：`prepare_mechanism_task(task_kind="assembly_constraints")`返回`connection_draft`；`plan_mechanism_task`不传`connection_intent`只读返回同类候选，不创建或撤销已有令牌。候选按已知约束及当前几何列出名称式输入、依据、歧义及只读阻断。明显长轴且横向包围盒相交只能支持导向假设，不能断言设计用途；同轴的转动/滑动/刚性等备选须与用户目标核对，不能把所有浮动件改刚性。每页扫描最多64对、返回最多8组；`next_cursor`原样传`get_mechanism_task(task_id=...,draft_cursor=...)`，不得与`collect_evidence`混用。游标绑定任务目录及完整调查快照，续查不访问COM，可读持久快照；按`pair_range_start/end_exclusive`累计前页，`complete_for_remaining_suffix`只表示该后缀结束。几何截断、未知约束和轴线选项截断分别保留，候选缺席不证明无需配合。草案来自prepare时刻，实际plan必须传具体`connection_intent`或alpha.32的明确`rigid_groups`，展开后合计1至8项目标并重新核对原生引用、状态与机械目标；仍经具体方案确认才执行。
 
 升级维护：`upgrade.ps1`继承宿主Python环境，不为完成升级清除`PYTHONPATH`、禁用`sitecustomize`、替换文件API或调用另一种删除入口。alpha.27在包与目标校验后、预检和租约前，以及正式租约内观察`Path.unlink`实现来源；外部包装或无法确认时，仅用宿主原API检查自建32字节文件及实际移除结果，允许且通过才继续，不一概拒绝包装器。拒绝、退出或静默不执行时返回`UPGRADE_FILE_API_CHECK_FAILED`、`python_runtime`、`file_api_checks`和`target_mutation_started=false`；托管源码及备份未写，自建`runs/upgrade-api-checks`预检记录和被拒绝的文件保留。这是单文件能力检查，不是对所有运行时钩子或未来批量操作的认证。AI应核对宿主支持的授权维护渠道，不能据此自动关闭其保护。事务中`SystemExit`及键盘中断进入逐文件回滚：先恢复所有可恢复旧文件，再清理新增托管文件，保留每项拒绝的类型/路径；任何残留仍是`UPGRADE_FAILED_ROLLBACK_INCOMPLETE`。回执写入失败单列`UPGRADE_RECOVERY_RECEIPT_FAILED`，旧回执与真实字节结论分别保留，不自动重试或宣称可启动MCP。历史执行器PID只作线索，租约和原生互斥体才用于当前占用核对，不删除陈旧恢复日志。
 
@@ -236,7 +236,20 @@ alpha.25：范围复核可返回assembly_group_recommendation，含assembly_inte
 
 原生全约束观察与运动目标冲突时返回 `CONNECTION_GOAL_CONFLICT`，不是要求操作者改工具参数。只读不完整、未知几何、已有锁定配合的移动后端边界均保持可见，不等于无配合。新方案撤销旧令牌；确认仍不授权执行未列出的补充。
 
-补齐后验证小幅允许运动与禁止方向、固定件及原有受支持连接，并逐次核对全部恢复。临时距离试验约束以成果检查点恢复移除，原配合和固定标志不变。`verification.declared_scope_passed` 限本次声明的小位移范围；`native_motion_study_solved=false`，不声称全局DOF或完整Motion求解。默认finish恢复导入检查点；明确保留已验证副本才keep_result。
+补齐后验证小幅允许运动与禁止方向、固定件及原有受支持连接，并逐次核对全部恢复。临时距离试验约束以成果检查点恢复移除，原配合不变，固定标志仅允许具体方案中的解除名单。`verification.declared_scope_passed` 限本次声明的小位移范围；`native_motion_study_solved=false`，不声称全局DOF或完整Motion求解。默认finish恢复导入检查点；明确保留已验证副本才keep_result。
 
 
 alpha.29旋转允许方向可使用自动选择的临时角度约束：两组件基准面须对已确认转轴具有足够灵敏度，避开0／π分支，参考仍由原生组件选择身份核验。直线允许方向仍可使用临时距离约束；每项之后恢复成果检查点移除临时特征。禁止方向使用原装配移动求解，不添加驱动去制造拒绝。所有转动试验逐项重新载入成果检查点，校验全组件位姿、原配合参数、数量和固定标志；不以反向移动位姿相同推断求解器状态已恢复。没有合适参考时不生成虚构基准，不在遇错后自动切换后端或降低行程要求。大装配恢复成本可很高，调用方查询原任务；前端等待到期不授权重放execute，收尾和成果保存仍须原任务验证完成。
+
+
+## alpha.32 整组目标与受控解除固定
+
+在已prepare为`assembly_constraints`的任务中，`plan_mechanism_task`可传`rigid_groups`：1至8组严格对象，每组`name`、2至32项完整组件实例名`members`，可选组内`anchor`。不新增MCP工具。可不传`connection_intent`仅规划刚性组；也可与刚性／转动／滑动目标组合，展开后总共最多8项目标、64项新增配合。不能在一个刚性组内声明相对转动或滑动。分组不证明机械意图，AI从用户目标和证据提出建议，必要歧义才集中澄清；未分配组件仍列为unassigned，不推断静止归属。
+
+自动锚点优先已声明运动端，再选保留的原固定件，否则为稳定坐标参考。锚点选择不授权固定它；已受间接关系充分约束的成员不重复加配合，其刚性绑定仍进入每项试验核对。组合后的约束若锁住其他已声明移动目标，预演前拒绝，不能以各局部方案分别可行作为组合可行证明。
+
+`release_fixed_components`为1至16项完整实例名，仅允许解除调查时明确固定、且绑定本次目标或组成员的零件。最后一个原固定参考不得释放，阵列成员和子装配范围不支持。没有传名单而固定状态妨碍已声明运动时，只读返回`fixed_release_review_required`及建议名单，不自动写入、不生成执行令牌。展开超8项返回`group_goal_budget_review_required`，保留完整展开清单，不截断或部分执行。
+
+固定状态变更以`fixed_state_changes`逐项before=true/after=false列入具体方案。plan使用假设解除后的受支持模型做检查，但原生preview仍绑定原调查签名，尚未改变固定状态。execute先建立并验证原检查点，再仅解除名单、重建并独立核对全部固定标志、全组件初态、旧配合、健康和原生状态；移动目标仍全约束则回退，不自动删除、压缩旧配合或关闭锁转。只支持解除固定这一种受控修复。
+
+每项试验恢复成果检查点时保持已确认的结果固定状态；默认finish恢复导入检查点时恢复原始固定状态。`verification.fixed_state_changes_verified`表示成果状态的独立读回核对，`declared_group_bindings_checked_per_trial`为每项试验检查的声明组绑定数；它们都不等于全行程或整机构运动认证。当前泵样本仅验证两组刚性关系，轴仍固定，不据此宣称完整齿轮传动通过。

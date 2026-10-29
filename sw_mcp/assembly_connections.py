@@ -194,11 +194,8 @@ def plan(survey, intents):
     def lift(rows,a,b=None):
         return [{**{6*indices[a]+i:x for i,x in enumerate(row) if abs(x)>1e-12},
                  **({6*indices[b]+i:-x for i,x in enumerate(row) if abs(x)>1e-12} if b is not None else {})} for row in rows]
-    for c in cs:
-        if c.get('fixed_component'):
-            for row in lift(target_rows('rigid',None,None,origin,scale),c['component_id']): matrix.add(row)
-    for (a,b),p in pairs.items():
-        for row in lift(p['rows'],a,b):matrix.add(row)
+    base_graph=constraint_graph.model(survey);matrix.pivots=base_graph.matrix.pivots.copy()
+    omitted=[v['native_feature_id'] for v in base_graph.unknown]
     actions=[];goals=[];seen=set()
     for raw in intents:
         if not isinstance(raw,dict) or set(raw)-{'component_a','component_b','kind','axis_hint','candidate_id'}:raise ValueError('invalid_connection_goal_fields')
@@ -271,6 +268,13 @@ def plan(survey, intents):
             'kind':kind,**chosen,'missing_supported_constraints_before':before,'remaining_supported_constraints':remaining,
             'added_action_count':len(actions)-start,'linear_trial_driver':trial_driver,
             'rotary_trial_driver':rotary_driver,'motion_verified':False})
+    planned=constraint_graph.Graph(survey);planned.matrix.pivots=matrix.pivots.copy()
+    for goal in goals:
+        if goal['kind']=='rigid':continue
+        effective=planned.relative(goal['component_a'],goal['component_b'])
+        target=target_rows(goal['kind'],goal['axis_global'],goal['reference_point_global_m'],origin,scale)
+        if len(ac.basis(target+effective['rows']))>len(ac.basis(target)):
+            raise ValueError('proposed_group_constraints_conflict_with_declared_motion')
     return {'status':'unsupported_references' if any(g['remaining_supported_constraints'] for g in goals) else 'plan_ready',
         'goals':goals,'actions':actions,'omitted_native_feature_ids':omitted,'requires_explicit_confirmation':True,
         'existing_mates_deleted':[],'existing_mates_suppressed':[],'fixed_state_changes':[],

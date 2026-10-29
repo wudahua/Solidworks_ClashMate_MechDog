@@ -11,8 +11,8 @@ using SolidWorks.Interop.swmotionstudy;
 public partial class Cad {
     class ConnectionPlan {
         public string Id,ModelId,Signature,OriginalParameters;public int Revision;
-        public bool Consumed;public List<Dictionary<string,object>> Actions,Goals;
-        public Dictionary<string,double[]> Poses;public Dictionary<string,bool> Fixed;
+        public bool Consumed;public List<Dictionary<string,object>> Actions,Goals,FixedChanges;
+        public Dictionary<string,double[]> Poses;public Dictionary<string,bool> Fixed,ExpectedFixed;
     }
     readonly Dictionary<string,ConnectionPlan> connectionPlans=new Dictionary<string,ConnectionPlan>();
     readonly HashSet<string> connectionModelScopes=new HashSet<string>();
@@ -118,25 +118,44 @@ public partial class Cad {
             if((string)data["reference_state_signature"]!=MateSignature(m,doc))throw new CadFault("CONNECTION_PLAN_STALE","只读方案已过期。");
             var actions=Json.Deserialize<List<Dictionary<string,object>>>(Json.Serialize(data["actions"]));
             var goals=Json.Deserialize<List<Dictionary<string,object>>>(Json.Serialize(data["goals"]));
+            var changes=data.ContainsKey("fixed_state_changes")?Json.Deserialize<List<Dictionary<string,object>>>(Json.Serialize(data["fixed_state_changes"])):new List<Dictionary<string,object>>();
+            var bindings=data.ContainsKey("group_bindings")?Json.Deserialize<List<Dictionary<string,object>>>(Json.Serialize(data["group_bindings"])):new List<Dictionary<string,object>>();
             if(actions.Count>64||goals.Count<1||goals.Count>8)throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","首批每项最多8个连接目标、64项新增约束。");
+            if(changes.Count>16||bindings.Count>128)throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","固定状态和刚性组范围超出预算。");
+            var declaredTargets=new HashSet<string>(goals.Select(g=>(string)g["component_a"]));
+            foreach(var binding in bindings) {
+                if((string)binding["kind"]!="rigid"||(string)binding["component_a"]==(string)binding["component_b"])throw new CadFault("CONNECTION_REFERENCE_INVALID","刚性组绑定无效。");
+                ResolveUserComponent(m,doc,(string)binding["component_a"]);ResolveUserComponent(m,doc,(string)binding["component_b"]);declaredTargets.Add((string)binding["component_a"]);
+            }
+            var released=new HashSet<string>();
+            foreach(var change in changes) {
+                string cid=(string)change["component_id"];var component=ResolveUserComponent(m,doc,cid);
+                if(change.Keys.Any(k=>!new[]{"component_id","instance","before","after","action","reason"}.Contains(k))||
+                    !declaredTargets.Contains(cid)||!released.Add(cid)||!(change["before"] is bool)||!(bool)change["before"]||!(change["after"] is bool)||(bool)change["after"]||
+                    (string)change["action"]!="release_fixed"||(string)change["instance"]!=component.Name2||!component.IsFixed()||component.IsPatternInstance())
+                    throw new CadFault("CONNECTION_REFERENCE_INVALID","仅允许明确目标或刚性组成员的已固定组件解除固定，未派发修改。");
+            }
+            var cs=UserComponents(doc);
+            if(released.Count>0&&!cs.Any(c=>c.IsFixed()&&!released.Contains(GTComponentId(doc,c))))throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","须保留至少一个原有固定参考，未自动选择或固定其他组件。");
             foreach(var action in actions)ValidateConnectionAction(m,doc,action);
             foreach(var goal in goals) {
                 if(!new[]{"rigid","revolute","prismatic"}.Contains((string)goal["kind"]))throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","目标连接类型未支持。");
                 var a=ResolveUserComponent(m,doc,(string)goal["component_a"]);var b=ResolveUserComponent(m,doc,(string)goal["component_b"]);
-                if(a.Name2==b.Name2||a.IsFixed())throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","试验目标须为不同的浮动组件，未自动解除固定。");
+                if(a.Name2==b.Name2||(a.IsFixed()&&!released.Contains((string)goal["component_a"])))throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","固定目标须列入明确解除固定方案，未自动修改。");
                 object trialDriver;
                 if(goal.TryGetValue("linear_trial_driver",out trialDriver)&&trialDriver!=null)ValidateConnectionAction(m,doc,Json.Deserialize<Dictionary<string,object>>(Json.Serialize(trialDriver)));
                 if(goal.TryGetValue("rotary_trial_driver",out trialDriver)&&trialDriver!=null)ValidateConnectionAction(m,doc,Json.Deserialize<Dictionary<string,object>>(Json.Serialize(trialDriver)));
             }
-            var cs=UserComponents(doc);var plan=new ConnectionPlan{Id=Guid.NewGuid().ToString("N"),ModelId=id,Revision=m.Revision,
+            var plan=new ConnectionPlan{Id=Guid.NewGuid().ToString("N"),ModelId=id,Revision=m.Revision,
                 Signature=MateSignature(m,doc),OriginalParameters=CompletionOriginalParameters(doc,EGAllMates(doc).Select(f=>f.GetID()).ToArray()),Actions=actions,Goals=goals,
-                Poses=Transforms(doc),Fixed=cs.ToDictionary(c=>c.Name2,c=>c.IsFixed())};connectionPlans[plan.Id]=plan;
+                Poses=Transforms(doc),Fixed=cs.ToDictionary(c=>c.Name2,c=>c.IsFixed()),FixedChanges=changes,
+                ExpectedFixed=cs.ToDictionary(c=>c.Name2,c=>c.IsFixed()&&!released.Contains(GTComponentId(doc,c)))};connectionPlans[plan.Id]=plan;
             if(cs.Any(c=>!ConnectionRigidTransform((double[])c.GetTotalTransform(false).ArrayData))) {
                 connectionPlans.Remove(plan.Id);throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","有界验证首批要求单位尺度的刚体变换。");
             }
             var nonzero=StudyStates(doc).Where(v=>Math.Abs(v.time_s)>1e-8).Select(v=>new{name=v.name,time_s=v.time_s}).ToArray();
             return new{plan_id=plan.Id,model_id=id,expected_added_mates=actions.Count,goals=goals,
-                checkpoint_probe_required=true,original_mates_deleted=false,original_mates_suppressed=false,fixed_state_changes=new string[0],
+                checkpoint_probe_required=true,original_mates_deleted=false,original_mates_suppressed=false,fixed_state_changes=changes,
                 initial_state_preparation=new{strategy="verified_model_context_saved_pose_only",nonzero_historical_clocks_retained_inactive=nonzero,historical_studies_deleted=false,old_frame_zero_claimed=false,requires_confirmation=true},
                 verification=new{method="native_assembly_solver_bounded_pose_trials_not_Motion_Analysis",translation_step_m=.0001,rotation_step_rad=Math.PI/3600,
                     maximum_any_component_translation_m=.005,maximum_any_component_rotation_rad=Math.PI/180,
@@ -174,7 +193,7 @@ public partial class Cad {
         ConnectionPlan p;if(!connectionPlans.TryGetValue(planId,out p))throw new CadFault("CONNECTION_PLAN_STALE","方案不存在。");
         if(!confirmed)throw new CadFault("CONFIRMATION_REQUIRED","须确认基础连接方案和有界运动试验。");
         if(p.Consumed)throw new CadFault("TASK_ALREADY_EXECUTED","方案已消费。");
-        if(testFault&&p.Actions.Count==0)throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","回滚夹具必须有待新增约束，不能将无写入当回滚验证。");
+        if(testFault&&p.Actions.Count==0&&p.FixedChanges.Count==0)throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","回滚夹具必须有待写入动作，不能将无写入当回滚验证。");
         if(testFault&&System.Environment.GetEnvironmentVariable("SW_MCP_FAULT_TESTS")!="1")throw new Exception("FAULT_TEST_DISABLED");
         var m=GetUserModel(p.ModelId);
         using(var scope=new Scope(this,m.Path,null))if(MateSignature(m,scope.Doc)!=p.Signature||m.Revision!=p.Revision)throw new CadFault("CONNECTION_PLAN_STALE","当前模型与方案不一致。");
@@ -187,6 +206,25 @@ public partial class Cad {
             using(var scope=new Scope(this,m.Path,null))using(var batch=new NativeCommandBatch(()=>Sw.CommandInProgress,v=>Sw.CommandInProgress=v)) {
                 Progress(activeJobId,"connection_model_context",0,0,null);
                 var doc=scope.Doc;mutating=true;LastOperationRestoration="pending";var prepared=PrepareConnectionModelScope(m,doc);var originalIds=EGAllMates(doc).Select(f=>f.GetID()).ToArray();
+                foreach(var change in p.FixedChanges) {
+                    Progress(activeJobId,"connection_release_declared_fixed",0,p.FixedChanges.Count,null);
+                    var c=ResolveUserComponent(m,doc,(string)change["component_id"]);doc.ClearSelection2(true);
+                    try{if(!c.IsFixed()||!c.Select4(false,null,false))throw new CadFault("CONNECTION_CREATE_FAILED","解除固定前原生状态或选择未通过。");
+                        ((IAssemblyDoc)doc).UnfixComponent();if(c.IsFixed())throw new CadFault("CONNECTION_CREATE_FAILED","解除固定原生读回未通过。");}
+                    finally{doc.ClearSelection2(true);}
+                }
+                if(p.FixedChanges.Count>0) {
+                    if(!doc.EditRebuild3())throw new CadFault("CONNECTION_CREATE_FAILED","解除固定后重建未通过。");RequireMatesHealthy(doc);
+                    var releasedPoses=Transforms(doc);
+                    if(UserComponents(doc).Any(c=>c.IsFixed()!=p.ExpectedFixed[c.Name2])||p.OriginalParameters!=CompletionOriginalParameters(doc,originalIds)||
+                        p.Poses.Count!=releasedPoses.Count||p.Poses.Any(v=>!releasedPoses.ContainsKey(v.Key)||!PoseValidation.Matches(v.Value,releasedPoses[v.Key])))throw new CadFault("CONNECTION_CREATE_FAILED","解除固定改变未授权状态、原配合或初态。");
+                    foreach(var goal in p.Goals)if((string)goal["kind"]!="rigid") {
+                        var c=ResolveUserComponent(m,doc,(string)goal["component_a"]);
+                        if(c.GetConstrainedStatus()==(int)SolidWorks.Interop.swconst.swConstrainedStatus_e.swFullyConstrained)
+                            throw new CadFault("CONNECTION_GOAL_CONFLICT","解除固定后原生仍全约束，未强行增加配合或删除旧约束。");
+                    }
+                    if(testFault)throw new CadFault("CONNECTION_CREATE_FAILED","受控验收故障：解除固定后验证完整回退。");
+                }
                 var evidence=new List<object>();int index=0;
                 foreach(var action in p.Actions) {
                     Progress(activeJobId,"basic_connection_completion",index++,p.Actions.Count,null);
@@ -198,12 +236,12 @@ public partial class Cad {
                 if(CompletionOriginalParameters(doc,originalIds)!=p.OriginalParameters||EGAllMates(doc).Length!=originalIds.Length+p.Actions.Count)
                     throw new CadFault("CONNECTION_CREATE_FAILED","原配合或新增数量发生非预期变化。");
                 var actual=Transforms(doc);if(!p.Poses.All(v=>actual.ContainsKey(v.Key)&&PoseValidation.Matches(v.Value,actual[v.Key])))throw new CadFault("CONNECTION_CREATE_FAILED","基础连接补齐改变初态。");
-                if(UserComponents(doc).Any(c=>c.IsFixed()!=p.Fixed[c.Name2]))throw new CadFault("CONNECTION_CREATE_FAILED","补齐改变固定状态。");
+                if(UserComponents(doc).Any(c=>c.IsFixed()!=p.ExpectedFixed[c.Name2]))throw new CadFault("CONNECTION_CREATE_FAILED","补齐固定状态超出明确方案。");
                 Progress(activeJobId,"connection_save_verified_result",0,0,null);
                 SaveOwnedDocuments(m);m.Revision++;SaveUserModel(m);VerifyUserSources(m);LastOperationRestoration="restored";
                 connectionTrialGoals[m.Id]=p.Goals;
                 return new{model_id=m.Id,plan_id=planId,checkpoint_id=cp,checkpoint_probe=probe,initial_state_preparation=prepared,
-                    added_mates=p.Actions.Count,goals=p.Goals,evidence=evidence,native_health_verified=true,motion_verified=false,
+                    added_mates=p.Actions.Count,fixed_state_changes=p.FixedChanges,fixed_state_changes_verified=true,goals=p.Goals,evidence=evidence,native_health_verified=true,motion_verified=false,
                     source_files_unchanged=true,restoration_status="restored"};
             }
         }catch(Exception error) {

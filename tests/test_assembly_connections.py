@@ -235,13 +235,13 @@ class ConnectionContractTests(unittest.TestCase):
         engine=SimpleNamespace(tasks={'a'*32:{}},plan=Mock(return_value={'accepted':True}))
         with patch.object(server,'_task_engine',engine):
             result=asyncio.run(server.mcp.call_tool('plan_mechanism_task',{'task_id':'a'*32}))
-        self.assertFalse(result.is_error,result);self.assertIsNone(engine.plan.call_args.args[-1])
+        self.assertFalse(result.is_error,result);self.assertIsNone(engine.plan.call_args.args[-3])
         engine.plan.reset_mock()
         with patch.object(server,'_task_engine',engine):
             result=asyncio.run(server.mcp.call_tool('plan_mechanism_task',{'task_id':'a'*32,'connection_intent':[
                 dict(component_a='滑块2-1',component_b='导轨-1',kind='prismatic')]}))
         self.assertFalse(result.is_error,result)
-        self.assertEqual(engine.plan.call_args.args[-1][0]['component_a'],'滑块2-1')
+        self.assertEqual(engine.plan.call_args.args[-3][0]['component_a'],'滑块2-1')
 
 
 class DeveloperAcceptanceWaitTests(unittest.TestCase):

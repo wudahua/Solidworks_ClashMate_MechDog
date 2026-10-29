@@ -3,7 +3,7 @@ import json
 import uuid
 from . import core,source_integrity,task_execution
 from .task_engine import matching_components,mechanical_choices
-from .. import assembly_connections as joints,connection_trials as trials,connection_recommendations as recommendations
+from .. import assembly_connections as joints,connection_trials as trials,connection_recommendations as recommendations,connection_groups
 
 
 def discover(s):
@@ -51,11 +51,11 @@ def resolve(s,intents):
     return out,None
 
 
-def propose(engine,t,intents):
+def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None):
     engine._require_session(t['task_id'])
     if t['phase'] not in {'constraint_review_ready','awaiting_confirmation'}:raise core.StopBatch('TASK_NOT_READY_FOR_PLAN')
     s=engine.sessions[t['task_id']]
-    if intents is None:return {'task_id':t['task_id'],'needs_connection_intent':True,
+    if intents is None and rigid_groups is None and release_fixed_components is None:return {'task_id':t['task_id'],'needs_connection_intent':True,
         'connection_draft':getattr(s,'connection_draft',None) or recommendations.draft(s.connection_survey),
         'connection_review':t['connection_review'],'write_dispatched':False,
         'instruction':'AI读取connection_draft，用候选connection_intent及推荐依据形成整组方案；已有机械目标可直接选择，真正歧义集中询问。草案不是原生预演或执行授权，实际plan仍须传具体connection_intent。现有方案不因只读草案查询自动撤销。'}
@@ -63,16 +63,29 @@ def propose(engine,t,intents):
         t['previous_plan_id']=(t.get('proposal') or {}).get('plan_id')
         t.pop('plan_token',None);t.pop('proposal',None)
         t.update(phase='constraint_review_ready',plan_token_revoked=True);engine.save(t)
-    goals,question=resolve(s,intents)
+    goals,question=resolve(s,intents) if intents is not None else ([],None)
     if question:return {'task_id':t['task_id'],**question}
-    try:proposal=joints.plan(s.connection_survey,goals)
+    expansion=None
+    try:
+        planning_survey=s.connection_survey
+        if rigid_groups is not None or release_fixed_components is not None:
+            expansion=connection_groups.expand(planning_survey,goals,rigid_groups,release_fixed_components)
+            core.write(s.folder/'整组目标展开.json',{k:v for k,v in expansion.items() if k!='planning_survey'})
+            if expansion['status']!='group_expanded':return {'task_id':t['task_id'],**{k:v for k,v in expansion.items() if k!='planning_survey'},'confirmation_token_created':False}
+            goals=expansion['goals'];planning_survey=expansion['planning_survey']
+        proposal=joints.plan(planning_survey,goals)
+        if expansion:
+            proposal.update(group_bindings=expansion['group_bindings'],rigid_groups=expansion['rigid_groups'],
+                fixed_state_changes=expansion['fixed_state_changes'],skipped_existing_pairs=expansion['skipped_existing_pairs'],
+                unassigned_components=expansion['unassigned_components'],mechanical_ownership_of_unassigned_components_inferred=False)
     except (ValueError,TypeError) as error:
         reason=str(error)
-        code='CONNECTION_GOAL_CONFLICT' if reason in {'existing_constraints_conflict_with_declared_motion','existing_indirect_constraints_conflict_with_declared_motion','both_components_fixed_no_floating_target_for_native_trial','native_fully_constrained_mobile_goal_requires_review','native_full_constraint_conflicts_with_supported_missing_rank'} else 'CONNECTION_SCOPE_UNSUPPORTED' if reason=='native_inventory_or_health_requires_review' else 'CONNECTION_INTENT_INVALID'
+        code='CONNECTION_GOAL_CONFLICT' if reason in {'existing_constraints_conflict_with_declared_motion','existing_indirect_constraints_conflict_with_declared_motion','proposed_group_constraints_conflict_with_declared_motion','mobile_joint_inside_declared_rigid_group','both_components_fixed_no_floating_target_for_native_trial','native_fully_constrained_mobile_goal_requires_review','native_full_constraint_conflicts_with_supported_missing_rank'} else 'CONNECTION_SCOPE_UNSUPPORTED' if reason in {'native_inventory_or_health_requires_review','pattern_group_requires_seed_scope_review','pattern_member_fixed_release_unsupported','fixed_release_requires_an_existing_fixed_reference_to_remain'} else 'CONNECTION_INTENT_INVALID'
         explanation={'native_fully_constrained_mobile_goal_requires_review':'局部运动线索与原生全约束观察冲突；先核对装配模型作用域及整条约束链，未解固定或补配合。',
             'native_full_constraint_conflicts_with_supported_missing_rank':'原生报告已全约束，但受支持局部模型仍有缺口；未知约束不能当作不存在，未继续补配合。',
             'existing_constraints_conflict_with_declared_motion':'原配合与目标运动冲突；未自动删除、压缩或解除固定。',
             'existing_indirect_constraints_conflict_with_declared_motion':'受支持的间接约束链与目标运动冲突；AI核对整装配约束图，不把直接配合较少当成缺项，不自动删除旧约束。',
+            'proposed_group_constraints_conflict_with_declared_motion':'整组补充约束会限制已声明的运动；方案未派发，AI核对分组或未解除的固定，不部分提交。',
             'both_components_fixed_no_floating_target_for_native_trial':'目标两件均固定；先澄清机械目标，未自动解除固定。'}.get(reason,'连接目标或当前受支持范围未通过校验；AI核对诊断，不重试写入。')
         raise core.StopBatch(code,explanation,{'reason':reason,'cad_dispatched':False,'write_dispatched':False,
             'native_state_review_path':str(s.folder/'通用配合体检.json'),
@@ -80,6 +93,7 @@ def propose(engine,t,intents):
             'component_state_observations':[{'instance':c['instance'],'fixed_component':c.get('fixed_component'),'constraint_state':c.get('constraint_state')}
                 for c in s.connection_survey['components'] if any(c['component_id'] in (g['component_a'],g['component_b']) for g in goals)],
             'nonlinear_constraints_observed':s.connection_survey.get('nonlinear_constraints',[]),
+            'group_intent_diagnostics':getattr(error,'diagnostics',None),
             'observation_scope':'whole_inventory_non_equality_constraints_are_not_proven_root_causes',
             'original_mates_or_fixed_flags_automatically_changed':False}) from error
     core.write(s.folder/'通用连接补齐规划.json',proposal)
@@ -90,6 +104,8 @@ def propose(engine,t,intents):
             {**proposal,'reference_state_signature':s.connection_survey['reference_state_signature']},ensure_ascii=False))
         t.update(phase='awaiting_confirmation',plan_token=uuid.uuid4().hex,plan_token_revoked=False,proposal={**native,
             'actions':proposal['actions'],'omitted_native_feature_ids':proposal['omitted_native_feature_ids'],
+            'group_bindings':proposal.get('group_bindings',[]),'rigid_groups':proposal.get('rigid_groups',[]),
+            'skipped_existing_pairs':proposal.get('skipped_existing_pairs',[]),'unassigned_components':proposal.get('unassigned_components',[]),
             'scope':'declared_basic_joints_small_trials_only_not_global_DOF_or_full_travel',
             'finish_policy':'restore_import_checkpoint_by_default'},
             next_action={'tool':'execute_mechanism_task','arguments':{'task_id':t['task_id']},
@@ -107,10 +123,23 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
         s=engine.sessions[t['task_id']];s.import_restored=False
         applied=s.call('_apply_assembly_connections',plan_id=t['proposal']['plan_id'],confirmed=True)
         core.write(s.folder/'通用连接补齐成果.json',applied);s.committed=True;s.capture_applied_result()
+        expected_fixed={c['component_id']:c['fixed_component'] for c in s.connection_survey['components']}
+        for change in t['proposal'].get('fixed_state_changes',[]):
+            if expected_fixed.get(change['component_id']) is not True or change['before'] is not True or change['after'] is not False:
+                raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','固定状态变更与明确方案不符。')
+            expected_fixed[change['component_id']]=False
+        actual_fixed={c['component_id']:c['fixed_component'] for c in s.result_inspection['components']}
+        fixed_audit={'passed':actual_fixed==expected_fixed,'expected':expected_fixed,'actual':actual_fixed,'changes':t['proposal'].get('fixed_state_changes',[])}
+        core.write(s.folder/'固定状态变更核对.json',fixed_audit)
+        if not fixed_audit['passed']:raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','实际固定标志超出确认的解除固定名单。',fixed_audit)
         poses={c['component_id']:c['transform'] for c in s.result_inspection['components']}
         try:bounds=[trials.bind(goal,poses) for goal in t['proposal']['goals']]
         except (ValueError,KeyError,TypeError) as error:raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','初态材料参考绑定未通过。',{'reason':str(error)}) from error
         declared_count=len(bounds);declared_pairs={frozenset((g['component_a'],g['component_b'])) for g in t['proposal']['goals']}
+        for binding in t['proposal'].get('group_bindings',[]):
+            pair=frozenset((binding['component_a'],binding['component_b']))
+            if pair not in declared_pairs:bounds.append(trials.bind(binding,poses));declared_pairs.add(pair)
+        group_extra_count=len(bounds)-declared_count
         observed=joints.review({'components':s.result_inspection['components'],'mates':s.result_inspection['mates'],'inventory_complete':True})
         for row in observed['connections']:
             if row['recommended_joint_type'] not in joints.KINDS or frozenset((row['component_a'],row['component_b'])) in declared_pairs:continue
@@ -138,7 +167,9 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
                 audits.append({**audit,'request_target_binding':binding,'artifact':receipt})
                 core.write(s.folder/'基础运动副有界验证.json',audits);passed=audit['passed']
         proof={'declared_scope_passed':passed,'method':'native_assembly_solver_small_pose_trials',
-            'connection_count':declared_count,'existing_supported_connection_checks':len(bounds)-declared_count,
+            'fixed_state_changes_verified':True,'fixed_state_changes':t['proposal'].get('fixed_state_changes',[]),
+            'connection_count':declared_count,'existing_supported_connection_checks':len(bounds)-declared_count-group_extra_count,
+            'additional_group_binding_checks':group_extra_count,'declared_group_bindings_checked_per_trial':len(t['proposal'].get('group_bindings',[])),
             'existing_connection_scope':'supported_native_pair_relations_only_not_unknown_constraints_or_global_DOF',
             'omitted_native_feature_ids':observed['omitted_native_feature_ids'],
             'completed_trials':len(audits),'trials':audits,'native_motion_study_solved':False,
