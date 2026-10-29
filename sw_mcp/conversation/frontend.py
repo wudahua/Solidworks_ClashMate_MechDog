@@ -18,7 +18,7 @@ def attach(mcp,root):
     client=OwnerClient(root,work,runtime)
     async def dispatch(name,arguments):
         try:
-            if name=='get_mechanism_task' and arguments.get('collect_evidence'):
+            if name=='get_mechanism_task' and arguments.get('collect_evidence') and not arguments.get('draft_cursor'):
                 return packed({'ok':True,'result':await asyncio.to_thread(client.evidence,arguments.get('task_id',''))})
             value=await asyncio.to_thread(client.call,'tool',name,arguments)
             return CallToolResult.model_validate(value)

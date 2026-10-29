@@ -51,7 +51,7 @@ class Client:
             state=self.tool('get_mechanism_task',task_id=task_id)
             mark=(state['phase'],state.get('native_stage'))
             if mark!=previous:print(json.dumps({'task_id':task_id,'phase':mark,'message':state.get('message')},ensure_ascii=False),flush=True);previous=mark
-            if not state['busy']:return state
+            if not state['busy'] and not state.get('native_close_pending'):return state
             time.sleep(1)
         raise core.StopBatch('ACCEPTANCE_WAIT_EXPIRED','仅停止等待，未结束任务或原生进程。')
     def close(self):

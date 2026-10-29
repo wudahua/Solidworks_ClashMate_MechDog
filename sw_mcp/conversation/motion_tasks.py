@@ -405,6 +405,7 @@ class MotionTaskEngine(TaskEngine):
         if keep_result and close_unrestored:raise core.StopBatch('INCOMPATIBLE_FINISH_CHOICES')
         if not keep_result:return super().finish(task_id,close_unrestored)
         t=self.tasks[task_id]
+        if getattr(self.sessions.get(task_id),'pending_owned_close',None) and not t.get('busy'):self.get(task_id)
         if t.get('closed'):return {'task_id':task_id,'closed':True,'result':t['finish'],'replayed':False}
         self._require_session(task_id)
         if t['phase']!='verified' or t.get('verification',{}).get('declared_scope_passed') is not True:

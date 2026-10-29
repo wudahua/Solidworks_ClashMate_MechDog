@@ -204,7 +204,15 @@ class ConversationSession(mate_worker.Session):
                 'exit_code':self.proc.returncode,'normal_zero_exit':self.proc.returncode==0,'force_kill':False,
                 'native_exit_observed_by':'retained_Popen','helper_exit_code':None})
             self.proc=None
-        return super().close()
+        try:return super().close()
+        except core.StopBatch as error:
+            if error.code=='OWNED_CAD_EXIT_PENDING_NO_TERMINATION':
+                # A later get may only observe this very same retained handle.
+                self.pending_close_process=self.proc
+                self.pending_owned_close={'pid':self.proc.pid,'model_id':self.model,'checkpoint_id':self.checkpoint,
+                    'import_restored':self.import_restored,'committed':self.committed}
+                self.persist_ownership({})
+            raise
 
 class TaskEngine:
     def __init__(self,project,work,runtime_base,session_factory=ConversationSession):
@@ -223,7 +231,22 @@ class TaskEngine:
     def save(self,t):
         t['updated_at']=time.time()
         core.write(Path(t['directory'])/'任务状态.json',t)
-    def get(self,task_id=''):
+    def get(self,task_id='',draft_cursor=''):
+        if draft_cursor:
+            from .. import connection_recommendations
+            if not re.fullmatch('[a-f0-9]{32}',task_id):raise core.StopBatch('INVALID_TASK_ID','草案续查需要有效task_id。')
+            if task_id not in self.tasks:raise core.StopBatch('TASK_NOT_IN_CURRENT_SERVER')
+            record=self.tasks[task_id]
+            if record.get('task_kind')!='assembly_constraints':raise core.StopBatch('CONNECTION_SCOPE_UNSUPPORTED','当前任务没有通用配合草案。')
+            try:
+                snapshot=core.no_links(Path(record['directory'])/'session/通用配合原生调查.json')
+                snapshot.relative_to(core.no_links(self.work))
+                survey=core.read(snapshot)
+                draft=connection_recommendations.draft(survey,cursor=draft_cursor,binding=str(Path(record['directory']).absolute()))
+            except (ValueError,TypeError) as error:raise core.StopBatch('CONNECTION_INTENT_INVALID','草案游标与本任务保存快照不符，未访问CAD或改写方案。',{'reason':str(error),'write_dispatched':False}) from error
+            except OSError as error:raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','保存的草案调查快照不可读，未访问CAD或重建现场。',{'error_type':type(error).__name__,'write_dispatched':False}) from error
+            return {'task_id':task_id,'connection_draft':draft,'write_dispatched':False,
+                    'instruction':'按next_cursor续查，累计所有pair_range；末页只表示剩余后缀结束，不替代前页。草案来自prepare快照，实际plan仍核对当前原生状态。'}
         if not task_id:
             with self.lock:
                 return {'server_pid':os.getpid(),'server_instance_id':self.server_instance_id,'active_task':self.active,
@@ -236,6 +259,12 @@ class TaskEngine:
             if task_id not in self.tasks:raise core.StopBatch('TASK_NOT_IN_CURRENT_SERVER','没有该任务记录；可不传task_id查询已有任务。')
             t=self.tasks[task_id]
             s=self.sessions.get(task_id)
+            if s and not t.get('busy') and not t.get('closed') and getattr(s,'pending_owned_close',None):
+                from . import late_close
+                try:late_close.reconcile(self,t,s)
+                except (core.StopBatch,OSError,ValueError,KeyError,TypeError) as error:
+                    t['late_close_review_error']={'code':getattr(error,'code',type(error).__name__),'message':str(error)}
+                    self.save(t)
             if s and not t.get('busy') and not t.get('closed') and getattr(s,'pending_native_response',None):
                 from . import managed_wait
                 try:
@@ -276,7 +305,12 @@ class TaskEngine:
             else:value.update(task_owner_available=True,connection_status='closed_record' if t.get('closed') else 'attached')
             s=self.sessions.get(task_id)
             already_ended=bool(s and getattr(s,'ended',False)) or completed_close.has_receipt(t)
-            if not t.get('busy') and not t.get('closed') and already_ended:
+            if s and not t.get('busy') and not t.get('closed') and getattr(s,'pending_owned_close',None):
+                value.update(connection_status='original_native_exit_pending',native_close_pending=True,
+                    next_action={'tool':'get_mechanism_task','arguments':{'task_id':task_id},
+                        'automatic_retry':False,'instruction':'已完成恢复或成果核对并发出退出请求；AI继续观察原进程句柄，不重复恢复、退出或启动新任务。迟到退出确认后自动补收据并释放任务。'})
+                value.pop('recovery_action',None)
+            elif not t.get('busy') and not t.get('closed') and already_ended:
                 value.update(connection_status='closed_receipts_pending_review',
                     next_action={'tool':'finish_mechanism_task','arguments':{'task_id':task_id,'close_unrestored':True},
                         'instruction':'原生收尾收据已存在；说明此前错误，获得关闭失败记录的明确同意后只读核对并归档，不再次恢复、求解或关闭进程。'})
@@ -559,6 +593,7 @@ class TaskEngine:
         return {'task_id':t['task_id'],'closed':True,'result':t['finish'],'replayed':False}
     def finish(self,task_id,close_unrestored=False):
         t=self.tasks[task_id]
+        if getattr(self.sessions.get(task_id),'pending_owned_close',None) and not t.get('busy'):self.get(task_id)
         if t.get('closed'):return {'task_id':task_id,'closed':True,'result':t['finish'],'replayed':False}
         if task_id not in self.sessions and t.get('server_instance_id')!=self.server_instance_id:
             return self.close_orphan(t,close_unrestored)
