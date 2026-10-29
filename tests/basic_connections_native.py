@@ -92,7 +92,8 @@ def main():
                     core.write(folder/f'{index+1}-automatic-draft.json',{'pages':pages,'selected':selected,'actual_public_intents':intents,
                         'scope':'developer_declared_mechanical_goals_not_live_LLM_intent_inference','axis_hint_supplied_in_card':False})
                     case['automatic_draft_record']=str(folder/f'{index+1}-automatic-draft.json')
-                client.tool('plan_mechanism_task',task_id=tid,connection_intent=intents)
+                group_options={key:card[key] for key in ('rigid_groups','release_fixed_components') if key in card}
+                client.tool('plan_mechanism_task',task_id=tid,connection_intent=intents,**group_options)
                 planned=client.wait(tid,args.wait_seconds);core.write(folder/f'{index+1}-plan.json',planned)
                 assert planned['phase']=='awaiting_confirmation',planned
                 assert planned['proposal']['expected_added_mates']==card['expected_added_mates'],planned['proposal']

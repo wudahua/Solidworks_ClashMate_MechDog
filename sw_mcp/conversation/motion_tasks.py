@@ -263,14 +263,14 @@ class MotionTaskEngine(TaskEngine):
         t.pop('component_selection',None)
 
     def plan(self,task_id,candidate_id='',moving_component_hint='',reference_component_hint='',initial_state='saved',alignment_mode='strict',
-             gear_ratio_numerator=0,gear_ratio_denominator=0,input_shaft_hint='',output_shaft_hint='',input_gear_hint='',output_gear_hint='',stationary_component_hints=None,assembly_intent=None,connection_intent=None):
+             gear_ratio_numerator=0,gear_ratio_denominator=0,input_shaft_hint='',output_shaft_hint='',input_gear_hint='',output_gear_hint='',stationary_component_hints=None,assembly_intent=None,connection_intent=None,rigid_groups=None,release_fixed_components=None):
         t=self.tasks[task_id]
         if t.get('task_kind')=='assembly_constraints':
             if candidate_id or moving_component_hint or reference_component_hint or initial_state!='saved' or alignment_mode!='strict' or assembly_intent is not None or stationary_component_hints is not None or gear_ratio_numerator or gear_ratio_denominator or input_shaft_hint or output_shaft_hint or input_gear_hint or output_gear_hint:
                 raise core.StopBatch('CONNECTION_INTENT_INVALID','通用连接目标使用connection_intent，不混用齿轮分组、运动初态或圆边对齐参数。')
             from .connection_task import propose
-            return propose(self,t,connection_intent)
-        if connection_intent is not None:raise core.StopBatch('CONNECTION_INTENT_INVALID','connection_intent仅用于assembly_constraints，不静默忽略。')
+            return propose(self,t,connection_intent,rigid_groups,release_fixed_components)
+        if connection_intent is not None or rigid_groups is not None or release_fixed_components is not None:raise core.StopBatch('CONNECTION_INTENT_INVALID','connection_intent、rigid_groups及release_fixed_components仅用于assembly_constraints，不静默忽略。')
         if t.get('task_kind')=='external_gear_pair':
             from .external_gear_task import propose
             return propose(self,t,candidate_id,initial_state,alignment_mode,moving_component_hint,reference_component_hint,

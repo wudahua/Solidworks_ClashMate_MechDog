@@ -1,5 +1,5 @@
 {
-  "version": "0.4.3-alpha.31",
+  "version": "0.4.3-alpha.32",
   "kind": "source_only",
   "text_line_endings": "LF",
   "includes_user_cad": false,
@@ -8,18 +8,18 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 30397,
-      "sha256": "56b9eb22ef7aa5bf079bcc07ae40be9052e63fecb69e5063d04ab37b8751f3b1"
+      "bytes": 31359,
+      "sha256": "859e723a0f0957775809ca53dbf06eedd635f910576cf7a2f8e46d440fd7d570"
     },
     {
       "path": "CONTRACT.md",
-      "bytes": 52302,
-      "sha256": "bed2be843a27fcdf066df146e9f563156989826dc55a7f8ca2506c567747f0bb"
+      "bytes": 54891,
+      "sha256": "494ef43034e8dc570780ed6a06e6272d7e910c457284fe49cb1fc71bc62d73ae"
     },
     {
-      "path": "发布说明_v0.4.3-alpha.31.md",
-      "bytes": 4762,
-      "sha256": "cd03668f28698dd699e855023d60b9aff3f20a895f5be4f309369bcaa0369ceb"
+      "path": "发布说明_v0.4.3-alpha.32.md",
+      "bytes": 4131,
+      "sha256": "afa4fc467b7f236f464d0c443ff0e53d8d586c1c8ce1eeb26cc7e2673ab7236f"
     },
     {
       "path": "LICENSE",
@@ -53,8 +53,8 @@
     },
     {
       "path": "motion_server.py",
-      "bytes": 49176,
-      "sha256": "04358a36281796586dde4e91e95c26009810b00412cda837e8800bfa428be68a"
+      "bytes": 50743,
+      "sha256": "69642ea9c7466fd5b65cf60d8c17e522cd2c792c1329cde08716570928fcb6a7"
     },
     {
       "path": "mcp-config.example.json",
@@ -122,6 +122,11 @@
       "sha256": "2dfbcf710fe79792ad84c9c81e4fc666dd6c23fa9ae6d9ede568248cdc3d8b59"
     },
     {
+      "path": "tests/test_connection_groups.py",
+      "bytes": 8486,
+      "sha256": "1af32531dc95fe033c8d52445caeea30f381b4eb74bbd106b487a560e77b78b7"
+    },
+    {
       "path": "tests/test_interface_consistency.py",
       "bytes": 11523,
       "sha256": "0be1eca710b39daf4013a5aa0b2e6ce3574977d247444f2b3f9a87e3b61444a0"
@@ -134,17 +139,17 @@
     {
       "path": "tests/test_assembly_connections.py",
       "bytes": 16516,
-      "sha256": "9c04b4bd03e3aa2a01de025c3253889d1df9f721501ace6afe7c5fe7ef4448fb"
+      "sha256": "d32f8ab8a1854b1832deeef43397919a8e7442cf0c658666943c49414abaa4b5"
     },
     {
       "path": "tests/BasicConnectionFixture.cs",
-      "bytes": 3634,
-      "sha256": "732d2abc8b6a07ec013a61f283d51c76f2d3fc3c42522dfe89575420c01040b0"
+      "bytes": 3790,
+      "sha256": "ddd6342189257734c37ab88c007ae794d8b3a2271a01db338b8ab592bfa9909f"
     },
     {
       "path": "tests/basic_connections_native.py",
-      "bytes": 12502,
-      "sha256": "c636e87ae26e030f7c058a9e19dbc24002a577aeec13dcf2f498c42c75ce0a42"
+      "bytes": 12634,
+      "sha256": "923be3df2e65786e7429a76669fde5496c4faa8b03a43bd6aba2e91a486edcc8"
     },
     {
       "path": "tests/test_external_gears.py",
@@ -198,8 +203,8 @@
     },
     {
       "path": "executor/AssemblyConnections.cs",
-      "bytes": 38734,
-      "sha256": "54839ef11b95f84f36903b03f96c0710ae61f403480742861701189143ae7e51"
+      "bytes": 43224,
+      "sha256": "6cbe9bc03c6c71cef852640f69b50e0a8c0c4ea67a44b2277e3121963bed0339"
     },
     {
       "path": "executor/AssemblyStructure.cs",
@@ -614,7 +619,7 @@
     {
       "path": "executor/UserMotion.cs",
       "bytes": 82815,
-      "sha256": "0f9514738683d1116d904478378e922b634edeb893066b9d771f1d61cf746e73"
+      "sha256": "c68c2179bad95e7e671ffd51206b2555509ee8b1e257a1339e231ab6af77de41"
     },
     {
       "path": "executor/VirtualImport.cs",
@@ -648,8 +653,8 @@
     },
     {
       "path": "sw_mcp/assembly_connections.py",
-      "bytes": 19445,
-      "sha256": "1fc053a9e22dafa696b443a86edfe1d025407ac74ff5fb227d1c864bd3a75930"
+      "bytes": 19848,
+      "sha256": "c33f3e2cc9216759ff734dd3615d3af0654d4a96be652e5a2a95caf2699bf048"
     },
     {
       "path": "sw_mcp/assembly_constraints.py",
@@ -670,6 +675,11 @@
       "path": "sw_mcp/circular_recommendations.py",
       "bytes": 15497,
       "sha256": "8dcb778710be75b01bbab4201bd7515e1259fc05a3828482496d6254544144cb"
+    },
+    {
+      "path": "sw_mcp/connection_groups.py",
+      "bytes": 7215,
+      "sha256": "4678013623b935258d83e7955b6b9089004e72bf82d697fefa887a8453f2772f"
     },
     {
       "path": "sw_mcp/connection_recommendations.py",
@@ -763,8 +773,8 @@
     },
     {
       "path": "sw_mcp/conversation/connection_task.py",
-      "bytes": 14067,
-      "sha256": "b20744103147ff14fa9a98f7adadb6fb7d4bef84f9732bdae496ffc795814291"
+      "bytes": 17608,
+      "sha256": "0f318f47a214ea61a5420ad91e3c310e3c19225058aa12712be1d5cd01f8858b"
     },
     {
       "path": "sw_mcp/conversation/conversation_owner.py",
@@ -774,7 +784,7 @@
     {
       "path": "sw_mcp/conversation/core.py",
       "bytes": 11926,
-      "sha256": "fc2f222c0d7d235a73042775bec578d64c7fb4a0c5be7e45742a0a5dc4a741b3"
+      "sha256": "2f73bac2a5ae19e9b7851bcf4ec8bda8fa6dfc91b91a1a0ab64a6d49ee4b253e"
     },
     {
       "path": "sw_mcp/conversation/evidence_bundle.py",
@@ -853,8 +863,8 @@
     },
     {
       "path": "sw_mcp/conversation/motion_tasks.py",
-      "bytes": 37059,
-      "sha256": "7dd650f62551ce4d01f49724e16a490a140859eb259579a8cc1981f5df181a03"
+      "bytes": 37255,
+      "sha256": "ec417ced878f3331a64c38a34a685483556ef077492989040839c6a3f10709f0"
     },
     {
       "path": "sw_mcp/conversation/orphan_close.py",
@@ -1058,8 +1068,8 @@
     },
     {
       "path": "scripts/build_release.py",
-      "bytes": 10534,
-      "sha256": "c2a944c3547903eb25c41af68cde8f5d69f907afef2a728c3047a0dbdfabdee1"
+      "bytes": 10573,
+      "sha256": "114a8fd820ce6417404e9e7462eceb703da648005c1c003805a85411ef195074"
     },
     {
       "path": "scripts/verify_release.py",
@@ -1433,8 +1443,8 @@
     },
     {
       "path": "tests/check_entrypoints.py",
-      "bytes": 7544,
-      "sha256": "299c97245d8141d27cd1f28007d28b857ecc7fa8b59374f533bba97b634ff194"
+      "bytes": 7756,
+      "sha256": "7f946ddf004ee72eaf50c1b9745d039770a6c03838801061f1fe461624be4331"
     },
     {
       "path": "tests/test_late_owned_close.py",
