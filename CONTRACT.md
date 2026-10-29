@@ -1,5 +1,13 @@
 # AI 客户端与开发者契约
 
+alpha.31整装配间接约束：`connection_review.assembly_constraint_graph`在完整清单内构造受支持瞬时约束模型，列出内部刚性组、地面约束观察、配合连接分区、阵列依赖和未知项。分区只包含已观察的配合边，不是整机断连证明；阵列依赖不是刚性运动证明。未知方程不加入受支持矩阵，但必须保留其存在与不确定性，不能据此认定额外自由度或缺配合。`global_DOF_certified`和`motion_verified`仍为false。
+
+草案保留`supported_direct_rank`和`supported_whole_inventory_effective_rank`，逐个选项的`supported_whole_inventory_missing_coordinates_if_goal_chosen`只在该目标成立时表示所需独立增补数。它与规划器共用秩判据，并在独立副本矩阵中计算，不修改共享快照；全部候选的`missing_connection_proven`仍为false。间接约束已充分时不添加冗余配合，与间接链冲突时在原生预演前返回`CONNECTION_GOAL_CONFLICT`及`existing_indirect_constraints_conflict_with_declared_motion`。这些线性关系不能取代原生预演、小位移验证和恢复。
+
+装配根参考仅在原生`IComponent2.IsRoot`确认且真实几何已读出时标记`reference_owner_scope=assembly_root, root_reference_verified=true`，不按名称或库存外ID猜地面，也不据此注册创建参考。`nonlinear_constraints`保留限位距离的SI长度及螺旋配合的原生RevolutionType、RevolutionVal、Reverse、Alignment；螺旋原始数值未经单位／类型解释，不直接冒充已求出的导程或耦合运动。未知或无法读取保持unavailable，观察成功不等于运动通过。
+
+目标冲突诊断附`component_state_observations`、`nonlinear_constraints_observed`及`constraint_graph_path`。非线性列表是完整清单观察，不是被证明的根因；AI不得把列表中无关配合直接当作应删除项。导轨当前仍保留全约束冲突门禁，不以增加约束、解除固定或重复plan解决未认证的原生运动路径；完整Motion任务的历史成绩不替代本次通用模式验证。
+
 alpha.30只读恢复核对：完整检查点关闭重开结束后，使用重新取得的组件对象，在一个`NativeCommandBatch`内读取全组件位姿、旧配合健康与参数、配合数量和固定状态。检查点恢复本身在批处理之外，不缓存跨重开的COM对象，不删除检查项。探针工件的`native_timings`记录顺序阶段及尚未归属的耗时，计时在最后一个已结束阶段冻结；工件写入、冻结后阶段、外层序列化、运输和整个任务准备不在总计内。`post_restore_native_batch`仅证明该批处理进入及恢复标志，不能单独证明机械检查通过。客户端仍读取任务结论和原始工件。
 
 alpha.30候选保留现有转动／滑动为首选，同时列出`source=alternative_only_if_rigid_mechanical_goal_confirmed`的刚性备选。它仅方便AI表达已确认的机械用途，仍为`requires_goal_confirmation=true, executable=false`；不把现有自由度当成缺配合证据。不得默认选刚性、删除旧配合或用“轴承”等名称替代机械目标确认；已有刚性连接不据此推荐释放自由度。

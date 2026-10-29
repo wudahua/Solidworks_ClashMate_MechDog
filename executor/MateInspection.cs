@@ -9,18 +9,18 @@ public partial class Cad {
     object AdditionalConstraintGeometry(IModelDoc2 doc,IMateEntity2 entity,IComponent2 component) {
         if(component==null)return null;
         try {
-            object reference=entity.Reference;var face=reference as IFace2;double[] point=null,axis=null;string kind=null;
+            bool root=component.IsRoot();object reference=entity.Reference;var face=reference as IFace2;double[] point=null,axis=null;string kind=null;
             if(face!=null&&((ISurface)face.GetSurface()).IsCone()) {
                 var values=(double[])((ISurface)face.GetSurface()).ConeParams2;
                 if(values==null||values.Length<8)return null;
                 point=values.Take(3).ToArray();axis=values.Skip(3).Take(3).ToArray();kind="conical_axis";
             }else if(entity.ReferenceType2==(int)swSelectType_e.swSelDATUMPLANES) {
-                var underlying=doc.Extension.GetCorresponding2(reference);var feature=underlying as IFeature;
+                var underlying=root?reference:doc.Extension.GetCorresponding2(reference);var feature=underlying as IFeature;
                 var plane=underlying as IRefPlane;
                 if(plane==null&&feature!=null)plane=feature.GetSpecificFeature2() as IRefPlane;
                 if(plane==null) {
                     feature=reference as IFeature;var part=component.GetModelDoc2() as IModelDoc2;
-                    if(feature==null||part==null||part.GetType()!=1)return null;var local=((IPartDoc)part).FeatureByName(feature.Name) as IFeature;
+                    if(feature==null||part==null||(!root&&part.GetType()!=1))return null;var local=root?((IAssemblyDoc)doc).FeatureByName(feature.Name) as IFeature:((IPartDoc)part).FeatureByName(feature.Name) as IFeature;
                     plane=local==null?null:local.GetSpecificFeature2() as IRefPlane;
                 }
                 if(plane==null)return null;
@@ -33,7 +33,7 @@ public partial class Cad {
                 if(values==null||values.Length!=6)return null;
                 point=values.Take(3).ToArray();axis=values.Skip(3).Zip(point,(a,b)=>a-b).ToArray();kind="reference_axis";
             }
-            if(point==null||axis==null)return null;var pose=(double[])component.GetTotalTransform(false).ArrayData;
+            if(point==null||axis==null)return null;var pose=root?new[]{1.0,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0}:(double[])component.GetTotalTransform(false).ArrayData;
             axis=ApplyPose(pose,axis,false);double length=Math.Sqrt(axis.Sum(v=>v*v));if(length<1e-12)return null;
             return new{kind=kind,axis_global=axis.Select(v=>v/length).ToArray(),reference_point_global_m=ApplyPose(pose,point,true),
                 source="native_mate_reference_axis_observation",creation_reference_supported=false,entity_registered=false};
@@ -54,6 +54,8 @@ public partial class Cad {
         catch(COMException e){row["geometry_status"]="native_reference_unavailable";row["native_hresult"]=e.HResult;}
         catch(CadFault e){row["geometry_status"]=e.Code;}
         if(!row.ContainsKey("geometry")&&((string)row["geometry_status"]=="unsupported_surface_type"||(string)row["geometry_status"]=="unsupported_reference_kind"))row["constraint_geometry"]=AdditionalConstraintGeometry(doc,entity,component);
+        bool isRoot=component!=null&&component.IsRoot();row["reference_owner_scope"]=isRoot?"assembly_root":"component_or_unresolved";
+        row["root_reference_verified"]=isRoot&&row.ContainsKey("constraint_geometry")&&row["constraint_geometry"]!=null;
         return row;
     }
     object[] UserMates(IModelDoc2 doc,UserModel registerModel=null) {

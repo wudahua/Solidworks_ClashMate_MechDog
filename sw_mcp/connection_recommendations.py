@@ -5,6 +5,7 @@ import math
 import json
 import re
 from . import assembly_connections as joints
+from . import constraint_graph
 
 MAX_PAIRS=64
 MAX_CANDIDATES=8
@@ -70,8 +71,9 @@ def draft(survey,review=None,cursor='',binding=''):
         offset=int(match[2])
     cs=survey['components'];by_id={c['component_id']:c for c in cs}
     pairs,omitted,origin,scale=joints.observed_rows(survey)
+    graph=constraint_graph.model(survey)
     eligible=[key for key in itertools.combinations(sorted(by_id),2) if not all(by_id[x].get('fixed_component') for x in key)]
-    eligible.sort(key=lambda key:(0 if key in pairs and len(joints.ac.basis(pairs[key]['rows']))<5 else 1 if key in pairs else 2,key))
+    eligible.sort(key=lambda key:(3 if graph.rank(*key)==6 else 0 if key in pairs and len(joints.ac.basis(pairs[key]['rows']))<5 else 1 if key in pairs else 2,key))
     if offset>=len(eligible) and cursor:raise ValueError('draft_cursor_outside_pair_scope')
     candidates=[];end=offset
     for key in eligible[offset:offset+MAX_PAIRS]:
@@ -79,7 +81,8 @@ def draft(survey,review=None,cursor='',binding=''):
         a,b=(by_id[x] for x in key)
         if a.get('fixed_component'):a,b=b,a
         pair=pairs.get(key,{'rows':[],'native_feature_ids':[]});rows=pair['rows']
-        observed=joints.mobility(rows,origin,scale)
+        effective=graph.relative(a['component_id'],b['component_id']);effective_rows=effective['rows']
+        observed=joints.mobility(effective_rows,origin,scale)
         axes=_coaxial(a,b)
         guides=_guide_hints(a,b,rows,origin,scale)
         if not rows and not axes:continue  # Datum alignment alone is not a connection.
@@ -91,7 +94,7 @@ def draft(survey,review=None,cursor='',binding=''):
             point=point_hint or a['transform'][9:12]
             if kind=='revolute':
                 matching=[r for r in axes if _parallel(r['axis_global'],axis)]
-                if source=='supported_existing_constraint_rows':point=observed['axis_point_global_m']
+                if source in {'supported_existing_constraint_rows','supported_indirect_constraint_rows'}:point=observed['axis_point_global_m']
                 elif point_hint is not None:point=point_hint
                 elif matching:point=matching[0]['reference_point_global_m']
                 else:return
@@ -100,7 +103,7 @@ def draft(survey,review=None,cursor='',binding=''):
                        {'axis_global':axis,'reference_point_global_m':point},
                        {'axis_global':o['axis_global'],'reference_point_global_m':o['axis_point_global_m']})))) for o in options):return
             target=joints.target_rows(kind,axis,point,origin,scale)
-            if len(joints.ac.basis(target+rows))>len(joints.ac.basis(target)):return
+            if len(joints.ac.basis(target+effective_rows))>len(joints.ac.basis(target)):return
             intent={'component_a':a['instance'],'component_b':b['instance'],'kind':kind}
             if kind!='rigid':
                 intent['axis_hint']=list(axis)
@@ -111,10 +114,11 @@ def draft(survey,review=None,cursor='',binding=''):
             options.append({'kind':kind,'axis_global':axis,'axis_point_global_m':point if kind=='revolute' else None,'source':source,
                 'connection_intent':intent,'requires_goal_confirmation':True,
                 'supported_local_missing_coordinates_if_goal_chosen':len(joints.ac.basis(target+rows))-len(joints.ac.basis(rows)),
+                'supported_whole_inventory_missing_coordinates_if_goal_chosen':graph.missing_target(target,a['component_id'],b['component_id']),
                 'native_plan_required':True,'executable':False})
         if observed['recommended_joint_type']:
             kind=observed['recommended_joint_type']
-            option(kind,observed.get('axis_global'),'supported_existing_constraint_rows')
+            option(kind,observed.get('axis_global'),'supported_indirect_constraint_rows' if effective['indirect_constraint_gain'] else 'supported_existing_constraint_rows')
             # Existing mobility is evidence, not the user's desired function.
             # Preserve it as the preferred choice; stopping it is a separately
             # confirmed mechanical goal, never proof that a mate was missing.
@@ -130,14 +134,18 @@ def draft(survey,review=None,cursor='',binding=''):
         option_count=len(options);options=options[:4]
         has_motion=any(o['kind']!='rigid' for o in options)
         blocker='native_lock_trial_unsupported' if locked else 'native_full_constraint_mobile_goal_requires_review' if full and has_motion else None
-        preferred=next((i for i,o in enumerate(options) if o['source']=='supported_existing_constraint_rows'),None)
+        if a['component_id'] in graph.patterns or b['component_id'] in graph.patterns:blocker='native_pattern_instance_requires_seed_goal'
+        preferred=next((i for i,o in enumerate(options) if o['source'] in {'supported_existing_constraint_rows','supported_indirect_constraint_rows'}),None)
         if preferred is None:
             guide_indices=[i for i,o in enumerate(options) if o['source']=='elongated_global_bounding_box_heuristic']
             if len(guide_indices)==1:preferred=guide_indices[0]
         candidates.append({'candidate_id':'joint-'+hashlib.sha256(('|'.join(key)).encode()).hexdigest()[:12],
             'component_a':a['component_id'],'component_b':b['component_id'],'instance_a':a['instance'],'instance_b':b['instance'],
             'supported_local_rank':observed['supported_local_rank'],'native_feature_ids':pair['native_feature_ids'],
-            'missing_connection_proven':False,'indirect_connection_sufficiency_not_evaluated':True,
+            'missing_connection_proven':False,'indirect_connection_sufficiency_not_evaluated':False,
+            'indirect_connection_evaluation_scope':effective['scope'],
+            'supported_whole_inventory_effective_rank':effective['supported_effective_rank'],
+            'supported_direct_rank':effective['supported_direct_rank'],'indirect_constraint_gain':effective['indirect_constraint_gain'],
             'status':'review_required' if blocker else 'existing_supported_joint' if observed['recommended_joint_type'] else 'mechanical_goal_confirmation_required',
             'blocker':blocker,'preferred_option_index':preferred if not blocker else None,
             'options':options,'options_complete':option_count<=4,'omitted_option_count':max(0,option_count-4),
