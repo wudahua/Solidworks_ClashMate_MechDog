@@ -8,12 +8,12 @@ from pathlib import Path
 from verify_release import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.3-alpha.28"
+VERSION = "0.4.3-alpha.29"
 
 
 def build(candidate=False):
     # Keep the installed/CI regression suite identical to the development suite.
-    sources = [ROOT/name for name in ("README.md", "CONTRACT.md", "发布说明_v0.4.3-alpha.28.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
+    sources = [ROOT/name for name in ("README.md", "CONTRACT.md", "发布说明_v0.4.3-alpha.29.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
     sources += [ROOT/'tests/test_managed_late_response.py',ROOT/'tests/test_managed_feedback.py',ROOT/'tests/test_upgrade_host_runtime.py',ROOT/'tests/test_connection_recommendations.py']
     sources += [ROOT/'tests/test_motion_reference_read.py']
     sources += [ROOT/'tests/test_interface_consistency.py',ROOT/'tests/test_assembly_group_recommendations.py',ROOT/'tests/test_assembly_connections.py',ROOT/'tests/BasicConnectionFixture.cs',ROOT/'tests/basic_connections_native.py']
@@ -40,7 +40,7 @@ def build(candidate=False):
     sources += [ROOT/"tests/test_v043a1.py", ROOT/"tests/test_v043a2.py", ROOT/"tests/test_v043a3.py", ROOT/"tests/v043a3_performance_native.py", ROOT/"tests/test_v043a4.py", ROOT/"tests/v043a4_pagination_native.py"]
     sources += [ROOT/"tests/test_v043a6.py", ROOT/"tests/v043a6_performance_native.py"]
     sources += [ROOT/"tests/test_v042a9.py", ROOT/"tests/test_v043a5.py", ROOT/"tests/v043a5_observation_native.py"]
-    sources += [ROOT/"tests/check_entrypoints.py", ROOT/"tests/test_late_owned_close.py"]
+    sources += [ROOT/"tests/check_entrypoints.py", ROOT/"tests/test_late_owned_close.py", ROOT/"tests/test_connection_target_binding.py", ROOT/"tests/ConnectionTargetWireFixture.cs"]
     sources += [ROOT/"tests/test_v042a8.py", ROOT/"tests/v042a8_policy_checks.py", ROOT/"tests/v042a8_performance_native.py", ROOT/"tests/upgrade_powershell_checks.py"]
     sources += [ROOT/"tests/test_v042a7.py", ROOT/"tests/v042a7_policy_checks.py", ROOT/"tests/v042a7_performance_native.py"]
     sources += [ROOT/"tests/test_v042a4.py", ROOT/"tests/v042a4_reset_native.py", ROOT/"tests/v042a4_query_native.py", ROOT/"tests/v042a4_performance_native.py"]

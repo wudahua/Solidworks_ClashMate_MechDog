@@ -86,7 +86,7 @@ def propose(engine,t,intents):
             'scope':'declared_basic_joints_small_trials_only_not_global_DOF_or_full_travel',
             'finish_policy':'restore_import_checkpoint_by_default'},
             next_action={'tool':'execute_mechanism_task','arguments':{'task_id':t['task_id']},
-                'instruction':'解释连接目标、自动采用轴线、逐项新增配合、保留的旧约束及未知项、仅副本初态准备和有界试验范围。直线允许方向可使用临时距离驱动，逐次恢复成果检查点移除，未修改原配合；其他方向用装配移动求解。取得当前具体方案授权后一次执行。未证明全行程、受力或接触；默认恢复原导入状态。'})
+                'instruction':'解释连接目标、自动采用轴线、逐项新增配合、保留的旧约束及未知项、仅副本初态准备和有界试验范围。允许方向可使用临时距离或角度约束驱动，逐次恢复成果检查点移除，未修改原配合；禁止方向用装配移动求解。取得当前具体方案授权后一次执行。未证明全行程、受力或接触；默认恢复原导入状态。'})
     return engine._submit(t,'planning',operation)
 
 
@@ -115,17 +115,20 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
             for trial in trials.trials(goal,poses):
                 if not passed:break
                 probe_id=uuid.uuid4().hex;s.state('bounded_joint_trial','正在验证允许运动与禁止方向，并逐次核对全部组件恢复…',goal_index=i,trial=trial['label'])
+                target_json=json.dumps(trial['target'])
                 receipt=s.call('_probe_assembly_connection_pose',model_id=s.model,component_id=goal['component_a'],
-                    target_json=json.dumps(trial['target']),checkpoint_id=s.result_checkpoint,probe_id=probe_id,
+                    target_json=target_json,checkpoint_id=s.result_checkpoint,probe_id=probe_id,
                     goal_index=i,allowed_trial=trial['allowed'])
                 path=core.no_links(core.Path(receipt['artifact_path']));path.relative_to(s.runtime.resolve())
                 if path.name!=probe_id+'.json' or receipt.get('sha256')!=core.digest(path):raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','试验工件身份或哈希不符。')
                 evidence=core.read(path)
-                if evidence.get('model_id')!=s.model or evidence.get('probe_id')!=probe_id or evidence.get('component_id')!=goal['component_a'] or evidence.get('target')!=trial['target']:
+                if evidence.get('model_id')!=s.model or evidence.get('probe_id')!=probe_id or evidence.get('component_id')!=goal['component_a']:
                     raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','试验证据与当前请求不符。')
-                try:audit=trials.audit(evidence,bounds,i,trial,poses)
+                try:
+                    binding=trials.require_target_binding(evidence,trial['target'],target_json)
+                    audit=trials.audit(evidence,bounds,i,trial,poses)
                 except (ValueError,KeyError,TypeError) as error:raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','试验变换或证据范围无效。',{'reason':str(error),'artifact':receipt}) from error
-                audits.append({**audit,'artifact':receipt})
+                audits.append({**audit,'request_target_binding':binding,'artifact':receipt})
                 core.write(s.folder/'基础运动副有界验证.json',audits);passed=audit['passed']
         proof={'declared_scope_passed':passed,'method':'native_assembly_solver_small_pose_trials',
             'connection_count':declared_count,'existing_supported_connection_checks':len(bounds)-declared_count,

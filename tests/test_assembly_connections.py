@@ -21,6 +21,40 @@ def survey(mates=()):
 
 
 class ConnectionTests(unittest.TestCase):
+    def test_revolute_trial_automatically_selects_non_singular_datum_angle(self):
+        s=survey([mate(1,'body','moving','cylindrical_axis'),mate(2,'body','moving','planar_normal')])
+        p=joint.plan(s,[dict(component_a='moving',component_b='body',kind='revolute')])
+        d=p['goals'][0]['rotary_trial_driver']
+        self.assertEqual(p['actions'],[])
+        self.assertEqual((d['kind'],d['component_a'],d['component_b']),('angle','moving','body'))
+        self.assertAlmostEqual(d['value'],math.pi/2)
+        self.assertTrue(d['temporary_only'] and d['removed_by_verified_result_checkpoint_after_each_trial'])
+        # Its angle must change with the allowed axis, rather than measuring tilt.
+        from sw_mcp import assembly_constraints as ac
+        sensitivity=abs(ac.dot(ac.cross(p['goals'][0]['axis_global'],d['normal_a_global']),d['normal_b_global']))
+        self.assertGreaterEqual(sensitivity,.5)
+
+    def test_rotary_driver_does_not_choose_axis_normal_or_parallel_planes(self):
+        a=survey()['components'][1];b=survey()['components'][0]
+        a['completion_planes']=a['completion_planes'][2:];b['completion_planes']=b['completion_planes'][2:]
+        self.assertIsNone(joint.rotary_trial_driver(joint._candidates(a,b,[0,0,0],1),[0,0,1],'moving','body'))
+
+    def test_rotary_driver_does_not_invent_missing_datum_reference(self):
+        a,b=survey()['components']
+        for c in (a,b):
+            c['planes']=c.pop('completion_planes')
+            for f in c['planes']:f['reference_kind']='planar_face'
+        self.assertIsNone(joint.rotary_trial_driver(joint._candidates(a,b,[0,0,0],1),[0,0,1],'moving','body'))
+
+    def test_rotary_driver_selection_is_stable_when_reference_order_changes(self):
+        a,b=survey()['components'];x=joint.rotary_trial_driver(joint._candidates(a,b,[0,0,0],1),[0,0,1],'body','moving')
+        a['completion_planes'].reverse();b['completion_planes'].reverse()
+        self.assertEqual(x,joint.rotary_trial_driver(joint._candidates(a,b,[0,0,0],1),[0,0,1],'body','moving'))
+
+    def test_no_rotary_trial_driver_for_rigid_goal(self):
+        p=joint.plan(survey(),[dict(component_a='moving',component_b='body',kind='rigid')])
+        self.assertIsNone(p['goals'][0]['rotary_trial_driver'])
+
     def test_targets_preserve_distinct_freedoms_at_offset_axis(self):
         for kind, rank in [('rigid',6),('revolute',5),('prismatic',5)]:
             rows=joint.target_rows(kind,[0,0,1],[.2,.3,0],[0,0,0],.01)
