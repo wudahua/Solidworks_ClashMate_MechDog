@@ -115,6 +115,11 @@ def draft(survey,review=None,cursor='',binding=''):
         if observed['recommended_joint_type']:
             kind=observed['recommended_joint_type']
             option(kind,observed.get('axis_global'),'supported_existing_constraint_rows')
+            # Existing mobility is evidence, not the user's desired function.
+            # Preserve it as the preferred choice; stopping it is a separately
+            # confirmed mechanical goal, never proof that a mate was missing.
+            if kind in {'revolute','prismatic'}:
+                option('rigid',source='alternative_only_if_rigid_mechanical_goal_confirmed')
         else:
             for axis in axes[:3]:
                 option('revolute',axis['axis_global'],axis['source'],axis['reference_point_global_m'])
