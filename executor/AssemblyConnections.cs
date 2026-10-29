@@ -42,6 +42,26 @@ public partial class Cad {
         return new{strategy="verified_model_context_saved_pose_only",historical_studies_deleted=false,historical_clocks_unchanged=true,
             saved_poses_and_mate_parameters_unchanged=true,model_context_verified=true,old_study_frame_zero_verified=false};
     }
+    object ConnectionNonlinearObservation(IFeature feature,IMate2 mate) {
+        try {
+            if(mate.Type==17) {
+                var data=feature.GetDefinition() as IScrewMateFeatureData;
+                if(data==null)return new{native_feature_id=feature.GetID(),kind="screw",status="definition_unavailable"};
+                return new{native_feature_id=feature.GetID(),kind="screw",status="observed",native_revolution_type=data.RevolutionType,
+                    native_revolution_value=data.RevolutionVal,reverse=data.Reverse,mate_alignment=data.MateAlignment,
+                    modelled_as_linear_equality=false,observation_not_native_motion_verification=true};
+            }
+            if(mate.Type==5&&feature.GetTypeName2().ToLowerInvariant().Contains("limit")) {
+                var data=feature.GetDefinition() as IDistanceMateFeatureData;
+                if(data==null)return new{native_feature_id=feature.GetID(),kind="limit_distance",status="definition_unavailable"};
+                return new{native_feature_id=feature.GetID(),kind="limit_distance",status="observed",distance_m=data.Distance,
+                    minimum_distance_m=data.MinimumDistance,maximum_distance_m=data.MaximumDistance,
+                    flip_dimension=data.FlipDimension,mate_alignment=data.MateAlignment,
+                    modelled_as_linear_equality=false,observation_not_native_motion_verification=true};
+            }
+            return null;
+        }catch(Exception error){return new{native_feature_id=feature.GetID(),status="unavailable",error=error.GetType().Name};}
+    }
     public object SurveyAssemblyConnections(string id) {
         var model=GetUserModel(id);
         using(var scope=new Scope(this,model.Path,null))using(var batch=new NativeCommandBatch(()=>Sw.CommandInProgress,v=>Sw.CommandInProgress=v)) {
@@ -65,10 +85,11 @@ public partial class Cad {
                     geometry_complete=cylinders.Length<=24&&planes.Length<=16,geometry_status=status});
             }
             var mates=UserMates(doc,model);var structure=AssemblyStructureObservation(doc);var studies=StudyStates(doc);
+            var nonlinear=BasicMateFeatures(doc).Select(f=>{var mate=f.GetSpecificFeature2() as IMate2;return mate==null?null:ConnectionNonlinearObservation(f,mate);}).Where(v=>v!=null).ToArray();
             if(signature!=MateSignature(model,doc))throw new CadFault("CONNECTION_PLAN_STALE","调查期间状态发生变化。");
             SaveUserModel(model);
             return new{model_id=id,reference_state_signature=signature,components=rows,mates=mates,structural_relations=structure,
-                studies=studies,skipped=skipped,inventory_complete=skipped.Count==0,write_dispatched=false,
+                studies=studies,nonlinear_constraints=nonlinear,skipped=skipped,inventory_complete=skipped.Count==0,write_dispatched=false,
                 native_motion_study_solved=false,geometry_budget=new{cylinders_per_component=24,planes_per_component=16},
                 recommendation_scope="basic_joint_goal_planning_not_global_DOF_or_design_intent",source_files_unchanged=UserSourcesUnchanged(model)};
         }

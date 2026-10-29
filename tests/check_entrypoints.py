@@ -1,5 +1,6 @@
 """Check entry point classification; native CAD is always an explicit workflow."""
 ENTRIES = {
+  "test_constraint_graph": {"mode": "unittest", "caller": "test_constraint_graph.py", "scope": "indirect constraint projection, root grounding, rigid floating groups, unknown and pattern boundaries; no CAD"},
   "test_connection_target_binding": {"mode": "unittest", "caller": "test_connection_target_binding.py", "scope": "exact request SHA256, strict binary64 round-trip limits, real .NET serializer and unchanged physical refusal"},
   "test_late_owned_close": {"mode": "unittest", "caller": "test_late_owned_close.py", "scope": "retained child process late exit, proof mismatch refusals, kept results and no native replay"},
   "test_connection_recommendations": {"mode": "unittest", "caller": "test_connection_recommendations.py", "scope": "read-only evidence drafts, material-axis ambiguity, heuristic slide direction, frozen cursor coverage and strict public integration; no CAD"},

@@ -6,6 +6,7 @@ Native health, actual motion trials and restoration remain mandatory.
 import math
 from . import assembly_constraints as ac
 from .assembly_completion import SparseBasis
+from . import constraint_graph
 
 KINDS = {'rigid', 'revolute', 'prismatic'}
 
@@ -72,10 +73,18 @@ def review(survey):
         return {'status': 'incomplete_inventory', 'complete': False, 'write_dispatched': False}
     pairs, omitted, origin, scale = observed_rows(survey)
     analysis = ac.analyze(cs, survey['mates'], structural_relations=survey.get('structural_relations'))
+    try:graph=constraint_graph.model(survey);graph_report=graph.report()
+    except (ValueError,KeyError,TypeError) as error:
+        graph=None;graph_report={'status':'unsupported_graph_snapshot','reason':str(error),'write_dispatched':False,'global_DOF_certified':False}
     rows = []
     for (a,b), p in sorted(pairs.items()):
+        effective=graph.relative(a,b) if graph else None
+        effective_motion=mobility(effective['rows'],origin,scale) if effective else {}
         rows.append({'component_a': a, 'component_b': b, 'instance_a': ids[a]['instance'], 'instance_b': ids[b]['instance'],
             **mobility(p['rows'], origin, scale), 'native_feature_ids': p['native_feature_ids'],
+            'supported_whole_inventory_effective_rank':effective['supported_effective_rank'] if effective else None,
+            'indirect_constraint_gain':effective['indirect_constraint_gain'] if effective else None,
+            'supported_effective_joint_hypothesis':effective_motion.get('recommended_joint_type'),
             'recommendation_source': 'supported_existing_constraint_rows_not_design_intent',
             'requires_goal_confirmation': True})
     return {'schema_version': 1, 'status': 'native_health_issues' if analysis['mate_health_issues'] else 'review_ready',
@@ -83,7 +92,7 @@ def review(survey):
         'connections': rows, 'mate_health_issues': analysis['mate_health_issues'],
         'suppressed_mates': [{'native_feature_id': m.get('native_feature_id'), 'name': m.get('name')}
                             for m in survey['mates'] if m.get('suppressed') is True],
-        'omitted_native_feature_ids': omitted, 'constraint_review': ac.summary(analysis),
+        'omitted_native_feature_ids': omitted, 'constraint_review': ac.summary(analysis),'assembly_constraint_graph':graph_report,
         'geometry_scope':{'complete':all(c.get('geometry_complete',True) for c in cs),
             'truncated_components':[c['instance'] for c in cs if c.get('geometry_complete') is False],
             'candidate_search':'bounded_native_snapshot_not_exhaustive_global_geometric_uniqueness'},
@@ -216,6 +225,9 @@ def plan(survey, intents):
         chosen=choices[0];target=target_rows(kind,chosen['axis_global'],chosen['reference_point_global_m'],origin,scale)
         if len(ac.basis(target+pair['rows']))>len(ac.basis(target)):
             raise ValueError('existing_constraints_conflict_with_declared_motion')
+        effective=constraint_graph.model(survey).relative(a_id,b_id)
+        if len(ac.basis(target+effective['rows']))>len(ac.basis(target)):
+            raise ValueError('existing_indirect_constraints_conflict_with_declared_motion')
         target_global=lift(target,a_id,b_id);before=matrix.trial(target_global);start=len(actions)
         if full and before:raise ValueError('native_full_constraint_conflicts_with_supported_missing_rank')
         native_links=[m for m in survey['mates'] if m.get('suppressed') is not True and any(e.get('component_id')==a_id for e in m.get('entities',[]))]

@@ -12,6 +12,7 @@ def discover(s):
     s.connection_survey=survey;s.initial_inspection=survey if survey.get('inventory_complete') else s.call('inspect_model',model_id=s.model,detail_level='full')
     core.write(s.folder/'通用配合原生调查.json',survey)
     review=joints.review(survey);core.write(s.folder/'通用配合体检.json',review)
+    core.write(s.folder/'整装配约束图.json',review.get('assembly_constraint_graph'))
     draft=recommendations.draft(survey,review,binding=str(s.folder.parent.absolute()));s.connection_draft=draft
     core.write(s.folder/'装配连接自动草案.json',draft)
     return {'connection_review':review,'connection_draft':draft}
@@ -67,13 +68,19 @@ def propose(engine,t,intents):
     try:proposal=joints.plan(s.connection_survey,goals)
     except (ValueError,TypeError) as error:
         reason=str(error)
-        code='CONNECTION_GOAL_CONFLICT' if reason in {'existing_constraints_conflict_with_declared_motion','both_components_fixed_no_floating_target_for_native_trial','native_fully_constrained_mobile_goal_requires_review','native_full_constraint_conflicts_with_supported_missing_rank'} else 'CONNECTION_SCOPE_UNSUPPORTED' if reason=='native_inventory_or_health_requires_review' else 'CONNECTION_INTENT_INVALID'
+        code='CONNECTION_GOAL_CONFLICT' if reason in {'existing_constraints_conflict_with_declared_motion','existing_indirect_constraints_conflict_with_declared_motion','both_components_fixed_no_floating_target_for_native_trial','native_fully_constrained_mobile_goal_requires_review','native_full_constraint_conflicts_with_supported_missing_rank'} else 'CONNECTION_SCOPE_UNSUPPORTED' if reason=='native_inventory_or_health_requires_review' else 'CONNECTION_INTENT_INVALID'
         explanation={'native_fully_constrained_mobile_goal_requires_review':'局部运动线索与原生全约束观察冲突；先核对装配模型作用域及整条约束链，未解固定或补配合。',
             'native_full_constraint_conflicts_with_supported_missing_rank':'原生报告已全约束，但受支持局部模型仍有缺口；未知约束不能当作不存在，未继续补配合。',
             'existing_constraints_conflict_with_declared_motion':'原配合与目标运动冲突；未自动删除、压缩或解除固定。',
+            'existing_indirect_constraints_conflict_with_declared_motion':'受支持的间接约束链与目标运动冲突；AI核对整装配约束图，不把直接配合较少当成缺项，不自动删除旧约束。',
             'both_components_fixed_no_floating_target_for_native_trial':'目标两件均固定；先澄清机械目标，未自动解除固定。'}.get(reason,'连接目标或当前受支持范围未通过校验；AI核对诊断，不重试写入。')
         raise core.StopBatch(code,explanation,{'reason':reason,'cad_dispatched':False,'write_dispatched':False,
             'native_state_review_path':str(s.folder/'通用配合体检.json'),
+            'constraint_graph_path':str(s.folder/'整装配约束图.json'),
+            'component_state_observations':[{'instance':c['instance'],'fixed_component':c.get('fixed_component'),'constraint_state':c.get('constraint_state')}
+                for c in s.connection_survey['components'] if any(c['component_id'] in (g['component_a'],g['component_b']) for g in goals)],
+            'nonlinear_constraints_observed':s.connection_survey.get('nonlinear_constraints',[]),
+            'observation_scope':'whole_inventory_non_equality_constraints_are_not_proven_root_causes',
             'original_mates_or_fixed_flags_automatically_changed':False}) from error
     core.write(s.folder/'通用连接补齐规划.json',proposal)
     if proposal['status']!='plan_ready':return {'task_id':t['task_id'],**proposal,
