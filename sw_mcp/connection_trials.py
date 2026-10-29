@@ -1,5 +1,7 @@
 """Material-bound, small-displacement checks; no contact or full travel claim."""
 import math
+import hashlib
+import json
 from . import assembly_constraints as a
 from .conversation import geometry_audit as g
 
@@ -7,6 +9,32 @@ TRANSLATION_STEP_M=.0001
 ROTATION_STEP_RAD=math.pi/3600
 POSITION_TOLERANCE_M=1e-7
 ANGLE_TOLERANCE_RAD=1e-6
+
+# Only the JSON double round trip. These are not mechanical pose/travel tolerances.
+TARGET_SERIALIZATION_ULPS=4
+TARGET_SERIALIZATION_POSITION_CAP_M=1e-12
+TARGET_SERIALIZATION_COEFFICIENT_CAP=1e-14
+
+
+def require_target_binding(evidence,expected,request_json):
+    """Exact wire hash plus a few binary64 ULPs; no legacy/missing-hash fallback."""
+    validate(expected)
+    if not isinstance(request_json,str):raise ValueError('invalid_target_request_json')
+    try:requested=json.loads(request_json)
+    except (TypeError,ValueError) as error:raise ValueError('invalid_target_request_json') from error
+    validate(requested)
+    if requested!=expected:raise ValueError('expected_target_does_not_match_request_json')
+    digest=hashlib.sha256(request_json.encode('utf8')).hexdigest()
+    if evidence.get('request_target_sha256')!=digest:raise ValueError('target_request_fingerprint_missing_or_mismatched')
+    actual=evidence.get('target');validate(actual);differences=[]
+    for i,(x,y) in enumerate(zip(expected,actual)):
+        delta=abs(x-y)
+        cap=TARGET_SERIALIZATION_POSITION_CAP_M if 9<=i<12 else TARGET_SERIALIZATION_COEFFICIENT_CAP
+        limit=min(TARGET_SERIALIZATION_ULPS*max(math.ulp(x),math.ulp(y)),cap)
+        if delta>limit:raise ValueError(f'native_target_coefficient_mismatch:index={i},delta={delta!r},maximum={limit!r}')
+        if delta:differences.append({'coefficient':i,'difference':delta,'maximum':limit})
+    return {'request_sha256_verified':True,'serialization_ULPs':TARGET_SERIALIZATION_ULPS,
+        'nonidentical_coefficients':differences,'mechanical_tolerances_changed':False}
 
 
 def rotation(p):return [p[i:i+3] for i in (0,3,6)]

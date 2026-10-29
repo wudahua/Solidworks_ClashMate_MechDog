@@ -105,6 +105,7 @@ public partial class Cad {
                 if(a.Name2==b.Name2||a.IsFixed())throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","试验目标须为不同的浮动组件，未自动解除固定。");
                 object trialDriver;
                 if(goal.TryGetValue("linear_trial_driver",out trialDriver)&&trialDriver!=null)ValidateConnectionAction(m,doc,Json.Deserialize<Dictionary<string,object>>(Json.Serialize(trialDriver)));
+                if(goal.TryGetValue("rotary_trial_driver",out trialDriver)&&trialDriver!=null)ValidateConnectionAction(m,doc,Json.Deserialize<Dictionary<string,object>>(Json.Serialize(trialDriver)));
             }
             var cs=UserComponents(doc);var plan=new ConnectionPlan{Id=Guid.NewGuid().ToString("N"),ModelId=id,Revision=m.Revision,
                 Signature=MateSignature(m,doc),OriginalParameters=CompletionOriginalParameters(doc,EGAllMates(doc).Select(f=>f.GetID()).ToArray()),Actions=actions,Goals=goals,
@@ -120,6 +121,7 @@ public partial class Cad {
                     maximum_any_component_translation_m=.005,maximum_any_component_rotation_rad=Math.PI/180,
                     full_component_pose_health_and_restore_checks=true,whole_range_or_global_DOF_certified=false},
                 linear_allowed_trial_strategy="temporary_native_distance_constraint_then_verified_result_checkpoint_restore_if_reference_available",
+                rotary_allowed_trial_strategy="temporary_native_angle_constraint_then_verified_result_checkpoint_restore_if_reference_available",
                 native_compatibility_verified=false,write_dispatched=false};
         }
     }
@@ -199,22 +201,26 @@ public partial class Cad {
         double det=p[0]*(p[4]*p[8]-p[5]*p[7])-p[1]*(p[3]*p[8]-p[5]*p[6])+p[2]*(p[3]*p[7]-p[4]*p[6]);
         return Math.Abs(det-1)<1e-7;
     }
-    bool ConnectionMove(IModelDoc2 doc,IComponent2 moving,double[] target) {
+    bool ConnectionMove(IModelDoc2 doc,IComponent2 moving,double[] target,out object observation) {
         var transform=(MathTransform)((IMathUtility)Sw.GetMathUtility()).CreateTransform(target);
         bool accepted=moving.SetTransformAndSolve3(transform,true);
+        observation=new{backend="SetTransformAndSolve3",this_configuration=true};
         if(!doc.EditRebuild3())throw new CadFault("CONNECTION_CREATE_FAILED","有界位姿请求后装配重建未通过。");
-        RequireMatesHealthy(doc);return accepted;
+        // Capture all poses in the caller before checking known mate errors.
+        return accepted;
     }
     public object ProbeAssemblyConnectionPose(string id,string componentId,string targetJson,string checkpointId,string probeId,int goalIndex=-1,bool allowedTrial=false) {
         if(!System.Text.RegularExpressions.Regex.IsMatch(probeId,"^[a-f0-9]{32}$"))throw new CadFault("CONNECTION_REFERENCE_INVALID","试验ID无效。");
-        var m=GetUserModel(id);var target=Json.Deserialize<double[]>(targetJson);string path=Path.Combine(Root,"runs","connection-probes",probeId+".json");Directory.CreateDirectory(Path.GetDirectoryName(path));
+        var m=GetUserModel(id);string requestHash=ConnectionRequestFingerprint.Hash(targetJson);var target=Json.Deserialize<double[]>(targetJson);string path=Path.Combine(Root,"runs","connection-probes",probeId+".json");Directory.CreateDirectory(Path.GetDirectoryName(path));
         Dictionary<string,double[]> before=null,after=null,restored=null;bool accepted=false,undoAccepted=false;string parameters=null;Dictionary<string,bool> fixedStates=null;
-        bool touched=false,needsCheckpoint=false,undoAttempted=false;Dictionary<string,object> driver=null;int[] originalIds=null;int? temporaryFeature=null;
+        bool touched=false,needsCheckpoint=false,undoAttempted=false,checkpointPerTrial=false,angularDriver=false;object moveObservation=null,undoObservation=null;Dictionary<string,object> driver=null;int[] originalIds=null;int? temporaryFeature=null;
         List<Dictionary<string,object>> goals;
-        if(allowedTrial&&connectionTrialGoals.TryGetValue(id,out goals)&&goalIndex>=0&&goalIndex<goals.Count) {
+        if(connectionTrialGoals.TryGetValue(id,out goals)&&goalIndex>=0&&goalIndex<goals.Count) {
             var goal=goals[goalIndex];object raw;
             if((string)goal["component_a"]!=componentId)throw new CadFault("CONNECTION_REFERENCE_INVALID","试验目标组件与确认方案不符。");
-            if((string)goal["kind"]=="prismatic"&&goal.TryGetValue("linear_trial_driver",out raw)&&raw!=null)driver=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(raw));
+            checkpointPerTrial=(string)goal["kind"]=="revolute";
+            if(allowedTrial&&(string)goal["kind"]=="prismatic"&&goal.TryGetValue("linear_trial_driver",out raw)&&raw!=null)driver=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(raw));
+            if(allowedTrial&&checkpointPerTrial&&goal.TryGetValue("rotary_trial_driver",out raw)&&raw!=null){driver=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(raw));angularDriver=true;}
         }
         try {
             using(var scope=new Scope(this,m.Path,null))using(var batch=new NativeCommandBatch(()=>Sw.CommandInProgress,v=>Sw.CommandInProgress=v)) {
@@ -225,38 +231,51 @@ public partial class Cad {
                 originalIds=EGAllMates(doc).Select(f=>f.GetID()).ToArray();parameters=CompletionOriginalParameters(doc,originalIds);fixedStates=UserComponents(doc).ToDictionary(c=>GTComponentId(doc,c),c=>c.IsFixed());
                 Progress(activeJobId,"connection_native_pose_trial",0,0,null);
                 if(driver!=null) {
+                    if(angularDriver) {
+                        if(Math.Abs(PoseValidation.RotationDistance(initial,target)-Math.PI/3600)>1e-8)throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","临时角度试验仅用于已确认的正反0.05度请求。");
+                        var na=RelativeMotion.Unit(Json.Deserialize<double[]>(Json.Serialize(driver["normal_a_global"])));
+                        var nb=RelativeMotion.Unit(Json.Deserialize<double[]>(Json.Serialize(driver["normal_b_global"])));
+                        var desired=RelativeMotion.Vector(target,RelativeMotion.InverseVector(initial,na));
+                        double angle=Math.Acos(Math.Max(-1,Math.Min(1,GTDot(desired,nb))));
+                        if(angle<=.01||angle>=Math.PI-.01)throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","临时角度试验接近分支奇异位置，未创建约束。");
+                        driver["value"]=angle;
+                        moveObservation=new{backend="temporary_native_angle_constraint",target_angle_rad=angle,configuration_scope="owned_active_assembly",contact_or_force_tested=false};
+                    }else {
                     var n=Json.Deserialize<double[]>(Json.Serialize(driver["normal_global"]));var delta=target.Skip(9).Take(3).Zip(initial.Skip(9).Take(3),(a,b)=>a-b).ToArray();
                     double step=GTDot(n,delta);
                     if(PoseValidation.RotationDistance(initial,target)>1e-9||Math.Abs(Math.Abs(step)-.0001)>1e-9||Math.Sqrt(delta.Select((v,i)=>Math.Pow(v-step*n[i],2)).Sum())>1e-9)
                         throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","临时直线驱动仅用于确认轴线的正反0.1mm试验。");
                     double signed=Convert.ToDouble(driver["signed_distance_m"])+step;
                     driver["value"]=Math.Abs(signed);driver["flip_dimension"]=signed>0;
-                    touched=true;LastOperationRestoration="pending";var added=CreateConnectionMate(m,doc,driver);temporaryFeature=added.GetID();CheckMate(added,"temporary_linear_trial");
-                    if(!doc.EditRebuild3())throw new CadFault("CONNECTION_CREATE_FAILED","临时距离试验求解重建失败。");accepted=true;
-                }else {touched=true;LastOperationRestoration="pending";accepted=ConnectionMove(doc,moving,target);}
+                    }
+                    touched=true;LastOperationRestoration="pending";var added=CreateConnectionMate(m,doc,driver);temporaryFeature=added.GetID();CheckMate(added,angularDriver?"temporary_angular_trial":"temporary_linear_trial");
+                    if(!doc.EditRebuild3())throw new CadFault("CONNECTION_CREATE_FAILED","临时驱动约束试验求解重建失败。");accepted=true;
+                }else {touched=true;LastOperationRestoration="pending";accepted=ConnectionMove(doc,moving,target,out moveObservation);}
                 after=ConnectionPoses(doc);RequireMatesHealthy(doc);
                 if(parameters!=CompletionOriginalParameters(doc,originalIds)||EGAllMates(doc).Length!=originalIds.Length+(driver==null?0:1)||UserComponents(doc).Any(c=>c.IsFixed()!=fixedStates[GTComponentId(doc,c)]))throw new CadFault("CONNECTION_CREATE_FAILED","试验改变原配合参数、数量或固定状态。");
                 if(before.Count!=after.Count||before.Any(v=>!after.ContainsKey(v.Key)||PoseValidation.TranslationDistance(v.Value,after[v.Key])>.005||PoseValidation.RotationDistance(v.Value,after[v.Key])>Math.PI/180))
                     throw new CadFault("CONNECTION_CREATE_FAILED","试验中任一组件位姿超出5mm/1度封顶。");
                 bool unchanged=before.Count==after.Count&&before.All(v=>after.ContainsKey(v.Key)&&PoseValidation.Matches(v.Value,after[v.Key]));
                 Progress(activeJobId,"connection_verify_trial_restore",0,0,null);
-                if(driver==null&&!unchanged){undoAttempted=true;undoAccepted=ConnectionMove(doc,moving,initial);}
-                restored=ConnectionPoses(doc);needsCheckpoint=driver!=null||before.Count!=restored.Count||!before.All(v=>restored.ContainsKey(v.Key)&&PoseValidation.Matches(v.Value,restored[v.Key]));
+                if(driver==null&&!checkpointPerTrial&&!unchanged){undoAttempted=true;undoAccepted=ConnectionMove(doc,moving,initial,out undoObservation);}
+                restored=ConnectionPoses(doc);needsCheckpoint=checkpointPerTrial||driver!=null||before.Count!=restored.Count||!before.All(v=>restored.ContainsKey(v.Key)&&PoseValidation.Matches(v.Value,restored[v.Key]));
                 RequireMatesHealthy(doc);
                 if(parameters!=CompletionOriginalParameters(doc,originalIds)||UserComponents(doc).Any(c=>c.IsFixed()!=fixedStates[GTComponentId(doc,c)]))throw new CadFault("CONNECTION_CREATE_FAILED","试验反向恢复改变了配合参数或固定状态。");
             }
             if(needsCheckpoint) {
                 RestoreUserCheckpoint(id,checkpointId);m=GetUserModel(id);
-                using(var scope=new Scope(this,m.Path,null)){restored=ConnectionPoses(scope.Doc);RequireMatesHealthy(scope.Doc);if(parameters!=CompletionOriginalParameters(scope.Doc,originalIds)||EGAllMates(scope.Doc).Length!=originalIds.Length)throw new CadFault("CONNECTION_CREATE_FAILED","试验检查点恢复后配合参数、数量不符。");}
+                using(var scope=new Scope(this,m.Path,null)){restored=ConnectionPoses(scope.Doc);RequireMatesHealthy(scope.Doc);if(parameters!=CompletionOriginalParameters(scope.Doc,originalIds)||EGAllMates(scope.Doc).Length!=originalIds.Length||UserComponents(scope.Doc).Any(c=>c.IsFixed()!=fixedStates[GTComponentId(scope.Doc,c)]))throw new CadFault("CONNECTION_CREATE_FAILED","试验检查点恢复后配合参数、数量或固定状态不符。");}
             }
             if(before.Count!=restored.Count||!before.All(v=>restored.ContainsKey(v.Key)&&PoseValidation.Matches(v.Value,restored[v.Key])))throw new CadFault("CONNECTION_CREATE_FAILED","有界试验未恢复全部姿态。");
             VerifyUserSources(m);LastOperationRestoration="restored";
-            var evidence=new{model_id=id,component_id=componentId,probe_id=probeId,target=target,before=before,after=after,restored=restored,
+            var evidence=new{model_id=id,component_id=componentId,probe_id=probeId,request_target_sha256=requestHash,target=target,before=before,after=after,restored=restored,
                 fixed_states=fixedStates,native_trial_return=accepted,native_set_transform_return=driver==null?(bool?)accepted:null,
-                native_undo_attempted=undoAttempted,native_undo_return=undoAttempted?(bool?)undoAccepted:null,checkpoint_fallback_used=driver==null&&needsCheckpoint,
+                native_undo_attempted=undoAttempted,native_undo_return=undoAttempted?(bool?)undoAccepted:null,checkpoint_fallback_used=driver==null&&!checkpointPerTrial&&needsCheckpoint,
+                per_trial_checkpoint_required=checkpointPerTrial,solver_state_restoration=checkpointPerTrial?"saved_result_closed_reopened_and_verified":"pose_undo_or_verified_checkpoint",
                 checkpoint_restore_used=needsCheckpoint,temporary_trial_feature_id=temporaryFeature,temporary_trial_feature_removed=driver==null?(bool?)null:true,
                 temporary_trial_feature_status=driver==null?"not_used":"removed_and_checkpoint_verified",
-                native_backend=driver==null?"SetTransformAndSolve3_then_rebuild":"temporary_native_distance_constraint_solve_and_result_checkpoint_restore",
+                native_backend=driver!=null?(angularDriver?"temporary_native_angle_constraint_solve_and_result_checkpoint_restore":"temporary_native_distance_constraint_solve_and_result_checkpoint_restore"):"SetTransformAndSolve3_then_rebuild",
+                native_move=moveObservation,native_undo=undoObservation,
                 original_mates_parameters_unchanged=true,restoration_status="restored",native_motion_study_solved=false};AtomicJson(path,evidence);
             return new{probe_id=probeId,artifact_path=path,sha256=FileHash(path).Replace("-","").ToLowerInvariant(),restoration_status="restored",native_motion_study_solved=false};
         }catch(Exception error) {
@@ -272,7 +291,8 @@ public partial class Cad {
                         if(before.Count==restored.Count&&before.All(v=>restored.ContainsKey(v.Key)&&PoseValidation.Matches(v.Value,restored[v.Key])))LastOperationRestoration="restored";
                     }catch(Exception){LastOperationRestoration="unknown";}
                 }
-                AtomicJson(path,new{probe_id=probeId,before=before,after=after,restored=restored,failure=FailureEvidence(error),restoration_status=LastOperationRestoration,automatic_retry=false});
+                AtomicJson(path,new{probe_id=probeId,model_id=id,component_id=componentId,request_target_sha256=requestHash,target=target,before=before,after=after,restored=restored,
+                    native_move=moveObservation,native_undo=undoObservation,failure=FailureEvidence(error),restoration_status=LastOperationRestoration,automatic_retry=false});
             }
             throw;
         }

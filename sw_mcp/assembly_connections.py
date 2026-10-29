@@ -157,6 +157,25 @@ def _candidates(a,b,origin,scale):
     return rows
 
 
+def rotary_trial_driver(candidates, axis, component_a, component_b):
+    """Stable datum-plane angle, away from singular zero/pi branches."""
+    possible=[];axis=ac.unit(axis)
+    for _,kind,fa,fb,_,_ in candidates:
+        if kind not in {'angle','perpendicular'} or any(f.get('reference_kind')!='datum_plane' for f in (fa,fb)):continue
+        na,nb=ac.unit(fa['axis_global']),ac.unit(fb['axis_global'])
+        angle=math.acos(max(-1,min(1,ac.dot(na,nb))))
+        sensitivity=abs(ac.dot(ac.cross(axis,na),nb))
+        if sensitivity<.5 or not .01<angle<math.pi-.01:continue
+        possible.append((-sensitivity,fa['native_reference'],fb['native_reference'],fa,fb,na,nb,angle))
+    if not possible:return None
+    _,_,_,fa,fb,na,nb,angle=min(possible,key=lambda x:x[:3])
+    return {'component_a':component_a,'component_b':component_b,'reference_a':fa['native_reference'],
+        'reference_b':fb['native_reference'],'reference_kind_a':'datum_plane','reference_kind_b':'datum_plane',
+        'normal_a_global':na,'normal_b_global':nb,'kind':'angle','value':angle,
+        'source':'current_native_datum_planes_non_singular_angle',
+        'temporary_only':True,'removed_by_verified_result_checkpoint_after_each_trial':True}
+
+
 def plan(survey, intents):
     if not isinstance(intents,list) or not 1<=len(intents)<=8: raise ValueError('one_to_8_connection_goals_required')
     cs=survey['components']; by_id={c['component_id']:c for c in cs};indices={c['component_id']:i for i,c in enumerate(cs)}
@@ -235,9 +254,11 @@ def plan(survey, intents):
                     'normal_global':n,'signed_distance_m':signed,'kind':'distance','value':abs(signed),
                     'source':'current_native_parallel_planes_nonzero_separation',
                     'temporary_only':True,'removed_by_verified_result_checkpoint_after_each_trial':True}
+        rotary_driver=rotary_trial_driver(candidates,chosen['axis_global'],a_id,b_id) if kind=='revolute' else None
         goals.append({'component_a':a_id,'component_b':b_id,'instance_a':a['instance'],'instance_b':b['instance'],
             'kind':kind,**chosen,'missing_supported_constraints_before':before,'remaining_supported_constraints':remaining,
-            'added_action_count':len(actions)-start,'linear_trial_driver':trial_driver,'motion_verified':False})
+            'added_action_count':len(actions)-start,'linear_trial_driver':trial_driver,
+            'rotary_trial_driver':rotary_driver,'motion_verified':False})
     return {'status':'unsupported_references' if any(g['remaining_supported_constraints'] for g in goals) else 'plan_ready',
         'goals':goals,'actions':actions,'omitted_native_feature_ids':omitted,'requires_explicit_confirmation':True,
         'existing_mates_deleted':[],'existing_mates_suppressed':[],'fixed_state_changes':[],
