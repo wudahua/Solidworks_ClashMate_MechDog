@@ -2,6 +2,9 @@ import copy
 import math
 import unittest
 import asyncio
+import subprocess
+import sys
+import uuid
 from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import Mock,patch
@@ -239,6 +242,38 @@ class ConnectionContractTests(unittest.TestCase):
                 dict(component_a='滑块2-1',component_b='导轨-1',kind='prismatic')]}))
         self.assertFalse(result.is_error,result)
         self.assertEqual(engine.plan.call_args.args[-1][0]['component_a'],'滑块2-1')
+
+
+class DeveloperAcceptanceWaitTests(unittest.TestCase):
+    def setUp(self):
+        from tests.transport_cleanup import remove_test_root
+        self.root=Path(__file__).resolve().parents[1]
+        base=self.root/'runs/native-acceptance-cli-tests';self.folder=base/uuid.uuid4().hex
+        self.folder.mkdir(parents=True);self.addCleanup(remove_test_root,self.folder,base)
+
+    def invoke(self,value):
+        return subprocess.run([sys.executable,'-X','utf8',str(self.root/'tests/basic_connections_native.py'),
+            '--cards',str(self.folder/'not_read.json'),'--output',str(self.folder/'out'),
+            '--runtime-base',str(self.folder/'runtime'),'--wait-seconds',value],
+            capture_output=True,text=True,encoding='utf8',timeout=30)
+
+    def test_out_of_range_observation_wait_is_refused_before_files_or_cad(self):
+        for value in ('0','29','7201'):
+            result=self.invoke(value);self.assertEqual(result.returncode,2)
+            self.assertIn('--wait-seconds must be an integer from 30 to 7200',result.stderr)
+            self.assertFalse((self.folder/'out').exists());self.assertFalse((self.folder/'runtime').exists())
+
+    def test_noninteger_observation_wait_is_not_coerced(self):
+        for value in ('true','nan','3.5'):
+            result=self.invoke(value);self.assertEqual(result.returncode,2)
+            self.assertIn('invalid int value',result.stderr)
+            self.assertFalse((self.folder/'out').exists());self.assertFalse((self.folder/'runtime').exists())
+
+    def test_help_distinguishes_wait_window_from_native_retry_budget(self):
+        result=subprocess.run([sys.executable,'-X','utf8',str(self.root/'tests/basic_connections_native.py'),'--help'],
+            capture_output=True,text=True,encoding='utf8',timeout=30)
+        self.assertEqual(result.returncode,0)
+        self.assertIn('never a native retry or solver budget',' '.join(result.stdout.split()))
 
 
 if __name__=='__main__':unittest.main()

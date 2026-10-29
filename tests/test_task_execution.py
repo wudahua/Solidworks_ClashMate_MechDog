@@ -83,7 +83,10 @@ class ProgressTests(unittest.TestCase):
         with progress.watch_call(self.session,'run_user_study',self.args,interval=.01):
             self.write('native_calculate',completed=0,total=31)
             self.wait_for(lambda v:v['stage']=='native_calculate')
-            self.wait_for(lambda v:v['stage']=='native_calculate' and v['native_update_age_s']>.025)
+            first=next(v['heartbeat_at'] for v in self.values if v['stage']=='native_calculate')
+            # A busy host can deliver its first observation after 25ms; age
+            # alone must not be mistaken for observing a second heartbeat.
+            self.wait_for(lambda v:v['stage']=='native_calculate' and v['heartbeat_at']>first and v['native_update_age_s']>.025)
             calculated=[v for v in self.values if v['stage']=='native_calculate']
             self.assertGreater(calculated[-1]['heartbeat_at'],calculated[0]['heartbeat_at'])
             self.assertEqual(calculated[-1]['last_native_update_at'],calculated[0]['last_native_update_at'])

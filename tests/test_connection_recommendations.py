@@ -26,9 +26,29 @@ class DraftTests(unittest.TestCase):
         s=fixtures.survey([mate(1,'body','moving','cylindrical_axis'),mate(2,'body','moving','planar_normal')])
         c=recommendations.draft(s)['candidates'][0]
         self.assertEqual(c['status'],'existing_supported_joint')
-        self.assertEqual(len(c['options']),1)
+        self.assertEqual([o['kind'] for o in c['options']],['revolute','rigid'])
         o=c['options'][0];self.assertEqual(o['kind'],'revolute')
         self.assertEqual(o['supported_local_missing_coordinates_if_goal_chosen'],0)
+        self.assertEqual(c['preferred_option_index'],0)
+        alternative=c['options'][1]
+        self.assertEqual(alternative['source'],'alternative_only_if_rigid_mechanical_goal_confirmed')
+        self.assertTrue(alternative['requires_goal_confirmation']);self.assertFalse(alternative['executable'])
+        self.assertFalse(c['missing_connection_proven'])
+
+    def test_existing_slide_keeps_translation_preferred_when_rigid_alternative_is_offered(self):
+        s=fixtures.survey([mate(1,'body','moving','planar_normal',axis=[1,0,0]),
+                           mate(2,'body','moving','planar_normal',axis=[0,1,0])])
+        d=recommendations.draft(s);c=d['candidates'][0]
+        self.assertEqual([o['kind'] for o in c['options']],['prismatic','rigid'])
+        self.assertEqual(c['preferred_option_index'],0)
+        self.assertFalse(d['write_dispatched']);self.assertFalse(d['mechanical_intent_proven'])
+
+    def test_existing_rigid_joint_does_not_offer_unsupported_freedom_release(self):
+        s=fixtures.survey([mate(i+1,'body','moving','planar_normal',axis=a)
+                           for i,a in enumerate(([1,0,0],[0,1,0],[0,0,1]))])
+        c=recommendations.draft(s)['candidates'][0]
+        self.assertEqual([o['kind'] for o in c['options']],['rigid'])
+        self.assertFalse(c['missing_connection_proven'])
 
     def guide(self):
         s=fixtures.survey([mate(1,'body','moving','planar_normal',axis=[0,1,0])])

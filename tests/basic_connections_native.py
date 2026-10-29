@@ -19,7 +19,10 @@ def main():
     parser=argparse.ArgumentParser();parser.add_argument('--cards',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True);parser.add_argument('--runtime-base',type=Path,required=True)
     parser.add_argument('--project-root',type=Path);parser.add_argument('--resume',action='store_true')
-    args=parser.parse_args();folder=core.no_links(args.output);folder.mkdir(parents=True,exist_ok=args.resume)
+    parser.add_argument('--wait-seconds',type=int,default=3600,help='Developer observation window only; never a native retry or solver budget')
+    args=parser.parse_args()
+    if not 30<=args.wait_seconds<=7200:parser.error('--wait-seconds must be an integer from 30 to 7200')
+    folder=core.no_links(args.output);folder.mkdir(parents=True,exist_ok=args.resume)
     cards=core.read(core.no_links(args.cards));work=folder/'work'
     assert not (ROOT/'runs/executor-state.json').exists(),'Use a clean isolated candidate installation.'
     before={str(core.no_links(Path(c['assembly']))):core.fixture_hashes(Path(c['assembly'])) for c in cards}
@@ -61,7 +64,7 @@ def main():
         for index,card in enumerate(cards[start:],start):
             print('CASE',index+1,card['label'],flush=True)
             tid=client.tool('prepare_mechanism_task',assembly_path=card['assembly'],task_kind='assembly_constraints')['task_id']
-            state=client.wait(tid,1800);core.write(folder/f'{index+1}-prepared.json',state)
+            state=client.wait(tid,args.wait_seconds);core.write(folder/f'{index+1}-prepared.json',state)
             assert state['phase']=='constraint_review_ready',state
             if owner is None:owner=state['server_instance_id']
             assert owner==state['server_instance_id']
@@ -90,7 +93,7 @@ def main():
                         'scope':'developer_declared_mechanical_goals_not_live_LLM_intent_inference','axis_hint_supplied_in_card':False})
                     case['automatic_draft_record']=str(folder/f'{index+1}-automatic-draft.json')
                 client.tool('plan_mechanism_task',task_id=tid,connection_intent=intents)
-                planned=client.wait(tid,1800);core.write(folder/f'{index+1}-plan.json',planned)
+                planned=client.wait(tid,args.wait_seconds);core.write(folder/f'{index+1}-plan.json',planned)
                 assert planned['phase']=='awaiting_confirmation',planned
                 assert planned['proposal']['expected_added_mates']==card['expected_added_mates'],planned['proposal']
                 if not reconnected:
@@ -103,7 +106,7 @@ def main():
                     except core.StopBatch as error:assert error.code==expected,(error.code,expected)
                     assert client.tool('get_mechanism_task',task_id=tid).get('execution_consumed') is not True
                 client.tool('execute_mechanism_task',task_id=tid,plan_token=planned['plan_token'],confirmed=True,scope_confirmed=True)
-                verified=client.wait(tid,1800);core.write(folder/f'{index+1}-verified.json',verified)
+                verified=client.wait(tid,args.wait_seconds);core.write(folder/f'{index+1}-verified.json',verified)
                 assert verified['phase']=='verified',verified
                 proof=verified['verification'];assert proof['declared_scope_passed'] and not proof['native_motion_study_solved']
                 assert all(v['passed'] and v['all_poses_restored'] for v in proof['trials'])
@@ -116,7 +119,7 @@ def main():
                 except core.StopBatch as error:
                     assert error.code==card['expected_plan_code'],error.code;case['scope_refusal']=error.diagnostics
             client.tool('finish_mechanism_task',task_id=tid,keep_result=card.get('keep_result',False))
-            closed=client.wait(tid,1800);core.write(folder/f'{index+1}-closed.json',closed);assert closed['closed'],closed
+            closed=client.wait(tid,args.wait_seconds);core.write(folder/f'{index+1}-closed.json',closed);assert closed['closed'],closed
             finish=verified_finish(closed,card)
             case['finish']=finish;case['source_files_unchanged']=core.fixture_hashes(Path(card['assembly']))==before[card['assembly']]
             assert case['source_files_unchanged'];result['cases'].append(case);core.write(folder/'result.json',result);tid=None
@@ -134,7 +137,7 @@ def main():
             try:
                 state=client.tool('get_mechanism_task',task_id=tid);result['failed_task']=state
                 if not state.get('busy') and not (state.get('error') or {}).get('native_unknown'):
-                    client.tool('finish_mechanism_task',task_id=tid);result['failure_cleanup']=client.wait(tid,1800)
+                    client.tool('finish_mechanism_task',task_id=tid);result['failure_cleanup']=client.wait(tid,args.wait_seconds)
             except Exception as cleanup:result['cleanup_error']=str(cleanup)
         raise
     finally:
