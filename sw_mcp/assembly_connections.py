@@ -6,7 +6,7 @@ Native health, actual motion trials and restoration remain mandatory.
 import math
 from . import assembly_constraints as ac
 from .assembly_completion import SparseBasis
-from . import constraint_graph
+from . import constraint_graph,assembly_hierarchy
 
 KINDS = {'rigid', 'revolute', 'prismatic'}
 
@@ -189,6 +189,8 @@ def plan(survey, intents,whole_assembly=False):
     limit=128 if whole_assembly else 8
     if not isinstance(intents,list) or not 1<=len(intents)<=limit: raise ValueError('connection_goal_budget_exceeded' if whole_assembly else 'one_to_8_connection_goals_required')
     cs=survey['components']; by_id={c['component_id']:c for c in cs};indices={c['component_id']:i for i,c in enumerate(cs)}
+    hierarchy=assembly_hierarchy.analyze(cs)
+    if not hierarchy['supported_for_connection_writes']:raise ValueError('flexible_subassembly_scope_unsupported')
     r=review(survey)
     if not r['complete'] or r['mate_health_issues']: raise ValueError('native_inventory_or_health_requires_review')
     pairs,omitted,origin,scale=observed_rows(survey);matrix=SparseBasis()
@@ -205,6 +207,7 @@ def plan(survey, intents,whole_assembly=False):
         pair_key=tuple(sorted((a_id,b_id)))
         if pair_key in seen:raise ValueError('duplicate_or_conflicting_connection_goals')
         seen.add(pair_key);a,b=by_id[a_id],by_id[b_id]
+        assembly_hierarchy.require_top_level_target(a_id,hierarchy);assembly_hierarchy.require_top_level_target(b_id,hierarchy)
         if a.get('fixed_component') and not b.get('fixed_component'): a_id,b_id=b_id,a_id;a,b=b,a
         if a.get('fixed_component'):raise ValueError('both_components_fixed_no_floating_target_for_native_trial')
         full=(a.get('constraint_state') or {}).get('status')=='observed' and (a.get('constraint_state') or {}).get('fully_constrained') is True

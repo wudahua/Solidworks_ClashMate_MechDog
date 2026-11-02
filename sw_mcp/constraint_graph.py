@@ -10,6 +10,7 @@ import json
 import math
 from . import assembly_constraints as ac
 from .assembly_completion import SparseBasis
+from . import assembly_hierarchy
 
 
 def _complement(rows):
@@ -31,13 +32,20 @@ class Graph:
             raise ValueError('graph_requires_complete_unique_inventory')
         self.survey=survey;self.ids=ids;self.index={cid:i for i,cid in enumerate(ids)}
         self.by_id={c['component_id']:c for c in cs};self.origin,self.scale=ac._frame(cs)
+        self.hierarchy=assembly_hierarchy.analyze(cs)
         self.matrix=SparseBasis();self.direct={};self.unknown=[];self.inactive=[]
         self.adj={cid:set() for cid in ids};self.links={cid:[] for cid in ids}
         self.ground_links=[];self.pairs={}
         self.patterns={c['component_id'] for c in (survey.get('structural_relations') or {}).get('components',[]) if c.get('is_pattern_instance') is True}
         for c in cs:
-            if c.get('fixed_component') is True:
-                for row in self.lift([[float(i==j) for j in range(6)] for i in range(6)],c['component_id']):self.matrix.add(row)
+            cid=c['component_id'];parent=self.hierarchy['parents'][cid]
+            fixed=c.get('fixed_component') is True if parent is None else self.hierarchy['parent_document_fixed_components'][cid] is True
+            if fixed:
+                if parent is not None:self.adj[cid].add(parent);self.adj[parent].add(cid)
+                for row in self.lift([[float(i==j) for j in range(6)] for i in range(6)],cid,parent):self.matrix.add(row)
+        for binding in self.hierarchy['rigid_child_pairs']:
+            a,b=binding['component_a'],binding['component_b'];self.adj[a].add(b);self.adj[b].add(a)
+            for row in self.lift([[float(i==j) for j in range(6)] for i in range(6)],a,b):self.matrix.add(row)
         for mate in survey['mates']:
             mid=mate.get('native_feature_id')
             if mate.get('suppressed') is True:self.inactive.append(mid);continue
@@ -130,10 +138,12 @@ class Graph:
             grounded=self.relative(cid)['supported_effective_rank']==6
             nodes.append({'component_id':cid,'instance':self.by_id[cid]['instance'],
                 'native_fixed_flag':self.by_id[cid].get('fixed_component'),
+                'fixed_reference_parent_id':self.hierarchy['parents'][cid],
+                'parent_document_fixed_component':self.hierarchy['parent_document_fixed_components'][cid],
                 'supported_ground_rigidity':grounded,'active_native_feature_ids':self.links[cid],
                 'no_observed_active_native_links':not self.links[cid],
                 'native_pattern_instance':cid in self.patterns,
-                'no_observed_constraint_or_pattern_relation':not self.links[cid] and cid not in self.patterns,
+                'no_observed_constraint_or_pattern_relation':not self.links[cid] and cid not in self.patterns and not self.adj[cid],
                 'native_constraint_state':self.by_id[cid].get('constraint_state'),
                 'mechanical_role':None,'motion_verified':False})
         result={'schema_version':1,'status':'supported_graph_with_unknowns' if self.unknown else 'supported_graph_ready',
@@ -142,6 +152,7 @@ class Graph:
             'rigid_groups':groups,'native_link_islands':islands,'components':nodes,
             'island_scope':'observed_native_mate_links_only_not_pattern_or_whole_mechanism_disconnection',
             'pattern_relations_observed_not_rigid_motion_proof':sorted(self.patterns),
+            'assembly_hierarchy':self.hierarchy,
             'verified_root_links':self.ground_links,'unknown_constraints':self.unknown,'suppressed_feature_ids':self.inactive,
             'nonlinear_constraint_observations':self.survey.get('nonlinear_constraints',[]),
             'unknown_constraints_treated_as_absent':False,'mechanical_intent_proven':False,

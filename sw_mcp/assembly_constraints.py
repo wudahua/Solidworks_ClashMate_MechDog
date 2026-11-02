@@ -127,6 +127,9 @@ def analyze(components, mates, seeds=None, inventory_complete=True, structural_r
     if len(components) > 128 or any(not isinstance(i, str) or not i for i in ids) or len(set(ids)) != len(ids):
         return {'status': 'unsupported_inventory', 'write_dispatched': False, 'motion_verified': False}
     by_id = {c['component_id']: c for c in components}
+    from .assembly_hierarchy import analyze as analyze_hierarchy
+    hierarchy=analyze_hierarchy(components)
+    world_fixed={c['component_id'] for c in components if c.get('fixed_component') is True and hierarchy['parents'][c['component_id']] is None}
     origin, scale = _frame(components)
     pairs = defaultdict(lambda: {'rows': [], 'mates': [], 'issues': []})
     problems, omitted = [], []
@@ -173,7 +176,7 @@ def analyze(components, mates, seeds=None, inventory_complete=True, structural_r
                     clusters[i] |= clusters[j]; clusters.pop(j); changed = True; break
     labels = defaultdict(set)
     for c in components:
-        if c.get('fixed_component') is True:
+        if c['component_id'] in world_fixed:
             labels[c['component_id']].add('stationary')
     for label, members in (seeds or {}).items():
         for cid in members:
@@ -185,7 +188,7 @@ def analyze(components, mates, seeds=None, inventory_complete=True, structural_r
         # A task may deliberately release an originally fixed rotor. Distinguish
         # that visible planned release from a second *outside* fixed component.
         moving = effective-{'stationary'}
-        fixed_outside = [cid for cid in cluster if by_id[cid].get('fixed_component') and cid not in {m for members in (seeds or {}).values() for m in members}]
+        fixed_outside = [cid for cid in cluster if cid in world_fixed and cid not in {m for members in (seeds or {}).values() for m in members}]
         if len(moving) == 1 and not fixed_outside:
             effective = moving
         row = {'components': sorted(cluster), 'instances': [by_id[cid]['instance'] for cid in sorted(cluster)],
@@ -226,14 +229,19 @@ def analyze(components, mates, seeds=None, inventory_complete=True, structural_r
         group_ranks = {label: len(basis(rows)) for label, rows in evidence_by_group.items()}
         group = next(iter(labels[cid])) if len(labels[cid]) == 1 else None
         state = 'group_conflict' if len(labels[cid]) > 1 else 'supported_group_recommendation' if group else 'mechanical_intent_required'
+        parent=hierarchy['parents'][cid]
+        native_rigid_child=parent is not None and by_id[parent].get('subassembly_solving')==0
+        if native_rigid_child and group is None:state='preserve_native_rigid_parent_membership'
         preferred = sorted(group_ranks, key=lambda k: (-group_ranks[k], k))
         row = {'component_id': cid, 'instance': c['instance'], 'fixed_component': c.get('fixed_component'),
+               'fixed_flag_reference_scope':'root_context_only' if hierarchy['parents'][cid] is not None else 'assembly_root',
+               'parent_document_fixed_component':hierarchy['parent_document_fixed_components'][cid],
                'native_constraint_state': c.get('constraint_state', {'status': 'not_observed'}),
                'status': state, 'suggested_group': group, 'constraint_rank_by_neighbor_group': group_ranks,
                'mate_links': linked, 'global_remaining_DOF': None, 'motion_verified': False,
                'group_seed_is_rigidity_proof':False,
-               'group_source':'proposed_intent_seed' if any(cid in members for members in (seeds or {}).values()) else 'native_fixed_flag' if c.get('fixed_component') else 'supported_local_constraint_relations' if group else 'not_determined'}
-        if group is None:
+               'group_source':'proposed_intent_seed' if any(cid in members for members in (seeds or {}).values()) else 'native_fixed_flag' if cid in world_fixed else 'native_parent_relative_fixed_flag' if c.get('fixed_component') else 'supported_local_constraint_relations' if group else 'not_determined'}
+        if group is None and not native_rigid_child:
             question = {'component_id': cid, 'instance': c['instance'], 'candidate_groups': preferred,
                         'reason': 'conflicting_rigid_group_seeds' if state == 'group_conflict' else 'existing_constraints_do_not_determine_design_intent',
                         'supported_rank_by_group': group_ranks,

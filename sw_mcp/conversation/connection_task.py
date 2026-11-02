@@ -3,7 +3,7 @@ import json
 import uuid
 from . import core,source_integrity,task_execution
 from .task_engine import matching_components,mechanical_choices
-from .. import assembly_connections as joints,connection_trials as trials,connection_recommendations as recommendations,connection_groups,assembly_overview,connection_batches
+from .. import assembly_connections as joints,connection_trials as trials,connection_recommendations as recommendations,connection_groups,assembly_overview,connection_batches,assembly_hierarchy
 
 
 def discover(s):
@@ -158,11 +158,16 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
         poses={c['component_id']:c['transform'] for c in s.result_inspection['components']}
         try:bounds=[trials.bind(goal,poses) for goal in t['proposal']['goals']]
         except (ValueError,KeyError,TypeError) as error:raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','初态材料参考绑定未通过。',{'reason':str(error)}) from error
+        hierarchy=assembly_hierarchy.analyze(s.result_inspection['components']);expected_parents=hierarchy['parents'] if hierarchy['native_observed'] else None
         declared_count=len(bounds);declared_pairs={frozenset((g['component_a'],g['component_b'])) for g in t['proposal']['goals']}
         for binding in t['proposal'].get('group_bindings',[]):
             pair=frozenset((binding['component_a'],binding['component_b']))
             if pair not in declared_pairs:bounds.append(trials.bind(binding,poses));declared_pairs.add(pair)
         group_extra_count=len(bounds)-declared_count
+        for binding in hierarchy['rigid_child_pairs']:
+            pair=frozenset((binding['component_a'],binding['component_b']))
+            if pair not in declared_pairs:bounds.append(trials.bind(binding,poses));declared_pairs.add(pair)
+        hierarchy_extra_count=len(bounds)-declared_count-group_extra_count
         observed=joints.review({'components':s.result_inspection['components'],'mates':s.result_inspection['mates'],'inventory_complete':True})
         for row in observed['connections']:
             if row['recommended_joint_type'] not in joints.KINDS or frozenset((row['component_a'],row['component_b'])) in declared_pairs:continue
@@ -185,7 +190,7 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
                     raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','试验证据与当前请求不符。')
                 try:
                     binding=trials.require_target_binding(evidence,trial['target'],target_json)
-                    audit=trials.audit(evidence,bounds,i,trial,poses)
+                    audit=trials.audit(evidence,bounds,i,trial,poses,expected_parents)
                 except (ValueError,KeyError,TypeError) as error:raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','试验变换或证据范围无效。',{'reason':str(error),'artifact':receipt}) from error
                 audits.append({**audit,'request_target_binding':binding,'artifact':receipt})
                 core.write(s.folder/'基础运动副有界验证.json',audits);passed=audit['passed']
@@ -193,7 +198,8 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
             'whole_assembly_declared_targets_passed':passed and t['proposal'].get('completion_scope')=='whole_assembly',
             'component_coverage':t['proposal'].get('component_coverage'),'batch_count':(t.get('connection_transaction') or {}).get('batch_count',1),
             'fixed_state_changes_verified':True,'fixed_state_changes':t['proposal'].get('fixed_state_changes',[]),
-            'connection_count':declared_count,'existing_supported_connection_checks':len(bounds)-declared_count-group_extra_count,
+            'connection_count':declared_count,'existing_supported_connection_checks':len(bounds)-declared_count-group_extra_count-hierarchy_extra_count,
+            'native_rigid_subassembly_binding_checks':hierarchy_extra_count,
             'additional_group_binding_checks':group_extra_count,'declared_group_bindings_checked_per_trial':len(t['proposal'].get('group_bindings',[])),
             'existing_connection_scope':'supported_native_pair_relations_only_not_unknown_constraints_or_global_DOF',
             'omitted_native_feature_ids':observed['omitted_native_feature_ids'],

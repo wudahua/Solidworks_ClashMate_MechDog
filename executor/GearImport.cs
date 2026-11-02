@@ -51,9 +51,9 @@ public partial class Cad {
         AtomicJson(Path.Combine(model.Directory,"gear-copy-preparation.json"),new{naming="original_basename_in_unique_owned_directory",toolbox_copy_metadata_changes=changes,
             source_and_global_library_written=false,reason="preserve_component_pattern_names_and_prevent_library_substitution_on_reopen"});
     }
-    string ImportMateParameters(IModelDoc2 doc) {
+    string ImportMateParameters(IModelDoc2 doc,bool includeReferenceCalculation=false) {
         var features=BasicMateFeatures(doc).GroupBy(f=>f.GetID()).ToDictionary(g=>g.Key,g=>g.First());
-        var rows=Json.Deserialize<List<Dictionary<string,object>>>(ProbeWorkingState.MateIdentity(doc,features.Values.ToArray()));
+        var rows=Json.Deserialize<List<Dictionary<string,object>>>(ProbeWorkingState.MateIdentity(doc,features.Values.ToArray(),includeReferenceCalculation));
         foreach(var row in rows) {
             row.Remove("references");var feature=features[Convert.ToInt32(row["id"])];var mate=(IMate2)feature.GetSpecificFeature2();
             row["component_bindings"]=Enumerable.Range(0,mate.GetMateEntityCount()).Select(i=>{

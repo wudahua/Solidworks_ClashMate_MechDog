@@ -11,6 +11,9 @@ def prepare_limits():
     grid={'minimum_intervals':MINIMUM_INTERVALS,'duration_times_fps_must_be_integer':True}
     return {
         'assembly_constraints':{'maximum_top_level_components':128,'maximum_connection_goals':8,'maximum_added_mates':64,
+            'maximum_total_component_nodes':128,'subassembly_scope':'resolved_external_native_rigid_only',
+            'nested_component_edits_allowed':False,'internal_fixed_flags_use_parent_frame':True,
+            'internal_fixed_flag_source':'owning_assembly_document_not_root_context_IsFixed',
             'whole_assembly_mode':{'maximum_expanded_goals':128,'maximum_total_added_mates':512,'maximum_goals_per_native_batch':8,'maximum_added_mates_per_native_batch':64,'complete_declared_component_coverage_required':True,'failure_restore_import_checkpoint':True},
             'native_motion_study_solved':False,'saved_pose_model_context_only':True,
             'translation_trial_m':.0001,'rotation_trial_deg':.05,'global_DOF_certified':False},

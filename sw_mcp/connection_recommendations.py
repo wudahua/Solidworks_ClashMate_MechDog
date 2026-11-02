@@ -5,7 +5,7 @@ import math
 import json
 import re
 from . import assembly_connections as joints
-from . import constraint_graph
+from . import constraint_graph, assembly_hierarchy
 
 MAX_PAIRS=64
 MAX_CANDIDATES=8
@@ -70,9 +70,13 @@ def draft(survey,review=None,cursor='',binding=''):
         if not match or match[1]!=snapshot:raise ValueError('draft_cursor_snapshot_or_scope_mismatch')
         offset=int(match[2])
     cs=survey['components'];by_id={c['component_id']:c for c in cs}
+    hierarchy=assembly_hierarchy.analyze(cs)
+    if not hierarchy['supported_for_connection_writes']:
+        result['reason']='flexible_subassembly_scope_unsupported';result['native_hierarchy']=hierarchy;return result
     pairs,omitted,origin,scale=joints.observed_rows(survey)
     graph=constraint_graph.model(survey)
-    eligible=[key for key in itertools.combinations(sorted(by_id),2) if not all(by_id[x].get('fixed_component') for x in key)]
+    eligible=[key for key in itertools.combinations(sorted(by_id),2)
+              if all(hierarchy['parents'][x] is None for x in key) and not all(by_id[x].get('fixed_component') for x in key)]
     eligible.sort(key=lambda key:(3 if graph.rank(*key)==6 else 0 if key in pairs and len(joints.ac.basis(pairs[key]['rows']))<5 else 1 if key in pairs else 2,key))
     if offset>=len(eligible) and cursor:raise ValueError('draft_cursor_outside_pair_scope')
     candidates=[];end=offset

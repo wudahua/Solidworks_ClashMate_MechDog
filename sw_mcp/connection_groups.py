@@ -1,6 +1,6 @@
 """Expand explicitly declared rigid groups; never infer mechanical ownership."""
 import copy
-from . import constraint_graph,assembly_constraints
+from . import constraint_graph,assembly_constraints,assembly_hierarchy
 
 
 class GroupIntentError(ValueError):
@@ -10,6 +10,10 @@ class GroupIntentError(ValueError):
 
 def expand(survey,intents,groups=None,release_names=None,whole_assembly=False):
     cs=survey['components'];by={c['component_id']:c for c in cs};names={}
+    hierarchy=assembly_hierarchy.analyze(cs)
+    if not hierarchy['supported_for_connection_writes']:raise GroupIntentError('flexible_subassembly_scope_unsupported')
+    for goal in intents:
+        for key in ('component_a','component_b'):assembly_hierarchy.require_top_level_target(goal[key],hierarchy)
     for c in cs:names.setdefault(c['instance'].casefold(),[]).append(c['component_id'])
     def identify(name):
         if not isinstance(name,str) or not name.strip() or len(name)>512:raise GroupIntentError('invalid_component_name')
@@ -22,9 +26,10 @@ def expand(survey,intents,groups=None,release_names=None,whole_assembly=False):
     if len(set(released))!=len(released):raise GroupIntentError('duplicate_fixed_release')
     patterns={c['component_id'] for c in (survey.get('structural_relations') or {}).get('components',[]) if c.get('is_pattern_instance') is True}
     for cid in released:
+        if hierarchy['parents'][cid] is not None:raise GroupIntentError('nested_component_fixed_release_unsupported',instance=by[cid]['instance'])
         if by[cid].get('fixed_component') is not True:raise GroupIntentError('release_target_not_observed_fixed',instance=by[cid]['instance'])
         if cid in patterns:raise GroupIntentError('pattern_member_fixed_release_unsupported',instance=by[cid]['instance'])
-    if released and not any(c.get('fixed_component') is True and c['component_id'] not in released for c in cs):
+    if released and not any(c.get('fixed_component') is True and hierarchy['parents'][c['component_id']] is None and c['component_id'] not in released for c in cs):
         raise GroupIntentError('fixed_release_requires_an_existing_fixed_reference_to_remain')
     moving={g['component_a'] for g in intents if g['kind']!='rigid'}
     memberships={};normalized=[];group_names=set()
@@ -36,6 +41,7 @@ def expand(survey,intents,groups=None,release_names=None,whole_assembly=False):
         maximum_members=128 if whole_assembly else 32
         if not isinstance(members,list) or not 2<=len(members)<=maximum_members:raise GroupIntentError('rigid_group_member_budget',group=label,maximum_members=maximum_members)
         ids=[identify(n) for n in members]
+        for cid in ids:assembly_hierarchy.require_top_level_target(cid,hierarchy)
         if len(set(ids))!=len(ids) or any(cid in memberships for cid in ids):raise GroupIntentError('duplicate_or_overlapping_group_members',group=label)
         for cid in ids:memberships[cid]=label
         if any(g['kind']!='rigid' and g['component_a'] in ids and g['component_b'] in ids for g in intents):raise GroupIntentError('mobile_joint_inside_declared_rigid_group',group=label)
@@ -117,5 +123,5 @@ def expand(survey,intents,groups=None,release_names=None,whole_assembly=False):
         'goals':active,'planning_survey':virtual,'group_bindings':bindings,'rigid_groups':normalized,'skipped_existing_pairs':skipped,
         'construction_reference_choices':references,
         'fixed_state_changes':[{'component_id':cid,'instance':by[cid]['instance'],'before':True,'after':False,'action':'release_fixed','reason':'explicit_declared_motion_or_rigid_group_target'} for cid in released],
-        'unassigned_components':[c['instance'] for c in cs if c['component_id'] not in memberships],
+        'unassigned_components':[c['instance'] for c in cs if c['component_id'] not in assembly_hierarchy.inherited_coverage(set(memberships)|{g[k] for g in active for k in ('component_a','component_b')},hierarchy)[0]],
         'mechanical_ownership_of_unassigned_components_inferred':False,'write_dispatched':False}
