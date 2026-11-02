@@ -34,8 +34,9 @@ public partial class Cad {
         return new Dictionary<string,object>{{"entity_id",StableId("entity_",reference)},{"component_id",knownComponentId??StableId("component_",Convert.ToBase64String((byte[])doc.Extension.GetPersistReference3(c)))},{"instance",knownInstance??c.Name2},{"kind",cylinder?"cylindrical_axis":"planar_normal"},{"axis_global",axis.Select(v=>v/norm).ToArray()},{"reference_point_global_m",ApplyPose(pose,cylinder?data.Take(3).ToArray():data.Skip(3).Take(3).ToArray(),true)},{"area_m2",face.GetArea()},{"cylinder_radius_m",cylinder?(double?)data[6]:null},{"fixed_component",knownFixed??c.IsFixed()},{"requires_user_selection",true}};
     }
     string MateSignature(UserModel m,IModelDoc2 doc){object timing;return MateSignature(m,doc,out timing);}
-    string MateSignature(UserModel m,IModelDoc2 doc,out object timings) {
-        timings=null;var clock=new OperationTiming("plan_signature_full_saved_and_live_input_observation");
+    string MateSignature(UserModel m,IModelDoc2 doc,out object timings) {object identity;return MateSignature(m,doc,out timings,out identity);}
+    string MateSignature(UserModel m,IModelDoc2 doc,out object timings,out object identity) {
+        identity=null;timings=null;var clock=new OperationTiming("plan_signature_full_saved_and_live_input_observation");
         clock.Start("batch_setup");using(var batch=new NativeCommandBatch(()=>Sw.CommandInProgress,v=>Sw.CommandInProgress=v)) {
             clock.Start("loaded_input_documents");
             var loaded=(Sw.GetDocuments() as object[]??new object[0]).Cast<IModelDoc2>().Select(d=>new{document=d,path=d.GetPathName()}).Where(d=>m.Files.Contains(d.path,StringComparer.OrdinalIgnoreCase)).OrderBy(d=>d.path,StringComparer.OrdinalIgnoreCase).Select(d=>new{path=d.path,stamp=d.document.GetUpdateStamp(),dirty=d.document.GetSaveFlag()}).ToArray();
@@ -45,7 +46,7 @@ public partial class Cad {
             clock.Start("mate_identity_and_parameters");var mates=ProbeWorkingState.MateIdentity(doc,features);
             clock.Start("mate_feature_health");var health=ProbeWorkingState.MateHealthIdentity(doc,features);
             clock.Start("component_identity");var components=ProbeWorkingState.ComponentIdentity(doc);
-            clock.Start("serialize_and_hash");string signature=StableId("state_",Json.Serialize(new{revision=m.Revision,configuration=configuration,files=files,documents=loaded,poses=poses,studies=studies,mates=mates,mate_health=health,component_identity=components}));
+            clock.Start("serialize_and_hash");identity=new{revision=m.Revision,configuration=configuration,files=files,documents=loaded,poses=poses,studies=studies,mates=mates,mate_health=health,component_identity=components};string signature=StableId("state_",Json.Serialize(identity));
             clock.Finish();timings=clock.Export();return signature;
         }
     }

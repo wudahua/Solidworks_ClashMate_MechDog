@@ -67,7 +67,7 @@ public partial class Cad {
     public object SurveyAssemblyConnections(string id) {
         var model=GetUserModel(id);
         using(var scope=new Scope(this,model.Path,null))using(var batch=new NativeCommandBatch(()=>Sw.CommandInProgress,v=>Sw.CommandInProgress=v)) {
-            var doc=scope.Doc;Fingerprint(doc,model.Path);string signature=MateSignature(model,doc);var cs=UserComponents(doc);
+            var doc=scope.Doc;Fingerprint(doc,model.Path);object signatureTiming,signatureBefore;string signature=MateSignature(model,doc,out signatureTiming,out signatureBefore);var cs=UserComponents(doc);
             if(cs.Length>128)throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","基础连接调查限128个完整解析组件节点，包含子装配与内部零件。");
             var rows=new List<object>();var skipped=new List<object>();var templates=new Dictionary<string,List<CompletionPlaneTemplate>>();
             var hierarchy=ConnectionHierarchyForModel(model,doc);
@@ -94,7 +94,14 @@ public partial class Cad {
             }
             var mates=UserMates(doc,model);var structure=AssemblyStructureObservation(doc);var studies=StudyStates(doc);
             var nonlinear=BasicMateFeatures(doc).Select(f=>{var mate=f.GetSpecificFeature2() as IMate2;return mate==null?null:ConnectionNonlinearObservation(f,mate);}).Where(v=>v!=null).ToArray();
-            if(signature!=MateSignature(model,doc))throw new CadFault("CONNECTION_PLAN_STALE","调查期间状态发生变化。");
+            object signatureAfter;string afterSignature=MateSignature(model,doc,out signatureTiming,out signatureAfter);
+            if(signature!=afterSignature) {
+                var beforeFields=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(signatureBefore));
+                var afterFields=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(signatureAfter));
+                var changes=beforeFields.Keys.Where(k=>Json.Serialize(beforeFields[k])!=Json.Serialize(afterFields[k])).ToArray();
+                throw new CadFault("CONNECTION_PLAN_STALE","调查期间输入签名发生变化；已保留具体字段，未重试写入。",new{
+                    changed_fields=changes,before=signatureBefore,after=signatureAfter,write_dispatched=false,automatic_retry=false});
+            }
             SaveUserModel(model);
             return new{model_id=id,reference_state_signature=signature,components=rows,mates=mates,structural_relations=structure,
                 studies=studies,nonlinear_constraints=nonlinear,skipped=skipped,inventory_complete=skipped.Count==0,write_dispatched=false,
@@ -120,7 +127,7 @@ public partial class Cad {
         ConnectionReference(doc,cb,(string)a["reference_b"],(string)a["reference_kind_b"]);
     }
     public object PreviewAssemblyConnections(string id,string proposalJson) {
-        var m=GetUserModel(id);var outer=Json.Deserialize<Dictionary<string,object>>(proposalJson);Dictionary<string,object> data;
+        var m=GetUserModel(id);VerifyConnectionLayer(id);var outer=Json.Deserialize<Dictionary<string,object>>(proposalJson);Dictionary<string,object> data;
         var batchScope=ReadConnectionBatch(id,outer,out data);
         using(var scope=new Scope(this,m.Path,null))using(var batch=new NativeCommandBatch(()=>Sw.CommandInProgress,v=>Sw.CommandInProgress=v)) {
             var doc=scope.Doc;Fingerprint(doc,m.Path);RequireMatesHealthy(doc);

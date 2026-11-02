@@ -162,6 +162,8 @@ class ConversationSession(mate_worker.Session):
             audit={'components':len(new),'maximum_transform_delta':delta,'fixed_states_equal':fixed,'mate_count_equal':mates_equal,
                    'native_checkpoint_restore':value,'passed':same and fixed and mates_equal and delta<=1e-7}
             core.write(self.folder/'恢复独立核对.json',audit)
+            if getattr(self,'selected_assembly_layer',None):
+                core.write(self.folder/'恢复内部范围总装守卫.json',self.call('_verify_connection_layer',model_id=self.model))
             if not audit['passed']:self.import_restored=False;self.unknown=True;raise core.StopBatch('RESTORE_AUDIT_FAILED',diagnostics=audit)
         return value
     def admit_owned_recovery(self,model,checkpoint,replacement=False):

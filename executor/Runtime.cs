@@ -335,6 +335,9 @@ public partial class Cad {
         string op=(string)request["op"];var p=(Dictionary<string,object>)request["params"];
         activeJobId=p.ContainsKey("job_id")?(string)p["job_id"]:null;activeRequestId=request.ContainsKey("id")?request["id"] as string:null;
         switch(op) {
+            case "_survey_connection_layers": return SurveyConnectionLayers((string)p["model_id"]);
+            case "_select_connection_layer": return SelectConnectionLayer((string)p["model_id"],(string)p["instance"]);
+            case "_verify_connection_layer": return VerifyConnectionLayer((string)p["model_id"],p.ContainsKey("rebuild_root")&&Convert.ToBoolean(p["rebuild_root"]));
             case "_survey_assembly_connections": return SurveyAssemblyConnections((string)p["model_id"]);
             case "_connection_reference_state": return ConnectionReferenceState((string)p["model_id"]);
             case "_test_connection_parameter_readers": return CompareConnectionParameterReaders((string)p["model_id"]);
