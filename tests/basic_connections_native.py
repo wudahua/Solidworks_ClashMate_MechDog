@@ -21,7 +21,7 @@ def main():
     parser.add_argument('--project-root',type=Path);parser.add_argument('--resume',action='store_true')
     parser.add_argument('--wait-seconds',type=int,default=3600,help='Developer observation window only; never a native retry or solver budget')
     args=parser.parse_args()
-    if not 30<=args.wait_seconds<=7200:parser.error('--wait-seconds must be an integer from 30 to 7200')
+    if not 30<=args.wait_seconds<=14400:parser.error('--wait-seconds must be an integer from 30 to 14400')
     folder=core.no_links(args.output);folder.mkdir(parents=True,exist_ok=args.resume)
     cards=core.read(core.no_links(args.cards));work=folder/'work'
     assert not (ROOT/'runs/executor-state.json').exists(),'Use a clean isolated candidate installation.'
@@ -66,6 +66,9 @@ def main():
             tid=client.tool('prepare_mechanism_task',assembly_path=card['assembly'],task_kind='assembly_constraints')['task_id']
             state=client.wait(tid,args.wait_seconds);core.write(folder/f'{index+1}-prepared.json',state)
             assert state['phase']=='constraint_review_ready',state
+            overview=state.get('assembly_overview') or {}
+            assert overview.get('accounting_complete') and overview['accounted_component_count']==overview['component_count']
+            assert len({c['component_id'] for c in overview['components']})==overview['component_count']
             if owner is None:owner=state['server_instance_id']
             assert owner==state['server_instance_id']
             case={'label':card['label'],'task_id':tid,'prepared_record':str(folder/f'{index+1}-prepared.json')}
@@ -92,11 +95,14 @@ def main():
                     core.write(folder/f'{index+1}-automatic-draft.json',{'pages':pages,'selected':selected,'actual_public_intents':intents,
                         'scope':'developer_declared_mechanical_goals_not_live_LLM_intent_inference','axis_hint_supplied_in_card':False})
                     case['automatic_draft_record']=str(folder/f'{index+1}-automatic-draft.json')
-                group_options={key:card[key] for key in ('rigid_groups','release_fixed_components') if key in card}
+                group_options={key:card[key] for key in ('rigid_groups','release_fixed_components','completion_scope') if key in card}
                 client.tool('plan_mechanism_task',task_id=tid,connection_intent=intents,**group_options)
                 planned=client.wait(tid,args.wait_seconds);core.write(folder/f'{index+1}-plan.json',planned)
                 assert planned['phase']=='awaiting_confirmation',planned
                 assert planned['proposal']['expected_added_mates']==card['expected_added_mates'],planned['proposal']
+                if card.get('completion_scope')=='whole_assembly':
+                    assert planned['proposal']['component_coverage']['all_components_have_declared_targets']
+                    assert len(planned['proposal']['batches'])==card['expected_batches']
                 if not reconnected:
                     assert client.close();client=Client(ROOT,work,args.runtime_base,folder/'frontend2',entry=ROOT/'motion_server.py')
                     recovered=client.tool('get_mechanism_task',task_id=tid)
@@ -112,6 +118,7 @@ def main():
                 proof=verified['verification'];assert proof['declared_scope_passed'] and not proof['native_motion_study_solved']
                 assert all(v['passed'] and v['all_poses_restored'] for v in proof['trials'])
                 assert proof['completed_trials']==card['expected_trials']
+                if card.get('completion_scope')=='whole_assembly':assert proof['whole_assembly_declared_targets_passed'] and proof['batch_count']==card['expected_batches']
                 case.update(verification=proof,added_mates=planned['proposal']['expected_added_mates'])
                 try:client.tool('execute_mechanism_task',task_id=tid,plan_token=planned['plan_token'],confirmed=True,scope_confirmed=True);raise AssertionError('execution replay accepted')
                 except core.StopBatch as error:assert error.code=='TASK_ALREADY_EXECUTED'

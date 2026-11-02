@@ -336,6 +336,7 @@ public partial class Cad {
         activeJobId=p.ContainsKey("job_id")?(string)p["job_id"]:null;activeRequestId=request.ContainsKey("id")?request["id"] as string:null;
         switch(op) {
             case "_survey_assembly_connections": return SurveyAssemblyConnections((string)p["model_id"]);
+            case "_connection_reference_state": return ConnectionReferenceState((string)p["model_id"]);
             case "_preview_assembly_connections": return PreviewAssemblyConnections((string)p["model_id"],(string)p["proposal_json"]);
             case "_apply_assembly_connections": return ApplyAssemblyConnections((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));
             case "_test_connection_rollback": return ApplyAssemblyConnections((string)p["plan_id"],true,true);

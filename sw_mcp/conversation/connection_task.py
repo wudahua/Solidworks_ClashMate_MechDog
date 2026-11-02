@@ -3,7 +3,7 @@ import json
 import uuid
 from . import core,source_integrity,task_execution
 from .task_engine import matching_components,mechanical_choices
-from .. import assembly_connections as joints,connection_trials as trials,connection_recommendations as recommendations,connection_groups
+from .. import assembly_connections as joints,connection_trials as trials,connection_recommendations as recommendations,connection_groups,assembly_overview,connection_batches
 
 
 def discover(s):
@@ -15,18 +15,19 @@ def discover(s):
     core.write(s.folder/'整装配约束图.json',review.get('assembly_constraint_graph'))
     draft=recommendations.draft(survey,review,binding=str(s.folder.parent.absolute()));s.connection_draft=draft
     core.write(s.folder/'装配连接自动草案.json',draft)
-    return {'connection_review':review,'connection_draft':draft}
+    overview=assembly_overview.recommend(survey,review);core.write(s.folder/'整装配组件推荐与遗漏检查.json',overview)
+    return {'connection_review':review,'connection_draft':draft,'assembly_overview':overview}
 
 
 def publish_review(engine,t,value):
     s=engine.sessions[t['task_id']];source_integrity.bind(t,s)
-    t.update(model_id=s.model,phase='constraint_review_ready',connection_review=value['connection_review'],connection_draft=value['connection_draft'],
+    t.update(model_id=s.model,phase='constraint_review_ready',connection_review=value['connection_review'],connection_draft=value['connection_draft'],assembly_overview=value.get('assembly_overview'),
         next_action={'tool':'plan_mechanism_task','arguments':{'task_id':t['task_id']},
             'instruction':'AI先解释原生配合故障、压缩项及局部连接线索。按用户已说明的机械目标，用connection_intent填写组件名称及rigid/revolute/prismatic；可自动采用唯一几何轴线，仅真实歧义才集中询问。不把局部秩当全机构自由度，不为消除浮动而锁死运动。若仅体检，可直接finish恢复收尾。'})
 
 
-def resolve(s,intents):
-    if not isinstance(intents,list) or not 1<=len(intents)<=8:raise core.StopBatch('CONNECTION_INTENT_INVALID','每次1至8项连接目标。')
+def resolve(s,intents,maximum=8):
+    if not isinstance(intents,list) or not 1<=len(intents)<=maximum:raise core.StopBatch('CONNECTION_INTENT_INVALID','本次连接目标上限为'+str(maximum)+'项。')
     cs=s.connection_survey['components'];out=[]
     for raw in intents:
         if hasattr(raw,'model_dump'):raw=raw.model_dump()
@@ -51,29 +52,38 @@ def resolve(s,intents):
     return out,None
 
 
-def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None):
+def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,completion_scope='declared'):
+    if completion_scope not in {'declared','whole_assembly'}:raise core.StopBatch('CONNECTION_INTENT_INVALID','completion_scope须为declared或whole_assembly。')
+    whole=completion_scope=='whole_assembly'
     engine._require_session(t['task_id'])
     if t['phase'] not in {'constraint_review_ready','awaiting_confirmation'}:raise core.StopBatch('TASK_NOT_READY_FOR_PLAN')
     s=engine.sessions[t['task_id']]
     if intents is None and rigid_groups is None and release_fixed_components is None:return {'task_id':t['task_id'],'needs_connection_intent':True,
         'connection_draft':getattr(s,'connection_draft',None) or recommendations.draft(s.connection_survey),
-        'connection_review':t['connection_review'],'write_dispatched':False,
+        'connection_review':t['connection_review'],'assembly_overview':t.get('assembly_overview'),'write_dispatched':False,
         'instruction':'AI读取connection_draft，用候选connection_intent及推荐依据形成整组方案；已有机械目标可直接选择，真正歧义集中询问。草案不是原生预演或执行授权，实际plan仍须传具体connection_intent。现有方案不因只读草案查询自动撤销。'}
     if t['phase']=='awaiting_confirmation':
         t['previous_plan_id']=(t.get('proposal') or {}).get('plan_id')
         t.pop('plan_token',None);t.pop('proposal',None)
         t.update(phase='constraint_review_ready',plan_token_revoked=True);engine.save(t)
-    goals,question=resolve(s,intents) if intents is not None else ([],None)
+    goals,question=resolve(s,intents,128 if whole else 8) if intents is not None else ([],None)
     if question:return {'task_id':t['task_id'],**question}
     expansion=None
     try:
         planning_survey=s.connection_survey
         if rigid_groups is not None or release_fixed_components is not None:
-            expansion=connection_groups.expand(planning_survey,goals,rigid_groups,release_fixed_components)
+            expansion=connection_groups.expand(planning_survey,goals,rigid_groups,release_fixed_components,whole_assembly=whole)
             core.write(s.folder/'整组目标展开.json',{k:v for k,v in expansion.items() if k!='planning_survey'})
             if expansion['status']!='group_expanded':return {'task_id':t['task_id'],**{k:v for k,v in expansion.items() if k!='planning_survey'},'confirmation_token_created':False}
             goals=expansion['goals'];planning_survey=expansion['planning_survey']
-        proposal=joints.plan(planning_survey,goals)
+        if whole:
+            goals.sort(key=lambda g:g['kind']!='rigid')
+            coverage=assembly_overview.coverage(s.connection_survey,goals,(expansion or {}).get('group_bindings',[]))
+            core.write(s.folder/'整装配目标覆盖.json',coverage)
+            if not coverage['all_components_have_declared_targets']:
+                return {'task_id':t['task_id'],'status':'assembly_goal_coverage_required','component_coverage':coverage,
+                        'write_dispatched':False,'confirmation_token_created':False,'instruction':'整装配方案仍有未声明组件。AI结合用户目标归组或集中澄清，不把未分配件默认静止，也不部分提交。'}
+        proposal=joints.plan(planning_survey,goals,whole_assembly=whole)
         if expansion:
             proposal.update(group_bindings=expansion['group_bindings'],rigid_groups=expansion['rigid_groups'],
                 fixed_state_changes=expansion['fixed_state_changes'],skipped_existing_pairs=expansion['skipped_existing_pairs'],
@@ -96,14 +106,24 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None):
             'group_intent_diagnostics':getattr(error,'diagnostics',None),
             'observation_scope':'whole_inventory_non_equality_constraints_are_not_proven_root_causes',
             'original_mates_or_fixed_flags_automatically_changed':False}) from error
+    if whole and proposal['status']=='plan_ready':
+        proposal['component_coverage']=coverage
+        try:transaction=connection_batches.prepare(proposal)
+        except ValueError as error:raise core.StopBatch('CONNECTION_SCOPE_UNSUPPORTED','整装配事务预算或完整性未通过，未部分提交。',{'reason':str(error),'write_dispatched':False}) from error
+        core.write(s.folder/'整装配冻结批次.json',transaction)
     core.write(s.folder/'通用连接补齐规划.json',proposal)
     if proposal['status']!='plan_ready':return {'task_id':t['task_id'],**proposal,
         'instruction':'仅当前已支持几何范围；AI解释缺失参考或轴线歧义，未部分提交配合。'}
     def operation():
-        native=s.call('_preview_assembly_connections',model_id=s.model,proposal_json=json.dumps(
-            {**proposal,'reference_state_signature':s.connection_survey['reference_state_signature']},ensure_ascii=False))
+        payload=connection_batches.request(transaction,0,s.connection_survey['reference_state_signature']) if whole else {**proposal,'reference_state_signature':s.connection_survey['reference_state_signature']}
+        native=s.call('_preview_assembly_connections',model_id=s.model,proposal_json=json.dumps(payload,ensure_ascii=False))
+        if whole:t['connection_transaction']=transaction
+        else:t.pop('connection_transaction',None)
         t.update(phase='awaiting_confirmation',plan_token=uuid.uuid4().hex,plan_token_revoked=False,proposal={**native,
-            'actions':proposal['actions'],'omitted_native_feature_ids':proposal['omitted_native_feature_ids'],
+            'actions':proposal['actions'],'goals':proposal['goals'],'expected_added_mates':len(proposal['actions']),
+            'fixed_state_changes':proposal.get('fixed_state_changes',[]),'completion_scope':completion_scope,
+            'batches':transaction['batches'] if whole else None,'component_coverage':proposal.get('component_coverage'),
+            'all_or_restore_import_checkpoint':whole,'omitted_native_feature_ids':proposal['omitted_native_feature_ids'],
             'group_bindings':proposal.get('group_bindings',[]),'rigid_groups':proposal.get('rigid_groups',[]),
             'skipped_existing_pairs':proposal.get('skipped_existing_pairs',[]),'unassigned_components':proposal.get('unassigned_components',[]),
             'scope':'declared_basic_joints_small_trials_only_not_global_DOF_or_full_travel',
@@ -119,9 +139,12 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
     if alignment_confirmed is not False:raise core.StopBatch('CONNECTION_INTENT_INVALID','本流程保留初始装配姿态，不含重新对齐授权。')
     task_execution.require_plan_token(t,token)
     t['execution_consumed']=True;t['confirmation']={'confirmed':True,'scope_confirmed':True};engine.save(t)
-    def operation():
+    def perform():
         s=engine.sessions[t['task_id']];s.import_restored=False
-        applied=s.call('_apply_assembly_connections',plan_id=t['proposal']['plan_id'],confirmed=True)
+        if t.get('connection_transaction'):
+            from .connection_batch_task import apply
+            applied=apply(engine,t,s)
+        else:applied=s.call('_apply_assembly_connections',plan_id=t['proposal']['plan_id'],confirmed=True)
         core.write(s.folder/'通用连接补齐成果.json',applied);s.committed=True;s.capture_applied_result()
         expected_fixed={c['component_id']:c['fixed_component'] for c in s.connection_survey['components']}
         for change in t['proposal'].get('fixed_state_changes',[]):
@@ -167,6 +190,8 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
                 audits.append({**audit,'request_target_binding':binding,'artifact':receipt})
                 core.write(s.folder/'基础运动副有界验证.json',audits);passed=audit['passed']
         proof={'declared_scope_passed':passed,'method':'native_assembly_solver_small_pose_trials',
+            'whole_assembly_declared_targets_passed':passed and t['proposal'].get('completion_scope')=='whole_assembly',
+            'component_coverage':t['proposal'].get('component_coverage'),'batch_count':(t.get('connection_transaction') or {}).get('batch_count',1),
             'fixed_state_changes_verified':True,'fixed_state_changes':t['proposal'].get('fixed_state_changes',[]),
             'connection_count':declared_count,'existing_supported_connection_checks':len(bounds)-declared_count-group_extra_count,
             'additional_group_binding_checks':group_extra_count,'declared_group_bindings_checked_per_trial':len(t['proposal'].get('group_bindings',[])),
@@ -179,4 +204,11 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
         if not passed:raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','补齐或有界运动验证未通过，停止后续试验；默认收尾恢复导入检查点。',proof)
         t.update(phase='verified',next_action={'tool':'finish_mechanism_task','arguments':{'task_id':t['task_id']},
             'instruction':'报告本次声明连接的小位移验证、旧约束和固定状态保持及每次恢复；不声称全机构自由度或全行程通过。默认恢复导入检查点并正常退出；只有用户明确要求才保留已验证成果副本。'})
+    def operation():
+        try:return perform()
+        except Exception as error:
+            if t.get('connection_transaction'):
+                from .connection_batch_task import restore_failed_transaction
+                restore_failed_transaction(engine.sessions[t['task_id']],t,error)
+            raise
     return engine._submit(t,'executing',operation)

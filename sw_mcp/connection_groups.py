@@ -1,6 +1,6 @@
 """Expand explicitly declared rigid groups; never infer mechanical ownership."""
 import copy
-from . import constraint_graph
+from . import constraint_graph,assembly_constraints
 
 
 class GroupIntentError(ValueError):
@@ -8,7 +8,7 @@ class GroupIntentError(ValueError):
         self.diagnostics=diagnostics;super().__init__(reason)
 
 
-def expand(survey,intents,groups=None,release_names=None):
+def expand(survey,intents,groups=None,release_names=None,whole_assembly=False):
     cs=survey['components'];by={c['component_id']:c for c in cs};names={}
     for c in cs:names.setdefault(c['instance'].casefold(),[]).append(c['component_id'])
     def identify(name):
@@ -33,14 +33,25 @@ def expand(survey,intents,groups=None,release_names=None):
         label=raw.get('name');members=raw.get('members');anchor_name=raw.get('anchor','')
         if not isinstance(label,str) or not label.strip() or len(label)>64 or label.casefold() in group_names:raise GroupIntentError('invalid_or_duplicate_group_name')
         group_names.add(label.casefold())
-        if not isinstance(members,list) or not 2<=len(members)<=32:raise GroupIntentError('rigid_group_requires_2_to_32_members',group=label)
+        maximum_members=128 if whole_assembly else 32
+        if not isinstance(members,list) or not 2<=len(members)<=maximum_members:raise GroupIntentError('rigid_group_member_budget',group=label,maximum_members=maximum_members)
         ids=[identify(n) for n in members]
         if len(set(ids))!=len(ids) or any(cid in memberships for cid in ids):raise GroupIntentError('duplicate_or_overlapping_group_members',group=label)
         for cid in ids:memberships[cid]=label
         if any(g['kind']!='rigid' and g['component_a'] in ids and g['component_b'] in ids for g in intents):raise GroupIntentError('mobile_joint_inside_declared_rigid_group',group=label)
-        if any(cid in patterns for cid in ids):raise GroupIntentError('pattern_group_requires_seed_scope_review',group=label)
-        anchor=identify(anchor_name) if anchor_name else min(ids,key=lambda cid:(0 if cid in moving else 1 if by[cid].get('fixed_component') and cid not in released else 2,cid))
+        if any(cid in patterns for cid in ids):
+            if not whole_assembly:raise GroupIntentError('pattern_group_requires_seed_scope_review',group=label)
+            deps={r['component_id']:r for r in assembly_constraints.analyze(cs,survey['mates'],structural_relations=survey.get('structural_relations'))['pattern_dependencies']}
+            def valid_seed(cid,seen):
+                if cid not in ids:return False
+                if cid not in patterns:return True
+                if cid in seen:return False
+                row=deps.get(cid,{})
+                return bool(row.get('seed_component_ids')) and all(valid_seed(p,seen|{cid}) for p in row['seed_component_ids'])
+            if not all(valid_seed(cid,set()) for cid in ids if cid in patterns):raise GroupIntentError('pattern_seed_group_scope_unresolved',group=label)
+        anchor=identify(anchor_name) if anchor_name else min((cid for cid in ids if cid not in patterns),key=lambda cid:(0 if cid in moving else 1 if by[cid].get('fixed_component') and cid not in released else 2,cid))
         if anchor not in ids:raise GroupIntentError('group_anchor_not_a_member',group=label)
+        if anchor in patterns:raise GroupIntentError('pattern_instance_cannot_be_group_anchor',group=label)
         normalized.append({'name':label,'members':ids,'instances':[by[x]['instance'] for x in ids],'anchor':anchor,'anchor_instance':by[anchor]['instance'],
             'anchor_source':'explicit_name' if anchor_name else 'declared_moving_endpoint_then_existing_fixed_then_stable_coordinate_choice',
             'mechanical_membership_source':'explicit_user_goal_via_AI_not_geometry_or_name_inference'})
@@ -56,27 +67,55 @@ def expand(survey,intents,groups=None,release_names=None):
     for c in virtual['components']:
         if c['component_id'] in released:
             c['fixed_component']=False;c['constraint_state']={'status':'pending_explicit_fixed_release_native_readback','fully_constrained':None,'remaining_DOF':None}
-    graph=constraint_graph.model(virtual);bindings=[];active=list(copy.deepcopy(intents));skipped=[]
+    graph=constraint_graph.model(virtual);bindings=[];active=list(copy.deepcopy(intents));skipped=[];references=[]
     seen={frozenset((g['component_a'],g['component_b'])):g['kind'] for g in active}
     for group in normalized:
-        anchor=group['anchor']
-        for cid in group['members']:
+        anchor=group['anchor'];connected={anchor};members=group['members']
+        if whole_assembly:
+            # Keep the declared group anchor for verification; build through
+            # already connected native neighbors when anchor geometry cannot
+            # supply an independent constraint. Do not invent datum geometry.
+            depth={anchor:0};queue=[anchor]
+            for peer in queue:
+                for cid in sorted(graph.adj[peer]):
+                    if cid in members and cid not in depth:depth[cid]=depth[peer]+1;queue.append(cid)
+            members=sorted(members,key=lambda cid:(depth.get(cid,129),cid))
+        for cid in members:
             if cid==anchor:continue
             binding={'kind':'rigid','component_a':cid,'component_b':anchor,'instance_a':by[cid]['instance'],'instance_b':by[anchor]['instance'],
                 'group_name':group['name'],'reference_point_global_m':None,'axis_global':None}
             bindings.append(binding);key=frozenset((cid,anchor))
+            if cid in patterns:
+                skipped.append({'component_a':cid,'component_b':anchor,'reason':'native_pattern_dependency_preserve_and_verify_only_not_rigid_proof'});continue
             if key in seen:
                 if seen[key]!='rigid':raise GroupIntentError('conflicting_expanded_joint_and_group')
+                connected.add(cid)
                 continue
-            if graph.rank(cid,anchor)==6:
-                skipped.append({'component_a':cid,'component_b':anchor,'reason':'supported_indirect_rigidity_already_present_not_finite_motion_proof'});continue
-            active.append({'component_a':cid,'component_b':anchor,'kind':'rigid'});seen[key]='rigid'
+            if graph.rank(cid,anchor)==6 and cid not in released:
+                skipped.append({'component_a':cid,'component_b':anchor,'reason':'supported_indirect_rigidity_already_present_not_finite_motion_proof'});connected.add(cid);continue
+            reference=anchor
+            if whole_assembly:
+                from . import assembly_connections as joints
+                def available(peer):
+                    candidates=joints._candidates(by[cid],by[peer],graph.origin,graph.scale)
+                    return len(joints.ac.basis(graph.relative(cid,peer)['rows']+[r for item in candidates for r in item[4]]))
+                if available(anchor)<6:
+                    choices=[peer for peer in sorted(graph.adj[cid]&connected) if peer not in patterns and available(peer)==6 and frozenset((cid,peer)) not in seen]
+                    if choices:
+                        reference=min(choices,key=lambda peer:(-graph.rank(cid,peer),by[peer]['instance']))
+                        references.append({'component':by[cid]['instance'],'declared_anchor':by[anchor]['instance'],'construction_reference':by[reference]['instance'],
+                            'evidence':'native_neighbor_in_same_declared_group_already_connected_to_anchor_with_sufficient_current_geometry',
+                            'membership_inferred_from_name':False})
+            active.append({'component_a':cid,'component_b':reference,'kind':'rigid'});seen[frozenset((cid,reference))]='rigid';connected.add(cid)
     permitted={g['component_a'] for g in active}|{b['component_a'] for b in bindings}
     if set(released)-permitted:raise GroupIntentError('fixed_release_not_bound_to_a_declared_moving_target_or_group_member')
-    if len(active)>8:return {'status':'group_goal_budget_review_required','expanded_goals':active,'expanded_goal_count':len(active),'maximum_goals':8,
+    limit=128 if whole_assembly else 8
+    if len(active)>limit:return {'status':'group_goal_budget_review_required','expanded_goals':active,'expanded_goal_count':len(active),'maximum_goals':limit,
         'write_dispatched':False,'executable':False,'instruction':'完整声明超过本次有界验证预算，未部分提交。AI按独立机械组拆分方案并分别验证，不截断或默认丢弃成员。'}
+    if whole_assembly:active.sort(key=lambda g:g['kind']!='rigid')
     return {'status':'group_expanded' if active else 'supported_groups_need_no_write',
         'goals':active,'planning_survey':virtual,'group_bindings':bindings,'rigid_groups':normalized,'skipped_existing_pairs':skipped,
+        'construction_reference_choices':references,
         'fixed_state_changes':[{'component_id':cid,'instance':by[cid]['instance'],'before':True,'after':False,'action':'release_fixed','reason':'explicit_declared_motion_or_rigid_group_target'} for cid in released],
         'unassigned_components':[c['instance'] for c in cs if c['component_id'] not in memberships],
         'mechanical_ownership_of_unassigned_components_inferred':False,'write_dispatched':False}

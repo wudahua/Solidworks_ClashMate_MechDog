@@ -185,8 +185,9 @@ def rotary_trial_driver(candidates, axis, component_a, component_b):
         'temporary_only':True,'removed_by_verified_result_checkpoint_after_each_trial':True}
 
 
-def plan(survey, intents):
-    if not isinstance(intents,list) or not 1<=len(intents)<=8: raise ValueError('one_to_8_connection_goals_required')
+def plan(survey, intents,whole_assembly=False):
+    limit=128 if whole_assembly else 8
+    if not isinstance(intents,list) or not 1<=len(intents)<=limit: raise ValueError('connection_goal_budget_exceeded' if whole_assembly else 'one_to_8_connection_goals_required')
     cs=survey['components']; by_id={c['component_id']:c for c in cs};indices={c['component_id']:i for i,c in enumerate(cs)}
     r=review(survey)
     if not r['complete'] or r['mate_health_issues']: raise ValueError('native_inventory_or_health_requires_review')
@@ -226,14 +227,15 @@ def plan(survey, intents):
         if len(ac.basis(target+effective['rows']))>len(ac.basis(target)):
             raise ValueError('existing_indirect_constraints_conflict_with_declared_motion')
         target_global=lift(target,a_id,b_id);before=matrix.trial(target_global);start=len(actions)
-        if full and before:raise ValueError('native_full_constraint_conflicts_with_supported_missing_rank')
+        preserve_native_full=whole_assembly and kind=='rigid' and full and bool(before)
+        if full and before and not preserve_native_full:raise ValueError('native_full_constraint_conflicts_with_supported_missing_rank')
         native_links=[m for m in survey['mates'] if m.get('suppressed') is not True and any(e.get('component_id')==a_id for e in m.get('entities',[]))]
         if any(m.get('type')==16 for m in native_links):
             return {'status':'unsupported_native_lock_trial','goals':[],'actions':[],'write_dispatched':False,
                 'instance_a':a['instance'],'instance_b':b['instance'],
                 'instruction':'原生锁定配合不能由本版小幅移动后端独立认证；只读报告，不删除旧锁定配合。可另行采用已有完整Motion验证流程，不冒充本次通过。'}
         candidates=_candidates(a,b,origin,scale)
-        while matrix.trial(target_global):
+        while not preserve_native_full and matrix.trial(target_global):
             options=[]
             for priority,k,fa,fb,rows,value in candidates:
                 if len(ac.basis(target+rows))>len(ac.basis(target)):continue
@@ -267,6 +269,8 @@ def plan(survey, intents):
         goals.append({'component_a':a_id,'component_b':b_id,'instance_a':a['instance'],'instance_b':b['instance'],
             'kind':kind,**chosen,'missing_supported_constraints_before':before,'remaining_supported_constraints':remaining,
             'added_action_count':len(actions)-start,'linear_trial_driver':trial_driver,
+            'preserved_native_full_constraint_observation':preserve_native_full,
+            'supported_target_fulfilment_certified':not bool(remaining),
             'rotary_trial_driver':rotary_driver,'motion_verified':False})
     planned=constraint_graph.Graph(survey);planned.matrix.pivots=matrix.pivots.copy()
     for goal in goals:
@@ -275,7 +279,7 @@ def plan(survey, intents):
         target=target_rows(goal['kind'],goal['axis_global'],goal['reference_point_global_m'],origin,scale)
         if len(ac.basis(target+effective['rows']))>len(ac.basis(target)):
             raise ValueError('proposed_group_constraints_conflict_with_declared_motion')
-    return {'status':'unsupported_references' if any(g['remaining_supported_constraints'] for g in goals) else 'plan_ready',
+    return {'status':'unsupported_references' if any(g['remaining_supported_constraints'] and not g['preserved_native_full_constraint_observation'] for g in goals) else 'plan_ready',
         'goals':goals,'actions':actions,'omitted_native_feature_ids':omitted,'requires_explicit_confirmation':True,
         'existing_mates_deleted':[],'existing_mates_suppressed':[],'fixed_state_changes':[],
         'global_DOF':None,'native_compatibility_verified':False,'motion_verified':False,'write_dispatched':False}

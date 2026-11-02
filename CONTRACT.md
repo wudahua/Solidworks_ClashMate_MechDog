@@ -232,7 +232,7 @@ alpha.25：范围复核可返回assembly_group_recommendation，含assembly_inte
 外齿轮推荐复用完整原生survey的组件/配合/姿态作为恢复对照，跳过重复full inspect；预检失败或survey不完整仍保留原独立检查。求解后从采样到名称身份核验、总览和驱动读取共用局部CommandInProgress批处理；嵌套读取保留true，在finally恢复调用前原值，范围不跨Calculate、配合创建、原生保存或快照恢复。所有组件、逐帧姿态、持久身份解析及恢复检查继续执行，不跨请求缓存。总耗时包含进入和退出批处理，不以阶段耗时转移声称提速。
 # 通用基础连接任务
 
-`prepare_mechanism_task(task_kind="assembly_constraints")` 创建隔离副本并体检。`plan_mechanism_task.connection_intent` 是1至8项严格对象列表：`component_a`、`component_b` 为实例名称线索，`kind` 为 `rigid/revolute/prismatic`，可选 `axis_hint` 装配全局坐标系中的三维非零方向及 `candidate_id`。AI优先采用已有轴线证据；方向本身不能生成材料转轴。不能混用齿轮分组、圆边对齐或马达参数。
+`prepare_mechanism_task(task_kind="assembly_constraints")` 创建隔离副本并体检。`plan_mechanism_task.connection_intent` 是严格对象列表，默认声明范围1至8项；alpha.33整装配范围见下文：`component_a`、`component_b` 为实例名称线索，`kind` 为 `rigid/revolute/prismatic`，可选 `axis_hint` 装配全局坐标系中的三维非零方向及 `candidate_id`。AI优先采用已有轴线证据；方向本身不能生成材料转轴。不能混用齿轮分组、圆边对齐或马达参数。
 
 原生全约束观察与运动目标冲突时返回 `CONNECTION_GOAL_CONFLICT`，不是要求操作者改工具参数。只读不完整、未知几何、已有锁定配合的移动后端边界均保持可见，不等于无配合。新方案撤销旧令牌；确认仍不授权执行未列出的补充。
 
@@ -253,3 +253,17 @@ alpha.29旋转允许方向可使用自动选择的临时角度约束：两组件
 固定状态变更以`fixed_state_changes`逐项before=true/after=false列入具体方案。plan使用假设解除后的受支持模型做检查，但原生preview仍绑定原调查签名，尚未改变固定状态。execute先建立并验证原检查点，再仅解除名单、重建并独立核对全部固定标志、全组件初态、旧配合、健康和原生状态；移动目标仍全约束则回退，不自动删除、压缩旧配合或关闭锁转。只支持解除固定这一种受控修复。
 
 每项试验恢复成果检查点时保持已确认的结果固定状态；默认finish恢复导入检查点时恢复原始固定状态。`verification.fixed_state_changes_verified`表示成果状态的独立读回核对，`declared_group_bindings_checked_per_trial`为每项试验检查的声明组绑定数；它们都不等于全行程或整机构运动认证。当前泵样本仅验证两组刚性关系，轴仍固定，不据此宣称完整齿轮传动通过。
+
+## alpha.33 整装配组件核对与冻结批次
+
+prepare及只读plan的`assembly_overview`逐项登记完整组件、内部刚性与已观察关节、阵列依赖和未知约束。`accounting_complete`只表示没有遗漏已调查组件，不表示用途已理解、配合已补齐或运动已通过。相同地面固定标志不把互不相关零件合并为一个转子。AI先复用用户已确认的机械目标，必要时集中澄清未知用途。
+
+`completion_scope`仅供`assembly_constraints`，枚举`declared`（默认）和`whole_assembly`。默认保留alpha.32的展开上限。整装配模式每个刚性组可至128名成员、展开合计最多128项目标、512项新增配合；每个组件必须能追溯到具体目标或组绑定，否则在首次原生预演前拒绝，不静默视为静止。参数schema上限不代表默认范围也扩大。观察到的阵列成员仅在完整种子依赖位于同一明确组内时保留并验证，不单独解除固定或加约束。
+
+一次确认绑定全部批次的精确UTF-8载荷哈希及事务ID。每批至多8项目标、64项新增配合，后批签名通过专用原配合签名读取，不使用几何查询游标签名。后批启动前核对前批完整姿态、固定标志及配合参数；跳批、换事务或载荷变更均拒绝。最后一批结束前不运行有界验证。`batch_progress`显示进度，单批写入成功不代表整项任务成功。
+
+所有批次完成后才建立成果检查点并验证全部声明目标、组绑定、已有受支持连接及每次恢复。只有完整通过才能置`verification.whole_assembly_declared_targets_passed=true`。已知写入或验证失败恢复原始导入检查点，包含先前已提交批次；失败原码及整体恢复结论保留。原生状态未知时不重放写入或强行恢复。旧执行令牌不能复用。正常收尾、源文件未变和保留成果分别以实际回执为准，不能从验证通过推断退出或保存成功。
+
+整装配模式下，已明确要求刚性的成员若原生已全约束而受支持数学模型仍有缺口，可保留旧配合、不追加动作，并显式返回`preserved_native_full_constraint_observation=true`、`supported_target_fulfilment_certified=false`；仍须真实有界验证，不能借此放行要求转动或滑动的全约束组件。组内几何参考不足时，只能选同一确认组内已有原生连接邻居，不创建虚构几何，也不凭名称选择机械关系。
+
+首批仍限完整解析的顶层外部零件、单位尺度，普通刚性子装配是独立后续开发范围。未知配合、全局自由度、全行程、传动比波形、接触及力学结果均不由本功能认证。最终验收及发布状态以版本说明为准。
