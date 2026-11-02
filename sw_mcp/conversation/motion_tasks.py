@@ -1,5 +1,5 @@
 """Bounded rotary/linear dialogue workflow; geometry recommendations do not infer intent."""
-import hashlib,json,math,time,uuid
+import hashlib,json,math,time,uuid,re
 from pathlib import Path
 from .task_engine import TaskEngine,ConversationSession,core,matching_components,mechanical_choices
 from . import mate_motion,startup_gate,source_integrity,task_execution,task_progress
@@ -13,6 +13,7 @@ def prepare_limits():
         'assembly_constraints':{'maximum_top_level_components':128,'maximum_connection_goals':8,'maximum_added_mates':64,
             'maximum_total_component_nodes':128,'subassembly_scope':'resolved_external_native_rigid_only',
             'nested_component_edits_allowed':True,'internal_edit_scope':'one_unique_external_rigid_document_per_transaction',
+            'readonly_structure_maximum_components':500,'readonly_structure_page_size':16,'readonly_structure_does_not_authorize_writes':True,
             'internal_scope_parameter':'plan.assembly_scope_hint','automatic_recursive_completion':False,'internal_fixed_flags_use_parent_frame':True,
             'internal_fixed_flag_source':'owning_assembly_document_not_root_context_IsFixed',
             'whole_assembly_mode':{'maximum_expanded_goals':128,'maximum_total_added_mates':512,'maximum_goals_per_native_batch':8,'maximum_added_mates_per_native_batch':64,'complete_declared_component_coverage_required':True,'failure_restore_import_checkpoint':True},
@@ -416,7 +417,12 @@ class MotionTaskEngine(TaskEngine):
                     'instruction':'报告原生验证与曲线；恢复初始检查点并核对退出后再开始下一轮。'})
         return self._submit(t,'running',operation)
 
-    def get(self,task_id='',draft_cursor=''):
+    def get(self,task_id='',draft_cursor='',structure_cursor=''):
+        if structure_cursor:
+            if draft_cursor or not re.fullmatch('[a-f0-9]{32}',task_id):raise core.StopBatch('CONNECTION_INTENT_INVALID','结构分页需要有效task_id，且不混用草案游标。')
+            if task_id not in self.tasks:raise core.StopBatch('TASK_NOT_IN_CURRENT_SERVER')
+            from .constraint_inventory import page
+            return page(self.tasks[task_id],structure_cursor)
         value=super().get(task_id,draft_cursor)
         if draft_cursor:return value
         from . import assembly_sequence

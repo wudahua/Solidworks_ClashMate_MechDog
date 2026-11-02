@@ -8,6 +8,10 @@ from .. import assembly_connections as joints,connection_trials as trials,connec
 
 def discover(s):
     s.state('reviewing_constraints','正在只读核对配合健康、固定状态及局部运动线索…')
+    from . import constraint_inventory
+    preflight=getattr(s,'import_preflight',None) or {}
+    if constraint_inventory.blockers(preflight):
+        return constraint_inventory.discover(s,preflight)
     survey=s.call('_survey_assembly_connections',model_id=s.model)
     s.connection_survey=survey;s.initial_inspection=survey if survey.get('inventory_complete') else s.call('inspect_model',model_id=s.model,detail_level='full')
     core.write(s.folder/'通用配合原生调查.json',survey)
@@ -28,6 +32,10 @@ def publish_review(engine,t,value):
     t.update(model_id=s.model,phase='constraint_review_ready',connection_review=value['connection_review'],connection_draft=value['connection_draft'],assembly_overview=value.get('assembly_overview'),
         next_action={'tool':'plan_mechanism_task','arguments':{'task_id':t['task_id']},
             'instruction':'AI先解释原生配合故障、压缩项及局部连接线索。按用户已说明的机械目标，用connection_intent填写组件名称及rigid/revolute/prismatic；可自动采用唯一几何轴线，仅真实歧义才集中询问。不把局部秩当全机构自由度，不为消除浮动而锁死运动。若仅体检，可直接finish恢复收尾。'})
+
+    if value.get('constraint_structure'):
+        from .constraint_inventory import publish
+        publish(engine,t,value)
 
 
 def resolve(s,intents,maximum=8):
@@ -82,6 +90,12 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
     engine._require_session(t['task_id'])
     if t['phase'] not in {'constraint_review_ready','awaiting_confirmation'}:raise core.StopBatch('TASK_NOT_READY_FOR_PLAN')
     s=engine.sessions[t['task_id']]
+    if (t.get('connection_review') or {}).get('write_scope_allowed') is False:
+        if intents is None and rigid_groups is None and release_fixed_components is None and completion_scope=='declared' and not assembly_scope_hint:
+            return {'task_id':t['task_id'],'readonly_structure':True,'constraint_structure':t['constraint_structure'],
+                    'connection_review':t['connection_review'],'write_dispatched':False,'confirmation_token_created':False}
+        from .constraint_inventory import require_write_scope
+        require_write_scope(t)
     if assembly_scope_hint:
         from ..connection_layers import resolve as resolve_layer
         if getattr(s,'selected_assembly_layer',None):
@@ -173,6 +187,8 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
 
 
 def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
+    from .constraint_inventory import require_write_scope
+    require_write_scope(t)
     engine._require_session(t['task_id'])
     if confirmed is not True or scope_confirmed is not True:raise core.StopBatch('CONFIRMATION_REQUIRED','须确认补齐和有限位移验证的具体范围。')
     if alignment_confirmed is not False:raise core.StopBatch('CONNECTION_INTENT_INVALID','本流程保留初始装配姿态，不含重新对齐授权。')

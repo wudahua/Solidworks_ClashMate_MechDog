@@ -96,6 +96,9 @@ def after_prepare(engine, task, session):
         return
     value, index = _load(engine, task)
     step = value['steps'][index]
+    if (task.get('connection_review') or {}).get('write_scope_allowed') is False:
+        step['status']='readonly_blocked';value.update(status='blocked_readonly_layer',current_step=index)
+        _save(engine,value);engine.save(task);return
     if step['instance'] != ROOT_SCOPE:
         from .connection_task import select_scope
         select_scope(engine, task, _scope_row(session.assembly_layers, step))
@@ -112,6 +115,8 @@ def after_prepare(engine, task, session):
 
 
 def start(engine, task):
+    from .constraint_inventory import require_write_scope
+    require_write_scope(task)
     engine._require_session(task['task_id'])
     session = engine.sessions[task['task_id']]
     if (task['phase'] != 'constraint_review_ready' or task.get('assembly_sequence_id') or
