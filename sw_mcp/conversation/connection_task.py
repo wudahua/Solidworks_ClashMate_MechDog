@@ -16,11 +16,15 @@ def discover(s):
     draft=recommendations.draft(survey,review,binding=str(s.folder.parent.absolute()));s.connection_draft=draft
     core.write(s.folder/'装配连接自动草案.json',draft)
     overview=assembly_overview.recommend(survey,review);core.write(s.folder/'整装配组件推荐与遗漏检查.json',overview)
-    return {'connection_review':review,'connection_draft':draft,'assembly_overview':overview}
+    from ..connection_layers import catalog
+    layers=catalog(s.call('_survey_connection_layers',model_id=s.model))
+    s.assembly_layers=layers;core.write(s.folder/'分层装配检查清单.json',layers)
+    return {'connection_review':review,'connection_draft':draft,'assembly_overview':overview,'assembly_layers':layers}
 
 
 def publish_review(engine,t,value):
     s=engine.sessions[t['task_id']];source_integrity.bind(t,s)
+    t['assembly_layers']=value.get('assembly_layers')
     t.update(model_id=s.model,phase='constraint_review_ready',connection_review=value['connection_review'],connection_draft=value['connection_draft'],assembly_overview=value.get('assembly_overview'),
         next_action={'tool':'plan_mechanism_task','arguments':{'task_id':t['task_id']},
             'instruction':'AI先解释原生配合故障、压缩项及局部连接线索。按用户已说明的机械目标，用connection_intent填写组件名称及rigid/revolute/prismatic；可自动采用唯一几何轴线，仅真实歧义才集中询问。不把局部秩当全机构自由度，不为消除浮动而锁死运动。若仅体检，可直接finish恢复收尾。'})
@@ -52,15 +56,46 @@ def resolve(s,intents,maximum=8):
     return out,None
 
 
-def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,completion_scope='declared'):
+def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint=''):
     if completion_scope not in {'declared','whole_assembly'}:raise core.StopBatch('CONNECTION_INTENT_INVALID','completion_scope须为declared或whole_assembly。')
     whole=completion_scope=='whole_assembly'
     engine._require_session(t['task_id'])
     if t['phase'] not in {'constraint_review_ready','awaiting_confirmation'}:raise core.StopBatch('TASK_NOT_READY_FOR_PLAN')
     s=engine.sessions[t['task_id']]
+    if assembly_scope_hint:
+        from ..connection_layers import resolve as resolve_layer
+        if getattr(s,'selected_assembly_layer',None):
+            if assembly_scope_hint!=s.selected_assembly_layer['selected_instance']:
+                raise core.StopBatch('CONNECTION_SCOPE_UNSUPPORTED','当前内部事务范围已绑定；结束本任务后再检查其他装配层。')
+        else:
+            if intents is not None or rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared':
+                raise core.StopBatch('CONNECTION_INTENT_INVALID','先只传assembly_scope_hint选择范围并读取内部草案，再用内部组件名称形成方案；未静默忽略连接输入。')
+            try:row,question=resolve_layer(s.assembly_layers,assembly_scope_hint)
+            except ValueError as error:raise core.StopBatch('CONNECTION_SCOPE_UNSUPPORTED','装配层范围未通过校验。',{'reason':str(error),'write_dispatched':False}) from error
+            if question:return {'task_id':t['task_id'],**question}
+            if t['phase']=='awaiting_confirmation':
+                t.pop('plan_token',None);t.pop('proposal',None);t.update(phase='constraint_review_ready',plan_token_revoked=True);engine.save(t)
+            def select_operation():
+                s.root_connection_survey=s.connection_survey
+                core.write(s.folder/'根装配原始调查.json',s.connection_survey)
+                selected=s.call('_select_connection_layer',model_id=s.model,instance=row['instance'])
+                core.write(s.folder/'内部装配范围绑定.json',selected)
+                checkpoint=s.call('create_model_checkpoint',model_id=s.model)
+                # Commit checkpoint and comparison frame together, before geometry
+                # discovery can fail. Root and inner snapshots are never mixed.
+                selected_inspection=s.call('inspect_model',model_id=s.model,detail_level='full')
+                s.checkpoint=checkpoint['checkpoint_id'];s.initial_inspection=selected_inspection;s.import_restored=False
+                selected={**selected,'scope_import_checkpoint_id':s.checkpoint,'scope_checkpoint_includes_all_import_files':True}
+                s.selected_assembly_layer=selected;core.write(s.folder/'内部装配范围绑定.json',selected)
+                core.write(s.folder/'内部装配导入检查点.json',checkpoint)
+                t['selected_assembly_layer']=selected;engine.save(t)
+                publish_review(engine,t,discover(s))
+                t['next_action']['instruction']='当前检查范围为'+selected['selected_instance']+'的内部文档；AI使用本轮内部组件名称规划，此文档以外的层尚未补齐认证。'+t['next_action']['instruction']
+                engine.save(t)
+            return engine._submit(t,'selecting_assembly_layer',select_operation)
     if intents is None and rigid_groups is None and release_fixed_components is None:return {'task_id':t['task_id'],'needs_connection_intent':True,
         'connection_draft':getattr(s,'connection_draft',None) or recommendations.draft(s.connection_survey),
-        'connection_review':t['connection_review'],'assembly_overview':t.get('assembly_overview'),'write_dispatched':False,
+        'connection_review':t['connection_review'],'assembly_overview':t.get('assembly_overview'),'assembly_layers':t.get('assembly_layers'),'selected_assembly_layer':t.get('selected_assembly_layer'),'write_dispatched':False,
         'instruction':'AI读取connection_draft，用候选connection_intent及推荐依据形成整组方案；已有机械目标可直接选择，真正歧义集中询问。草案不是原生预演或执行授权，实际plan仍须传具体connection_intent。现有方案不因只读草案查询自动撤销。'}
     if t['phase']=='awaiting_confirmation':
         t['previous_plan_id']=(t.get('proposal') or {}).get('plan_id')
@@ -111,6 +146,7 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
         try:transaction=connection_batches.prepare(proposal)
         except ValueError as error:raise core.StopBatch('CONNECTION_SCOPE_UNSUPPORTED','整装配事务预算或完整性未通过，未部分提交。',{'reason':str(error),'write_dispatched':False}) from error
         core.write(s.folder/'整装配冻结批次.json',transaction)
+    proposal['selected_assembly_layer']=getattr(s,'selected_assembly_layer',None)
     core.write(s.folder/'通用连接补齐规划.json',proposal)
     if proposal['status']!='plan_ready':return {'task_id':t['task_id'],**proposal,
         'instruction':'仅当前已支持几何范围；AI解释缺失参考或轴线歧义，未部分提交配合。'}
@@ -193,6 +229,9 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
                     audit=trials.audit(evidence,bounds,i,trial,poses,expected_parents)
                 except (ValueError,KeyError,TypeError) as error:raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','试验变换或证据范围无效。',{'reason':str(error),'artifact':receipt}) from error
                 audits.append({**audit,'request_target_binding':binding,'artifact':receipt})
+                if getattr(s,'selected_assembly_layer',None):
+                    layer_audit=s.call('_verify_connection_layer',model_id=s.model)
+                    core.write(s.folder/('内部试验总装守卫-'+str(len(audits))+'.json'),layer_audit)
                 core.write(s.folder/'基础运动副有界验证.json',audits);passed=audit['passed']
         proof={'declared_scope_passed':passed,'method':'native_assembly_solver_small_pose_trials',
             'whole_assembly_declared_targets_passed':passed and t['proposal'].get('completion_scope')=='whole_assembly',
@@ -206,6 +245,11 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
             'completed_trials':len(audits),'trials':audits,'native_motion_study_solved':False,
             'global_DOF_certified':False,'whole_travel_certified':False,'contact_or_force_validated':False,
             'position_tolerance_m':trials.POSITION_TOLERANCE_M,'angle_tolerance_rad':trials.ANGLE_TOLERANCE_RAD}
+        if passed and getattr(s,'selected_assembly_layer',None):
+            guard=s.call('_verify_connection_layer',model_id=s.model,rebuild_root=True)
+            proof['assembly_layer_guard']=guard;proof['selected_assembly_layer']=s.selected_assembly_layer
+            s.capture_applied_result()
+            core.write(s.folder/'内部补齐总装守卫.json',guard)
         t['verification']=proof;core.write(s.folder/'通用配合验证结论.json',proof)
         if not passed:raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','补齐或有界运动验证未通过，停止后续试验；默认收尾恢复导入检查点。',proof)
         t.update(phase='verified',next_action={'tool':'finish_mechanism_task','arguments':{'task_id':t['task_id']},

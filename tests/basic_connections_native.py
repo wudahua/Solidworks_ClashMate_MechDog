@@ -15,10 +15,34 @@ from sw_mcp.conversation.host_scheduler import control
 from sw_mcp.conversation.process_identity import same_process
 
 
+
+def kept_source_admission(closed):
+    """Match the product's known-exit contract; never relabel a nonzero exit."""
+    f=closed['finish'];native=f['native_exit'];executor=f['executor_exit']
+    assert closed['closed'] and closed['verification']['declared_scope_passed']
+    assert f['restoration_status']=='not_requested_result_preserved' and f['next_round_allowed'] and f['source_files_unchanged']
+    assert native['native_process_exited'] and not native['force_kill']
+    assert executor['confirmed'] and executor['executor_exit_code']==0 and not executor['force_kill']
+    assert type(native.get('exit_code')) is int and type(executor.get('executor_exit_code')) is int
+    warning=native['exit_code']!=0
+    assert native.get('normal_zero_exit') is (not warning)
+    assert f['cleanup_status']==('warning_nonzero_native_exit' if warning else 'pass')
+    if warning:
+        session=Path(closed['directory'])/'session'
+        control=core.read(session/'exit-control.json');assert control['ok'] and control['result']['exit_requested']
+        events=[json.loads(line) for line in (session/'exit-control.stages.jsonl').read_text('utf-8-sig').splitlines() if line.strip()]
+        assert any(e['stage']=='closed_document_inventory' and e['evidence']['document_count']==0 for e in events)
+        assert any(e['stage']=='after_ExitApp_returned' for e in events)
+        assert native['helper_exit_code']==0
+    return {'allowed_by_known_closed_verified_copy_contract':True,'native_exit_warning':warning,
+            'native_exit_code':native['exit_code'],'normal_zero_exit_certified':not warning,
+            'nonzero_exit_cause':'not_proven' if warning else None,'force_termination':False}
+
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--cards',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True);parser.add_argument('--runtime-base',type=Path,required=True)
     parser.add_argument('--project-root',type=Path);parser.add_argument('--resume',action='store_true')
+    parser.add_argument('--expectation-correction',type=Path,help='Developer-only evidence-backed single card expectation correction; no production or write replay changes')
     parser.add_argument('--wait-seconds',type=int,default=3600,help='Developer observation window only; never a native retry or solver budget')
     args=parser.parse_args()
     if not 30<=args.wait_seconds<=14400:parser.error('--wait-seconds must be an integer from 30 to 14400')
@@ -39,14 +63,38 @@ def main():
     try:
         if args.resume:
             prior=core.read(folder/'result.json')
-            assert prior['source_manifest']==source_manifest() and prior['cards_sha256']==result['cards_sha256'] and prior['sources_before']==before,'Changed product/card/source; do not reuse old native conclusions.'
+            assert prior['source_manifest']==source_manifest(),'Changed production; cannot reuse native conclusions.'
+            if prior['cards_sha256']!=result['cards_sha256']:
+                assert args.expectation_correction,'Card changes require explicit native evidence; never silently resume.'
+                correction=core.read(args.expectation_correction)
+                assert correction['status']=='evidence_backed_expectation_correction'
+                assert correction['old_sha256']==prior['cards_sha256'] and correction['new_sha256']==result['cards_sha256']
+                old_cards=core.read(Path(correction['old_cards']));assert core.digest(Path(correction['old_cards']))==correction['old_sha256']
+                wanted=correction['only_change'];assert wanted=={'case':5,'field':'initial_internal_mates','before':11,'after':13}
+                expected=json.loads(json.dumps(old_cards));expected[4]['initial_internal_mates']=13;assert expected==cards
+                actual=Path(correction['actual_native_readback']);assert core.digest(actual)==correction['actual_native_readback_sha256']
+                assert len(core.read(actual)['mates'])==13
+                result['expectation_correction']=str(args.expectation_correction)
+            for path,hashes in prior['sources_before'].items():
+                assert core.fixture_hashes(Path(path))==hashes,'Actual source changed; cannot resume.'
+                if path in before:assert before[path]==hashes
+                before[path]=hashes
             backup=folder/('result-before-resume-'+str(time.time_ns())+'.json');core.write(backup,prior)
             result['resumed_evidence']=[];result['prior_result_record']=str(backup)
             for index,card in enumerate(cards):
                 closed_path=folder/f'{index+1}-closed.json'
                 if not closed_path.exists():break
                 closed=core.read(closed_path);finish=verified_finish(closed,card)
+                if card.get('source_from_kept_case'):
+                    previous=card['source_from_kept_case'];assert type(previous) is int and 1<=previous<=index
+                    kept=core.read(folder/f'{previous}-closed.json');kept_source_admission(kept)
+                    actual_source=kept['finish']['result_assembly_path'];binding=core.read(folder/f'{index+1}-kept-input-binding.json')
+                    assert binding['assembly']==actual_source and core.digest(Path(actual_source))==binding['sha256']==kept['finish']['result_assembly_sha256']
+                    card={**card,'assembly':actual_source}
                 assert closed['source']==card['assembly'] and closed['task_kind']=='assembly_constraints'
+                if card.get('assembly_scope_hint') and not card.get('expected_scope_code'):
+                    surveyed=core.read(Path(closed['directory'])/'session/通用配合原生调查.json')
+                    assert len(surveyed['mates'])==card['initial_internal_mates'] and len(surveyed['components'])==card['expected_scope_components']
                 if owner is None:owner=closed['server_instance_id']
                 assert closed['server_instance_id']==owner
                 case={'label':card['label'],'task_id':closed['task_id'],'finish':finish,'source_files_unchanged':True,'resumed_from_closed_receipts':True,'native_calls_repeated':0}
@@ -62,6 +110,14 @@ def main():
         assert len(client.rpc('tools/list',{})['tools'])==30
         assert client.tool('get_mechanism_task')['active_task'] is None,'Read and finish the existing task; never automatically prepare over it.'
         for index,card in enumerate(cards[start:],start):
+            if card.get('source_from_kept_case'):
+                previous=card['source_from_kept_case'];assert type(previous) is int and 1<=previous<=index
+                kept=core.read(folder/f'{previous}-closed.json');finish=kept['finish']
+                assert kept['closed'] and finish['restoration_status']=='not_requested_result_preserved'
+                source_admission=kept_source_admission(kept)
+                source=core.no_links(Path(finish['result_assembly_path']));assert core.digest(source)==finish['result_assembly_sha256']
+                before[str(source)]=core.fixture_hashes(source);card={**card,'assembly':str(source)}
+                core.write(folder/f'{index+1}-kept-input-binding.json',{'from_case':previous,'assembly':str(source),'sha256':core.digest(source),'source_admission':source_admission})
             print('CASE',index+1,card['label'],flush=True)
             tid=client.tool('prepare_mechanism_task',assembly_path=card['assembly'],task_kind='assembly_constraints')['task_id']
             state=client.wait(tid,args.wait_seconds);core.write(folder/f'{index+1}-prepared.json',state)
@@ -69,6 +125,21 @@ def main():
             overview=state.get('assembly_overview') or {}
             assert overview.get('accounting_complete') and overview['accounted_component_count']==overview['component_count']
             assert len({c['component_id'] for c in overview['components']})==overview['component_count']
+            if card.get('assembly_scope_hint'):
+                layers=state['assembly_layers'];assert layers['inventory_complete'] and not layers['all_layers_completed']
+                if card.get('expected_scope_code'):
+                    assert card.get('read_only') is True
+                    try:client.tool('plan_mechanism_task',task_id=tid,assembly_scope_hint=card['assembly_scope_hint']);raise AssertionError('scope refusal missing')
+                    except core.StopBatch as error:
+                        assert error.code==card['expected_scope_code'];core.write(folder/f'{index+1}-scope-refusal.json',error.diagnostics)
+                    state=client.tool('get_mechanism_task',task_id=tid);assert state['phase']=='constraint_review_ready' and not state.get('selected_assembly_layer')
+                else:
+                    client.tool('plan_mechanism_task',task_id=tid,assembly_scope_hint=card['assembly_scope_hint'])
+                    state=client.wait(tid,args.wait_seconds);core.write(folder/f'{index+1}-layer-selected.json',state)
+                    assert state['phase']=='constraint_review_ready' and state['selected_assembly_layer']['selected_instance']==card['assembly_scope_hint']
+                    layer_survey=core.read(Path(state['directory'])/'session/通用配合原生调查.json')
+                    assert len(layer_survey['components'])==card['expected_scope_components']
+                    assert len(layer_survey['mates'])==card.get('initial_internal_mates',0)
             if card.get('expected_hierarchy'):
                 from sw_mcp import assembly_hierarchy
                 surveyed=core.read(Path(state['directory'])/'session/通用配合原生调查.json')

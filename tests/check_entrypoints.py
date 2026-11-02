@@ -1,5 +1,9 @@
 """Check entry point classification; native CAD is always an explicit workflow."""
 ENTRIES = {
+  "LayeredConnectionGuardFixture": {"mode": "native_cad", "scope": "actual owned non-target fixed-flag disturbance, expected refusal and whole-copy restoration"},
+  "LayeredConnectionFixture": {"mode": "native_cad", "scope": "wrap only an already isolated registered assembly copy, no source edits"},
+  "layered_connection_fixture_native": {"mode": "native_cad", "scope": "explicit owned import and wrapper generation; source hashes and producer exit separate"},
+  "test_connection_layers": {"mode": "unittest", "caller": "test_connection_layers.py", "scope": "native layer admission, uniqueness, scoped intent and no implicit internal completeness; no CAD"},
   "test_assembly_hierarchy": {"mode": "unittest", "caller": "test_assembly_hierarchy.py", "scope": "verified rigid hierarchy, parent-relative fixed state and no implicit flexible conversion; no CAD"},
   "RigidAssemblyFixture": {"mode": "native_cad", "scope": "empty owned CAD only, external rigid subassembly with fixed and floating children; generated test truth"},
   "rigid_assembly_fixture_native": {"mode": "native_cad", "scope": "explicit new instance and developer-only hierarchy fixture; compile-only does not launch CAD"},
