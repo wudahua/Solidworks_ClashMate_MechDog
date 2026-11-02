@@ -12,12 +12,21 @@ class FormalEngine:
         from .owner_transport import fingerprint
         self.source_fingerprint=fingerprint()
         self.tasks=MotionTaskEngine(project,work,runtime)
+        self.tasks.continuation_gate=self.continuation_gate
         product._task_engine=self.tasks
         product._formal_engine=self
         self.server_instance_id=self.tasks.server_instance_id
         self.managed_upgrade_guard=False
         if self.tasks.prior_unfinished:
             product.bridge._acquire_lease();self.managed_upgrade_guard=True
+
+    def continuation_gate(self):
+        # Invoked only after sequence parameters and saved input bindings pass.
+        # Reacquire the same installation lease as ordinary prepare, before a
+        # new child task/native instance is created through plan(continue).
+        self.handoff_legacy()
+        self.product.bridge._acquire_lease()
+        self.managed_upgrade_guard=True
 
     @property
     def active(self):

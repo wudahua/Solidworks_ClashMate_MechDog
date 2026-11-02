@@ -56,6 +56,26 @@ def resolve(s,intents,maximum=8):
     return out,None
 
 
+def select_scope(engine,t,row):
+    s=engine.sessions[t['task_id']]
+    s.root_connection_survey=s.connection_survey
+    core.write(s.folder/'根装配原始调查.json',s.connection_survey)
+    selected=s.call('_select_connection_layer',model_id=s.model,instance=row['instance'])
+    core.write(s.folder/'内部装配范围绑定.json',selected)
+    checkpoint=s.call('create_model_checkpoint',model_id=s.model)
+    # Commit checkpoint and comparison frame together, before geometry
+    # discovery can fail. Root and inner snapshots are never mixed.
+    selected_inspection=s.call('inspect_model',model_id=s.model,detail_level='full')
+    s.checkpoint=checkpoint['checkpoint_id'];s.initial_inspection=selected_inspection;s.import_restored=False
+    selected={**selected,'scope_import_checkpoint_id':s.checkpoint,'scope_checkpoint_includes_all_import_files':True}
+    s.selected_assembly_layer=selected;core.write(s.folder/'内部装配范围绑定.json',selected)
+    core.write(s.folder/'内部装配导入检查点.json',checkpoint)
+    t['selected_assembly_layer']=selected;engine.save(t)
+    publish_review(engine,t,discover(s))
+    t['next_action']['instruction']='当前检查范围为'+selected['selected_instance']+'的内部文档；AI使用本轮内部组件名称规划，此文档以外的层尚未补齐认证。'+t['next_action']['instruction']
+    engine.save(t)
+
+
 def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint=''):
     if completion_scope not in {'declared','whole_assembly'}:raise core.StopBatch('CONNECTION_INTENT_INVALID','completion_scope须为declared或whole_assembly。')
     whole=completion_scope=='whole_assembly'
@@ -75,24 +95,7 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
             if question:return {'task_id':t['task_id'],**question}
             if t['phase']=='awaiting_confirmation':
                 t.pop('plan_token',None);t.pop('proposal',None);t.update(phase='constraint_review_ready',plan_token_revoked=True);engine.save(t)
-            def select_operation():
-                s.root_connection_survey=s.connection_survey
-                core.write(s.folder/'根装配原始调查.json',s.connection_survey)
-                selected=s.call('_select_connection_layer',model_id=s.model,instance=row['instance'])
-                core.write(s.folder/'内部装配范围绑定.json',selected)
-                checkpoint=s.call('create_model_checkpoint',model_id=s.model)
-                # Commit checkpoint and comparison frame together, before geometry
-                # discovery can fail. Root and inner snapshots are never mixed.
-                selected_inspection=s.call('inspect_model',model_id=s.model,detail_level='full')
-                s.checkpoint=checkpoint['checkpoint_id'];s.initial_inspection=selected_inspection;s.import_restored=False
-                selected={**selected,'scope_import_checkpoint_id':s.checkpoint,'scope_checkpoint_includes_all_import_files':True}
-                s.selected_assembly_layer=selected;core.write(s.folder/'内部装配范围绑定.json',selected)
-                core.write(s.folder/'内部装配导入检查点.json',checkpoint)
-                t['selected_assembly_layer']=selected;engine.save(t)
-                publish_review(engine,t,discover(s))
-                t['next_action']['instruction']='当前检查范围为'+selected['selected_instance']+'的内部文档；AI使用本轮内部组件名称规划，此文档以外的层尚未补齐认证。'+t['next_action']['instruction']
-                engine.save(t)
-            return engine._submit(t,'selecting_assembly_layer',select_operation)
+            return engine._submit(t,'selecting_assembly_layer',lambda:select_scope(engine,t,row))
     if intents is None and rigid_groups is None and release_fixed_components is None:return {'task_id':t['task_id'],'needs_connection_intent':True,
         'connection_draft':getattr(s,'connection_draft',None) or recommendations.draft(s.connection_survey),
         'connection_review':t['connection_review'],'assembly_overview':t.get('assembly_overview'),'assembly_layers':t.get('assembly_layers'),'selected_assembly_layer':t.get('selected_assembly_layer'),'write_dispatched':False,
