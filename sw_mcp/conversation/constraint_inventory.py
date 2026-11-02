@@ -40,7 +40,7 @@ def _page(snapshot,kind,offset,snapshot_id):
             'native_calls':False,'write_dispatched':False,'observation_scope':'frozen_prepare_snapshot_not_live_CAD_state'}
 
 
-def discover(session,preflight):
+def discover(session,preflight,reference_issue=None):
     expected=preflight.get('components')
     if type(expected) is not int or not 1<=expected<=MAX_COMPONENTS:
         raise core.StopBatch('CONNECTION_SCOPE_UNSUPPORTED','只读结构体检限500节点；写入仍限128节点。',
@@ -64,7 +64,9 @@ def discover(session,preflight):
                          'readonly_task_does_not_authorize_layer_selection':True} for r in native['layers']],
               'component_count':len(cs),'mate_count':len(inspection['mates']),
               'native_mate_health':inspection.get('mate_health'),'preflight_mate_health':preflight.get('mate_health'),
-              'write_scope_blockers':blockers(preflight),'geometry_survey_performed':False,
+              'write_scope_blockers':blockers(preflight)+([{'code':'EXISTING_MATE_REFERENCE_IDENTITY_UNAVAILABLE',
+                  'native_observation':reference_issue}] if reference_issue is not None else []),
+              'native_reference_identity_issue':reference_issue,'geometry_survey_performed':False,
               'source_files_unchanged':True,'configuration':inspection.get('configuration')}
     sid=_digest(snapshot,session.folder.parent.absolute());core.write(session.folder/SNAPSHOT,snapshot)
     core.write(session.folder/'只读结构完整原生检查.json',inspection)
@@ -75,6 +77,7 @@ def discover(session,preflight):
              'layer_count':len(snapshot['layers']),'component_inventory_captured':True,'geometry_survey_performed':False,
              'write_scope_allowed':False,'write_scope_blockers':snapshot['write_scope_blockers'],
              'native_mate_health':snapshot['native_mate_health'],'pages':pages,'pending_queries':queries,
+             'native_reference_identity_issue':reference_issue,
              'all_structure_pages_completed':False,'full_snapshot_path':str(session.folder/SNAPSHOT)}
     review={'status':'readonly_structure_review','mode':'readonly_structure','complete':False,
             'component_inventory_complete':True,'component_count':len(cs),'mate_count':len(inspection['mates']),
@@ -101,7 +104,7 @@ def publish(engine,task,value):
         'tool':'finish_mechanism_task','arguments':{'task_id':task['task_id']}}
     task['next_action']={**task['next_action'],'automatic_retry':False,
         'instruction':'当前只读体检已记录组件、原生配合健康和刚性/柔性层级；保留components与layers两队分页待办，末页不代表整模型完成。'
-        '几何缺项、全局自由度及配合充分性未认证，写入仍受128节点和原刚性边界限制。'
+        '几何缺项、全局自由度及配合充分性未认证，写入仍要求现有配合参考身份完整，且受128节点和原刚性边界限制。'
         'AI解释阻断后finish恢复；若另选独立子文档，先结束本任务再准备新副本，不自动改柔性、配置或原文件。'}
 
 

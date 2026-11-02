@@ -3,6 +3,7 @@ import json
 import uuid
 from . import core,source_integrity,task_execution
 from .task_engine import matching_components,mechanical_choices
+from ..bridge import CadError
 from .. import assembly_connections as joints,connection_trials as trials,connection_recommendations as recommendations,connection_groups,assembly_overview,connection_batches,assembly_hierarchy
 
 
@@ -12,7 +13,20 @@ def discover(s):
     preflight=getattr(s,'import_preflight',None) or {}
     if constraint_inventory.blockers(preflight):
         return constraint_inventory.discover(s,preflight)
-    survey=s.call('_survey_assembly_connections',model_id=s.model)
+    try:
+        survey=s.call('_survey_assembly_connections',model_id=s.model)
+    except (core.StopBatch,CadError) as error:
+        diagnostic=error.diagnostics if isinstance(error.diagnostics,dict) else {}
+        details=diagnostic.get('details') or {}
+        if (error.code!='CONNECTION_REFERENCE_INVALID' or getattr(s,'unknown',True)
+                or not isinstance(details,dict) or details.get('reason')!='native_mate_reference_identity_unavailable'
+                or details.get('write_dispatched') is not False or details.get('signature_complete') is not False):
+            raise
+        # The native signature reader stopped before candidate traversal or writes.
+        # Do not replace missing identity with a constant or certify it unchanged.
+        core.write(s.folder/'现有配合参考身份未认证.json',details)
+        s.state('reviewing_constraints','现有配合参考身份未认证，正在只读报告结构及原生健康；未跳过写入签名门禁。')
+        return constraint_inventory.discover(s,preflight,reference_issue=details)
     s.connection_survey=survey;s.initial_inspection=survey if survey.get('inventory_complete') else s.call('inspect_model',model_id=s.model,detail_level='full')
     core.write(s.folder/'通用配合原生调查.json',survey)
     review=joints.review(survey);core.write(s.folder/'通用配合体检.json',review)

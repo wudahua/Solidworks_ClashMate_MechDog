@@ -316,3 +316,12 @@ plan_mechanism_task 增加 assembly_sequence=start/continue/stop，不能混用�
 `COPY_REFERENCE_REDIRECT_FAILED`保持原错误码，details.reason区分`direct_dependency_outside_traversed_input_set`与`native_replace_returned_false`，并附引用双方路径。前一情况的`source_documents_opened=false`及`native_replace_dispatched=false`描述该失败边，不表示此前没有对其他已关闭副本成功重定向。外部建模引用不是被证明丢失的组件；不以删引用、猜路径或忽略隔离来放行。
 
 只读上限500节点、每页16行；触发条件为预检节点数超过128或原生柔性阻断。保持完整inspect_model结果作为恢复基线，不能用分页压缩字段替代。报告仅认证已捕获的组件／层级清单及当前根文档原生健康观察；子文档递归健康、几何缺项、全局自由度、完整运动均未认证。已有写入仍限128节点及原受支持范围。
+
+
+## alpha.38 未认证原生配合参考的只读转接
+
+`diagnostics.details.reason=native_mate_reference_identity_unavailable`说明本次写入身份不完整。details指向首次不可读的参考；完整只读检查另保留全部已观察的根文档未解析配合。`reference_object_available`区分参考对象不可读与对象可读但持久字节不可用；不把原生错误计数0解释为引用齐全或可安全写入。
+
+prepare返回`connection_review.mode=readonly_structure`、`write_scope_allowed=false`和`all_mates_sufficient=null`。原始参考诊断在`constraint_structure.native_reference_identity_issue`，同时进入写入阻断清单。组件／层级仍是冻结分页快照，结构完整不代表几何缺项、全局自由度、递归子文档健康或完整运动已认证。只读上限500、写入原128节点及唯一刚性文档边界保持。预演、范围选择、序列启动、执行和保留未经验证成果均拒绝；AI解释已有结果后finish恢复收尾。
+
+低层配合预演、检查点和其他调用仍要求完整身份，返回明确错误后由AI核对证据；没有普遍吞掉异常或自动改引用。相同错误码但其他reason、缺少明确未写入声明、未知原生状态和COM故障继续原失败流程，不进入只读转接。不可读取不是“已证明引用丢失”，没有自动删除、压缩、猜测替换或补冗余配合。
