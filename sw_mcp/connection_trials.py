@@ -114,7 +114,35 @@ def trials(goal,poses):
     return out
 
 
-def audit(evidence,bounds,selected,trial,expected_poses=None):
+def fixed_pose_checks(before,after,fixed_states,expected_parents,observed_parents):
+    if expected_parents is None:
+        if observed_parents is not None and (set(observed_parents)!=set(before) or any(v is not None for v in observed_parents.values())):
+            raise ValueError('verified_expected_parent_scope_required')
+        parents={cid:None for cid in before}
+    else:
+        if set(expected_parents)!=set(before) or observed_parents!=expected_parents:raise ValueError('trial_parent_scope_changed_or_missing')
+        parents=expected_parents
+    from .assembly_hierarchy import ancestors
+    if any(parent is not None and parent not in parents for parent in parents.values()):
+        raise ValueError('trial_parent_outside_inventory')
+    for cid in parents:
+        seen=set()
+        for parent in ancestors(cid,parents):
+            if parent in seen:raise ValueError('trial_parent_cycle')
+            seen.add(parent)
+    checks=[]
+    for cid,fixed in fixed_states.items():
+        if not fixed:continue
+        parent=parents[cid]
+        if parent is None:
+            q=g.quat(g.mm(g.transpose(rotation(before[cid])),rotation(after[cid])))
+            passed=math.dist(before[cid][9:12],after[cid][9:12])<=POSITION_TOLERANCE_M and 2*math.atan2(g.norm(q[1:]),abs(q[0]))<=ANGLE_TOLERANCE_RAD
+        else:passed=measure(bind({'component_a':cid,'component_b':parent,'kind':'rigid'},before),after)['passed']
+        checks.append({'component_id':cid,'reference_parent_id':parent,'passed':passed})
+    return {'passed':all(c['passed'] for c in checks),'checks':checks,'expected_parent_scope_verified':expected_parents is not None}
+
+
+def audit(evidence,bounds,selected,trial,expected_poses=None,expected_parents=None):
     before,after,restored=(evidence[k] for k in ('before','after','restored'))
     if set(before)!=set(after) or set(before)!=set(restored):raise ValueError('trial_component_scope_changed')
     if set(evidence['fixed_states'])!=set(before) or any(type(v) is not bool for v in evidence['fixed_states'].values()):raise ValueError('trial_fixed_state_scope_invalid')
@@ -123,7 +151,8 @@ def audit(evidence,bounds,selected,trial,expected_poses=None):
     def same(x,y):
         q=g.quat(g.mm(g.transpose(rotation(x)),rotation(y)))
         return math.dist(x[9:12],y[9:12])<=POSITION_TOLERANCE_M and 2*math.atan2(g.norm(q[1:]),abs(q[0]))<=ANGLE_TOLERANCE_RAD
-    fixed=all(same(before[k],after[k]) for k,v in evidence['fixed_states'].items() if v)
+    fixed_audit=fixed_pose_checks(before,after,evidence['fixed_states'],expected_parents,evidence.get('fixed_reference_parents'))
+    fixed=fixed_audit['passed']
     restore=all(same(before[k],restored[k]) for k in before)
     initial=expected_poses is None or set(expected_poses)==set(before) and all(same(expected_poses[k],before[k]) for k in before)
     checks=[measure(b,after) for b in bounds];current=checks[selected]
@@ -133,6 +162,6 @@ def audit(evidence,bounds,selected,trial,expected_poses=None):
     passed=initial and fixed and restore and allowed and all(c['passed'] for c in checks) and evidence.get('original_mates_parameters_unchanged') is True and evidence.get('restoration_status')=='restored'
     return dict(passed=passed,trial=trial['label'],allowed_travel_verified=allowed,
         travel_requirement_applicable=trial['allowed'],
-        fixed_poses_unchanged=fixed,all_poses_restored=restore,initial_pose_scope_matches=initial,connection_checks=checks,
+        fixed_poses_unchanged=fixed,fixed_pose_audit=fixed_audit,all_poses_restored=restore,initial_pose_scope_matches=initial,connection_checks=checks,
         actual_travel=travel,requested_travel=trial['requested'],requested_travel_unit='rad' if trial['angular'] else 'm',native_return_is_not_verification=True,
         global_DOF_certified=False,whole_travel_certified=False,native_motion_study_solved=False)

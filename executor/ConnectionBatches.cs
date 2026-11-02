@@ -11,7 +11,7 @@ public partial class Cad {
     class ConnectionBatchProgress {
         public ConnectionBatchScope Scope;public int Next;public bool Failed;
         public List<Dictionary<string,object>> Goals=new List<Dictionary<string,object>>();
-        public string Parameters;public int[] MateIds;public Dictionary<string,double[]> Poses;public Dictionary<string,bool> Fixed;
+        public ConnectionInternalWitness InternalWitness;public string Parameters;public int[] MateIds;public Dictionary<string,double[]> Poses;public Dictionary<string,bool> Fixed;
     }
     readonly Dictionary<string,ConnectionBatchProgress> connectionBatchProgress=new Dictionary<string,ConnectionBatchProgress>();
     public object ConnectionReferenceState(string id) {
@@ -54,7 +54,7 @@ public partial class Cad {
     }
     void BeginConnectionBatch(ConnectionPlan plan) {
         if(plan.Batch==null)return;ValidateConnectionBatch(plan.ModelId,plan.Batch);
-        if(!connectionBatchProgress.ContainsKey(plan.ModelId))connectionBatchProgress[plan.ModelId]=new ConnectionBatchProgress{Scope=plan.Batch,Poses=plan.Poses,Fixed=plan.Fixed,Parameters=plan.OriginalParameters,MateIds=plan.OriginalMateIds};
+        if(!connectionBatchProgress.ContainsKey(plan.ModelId))connectionBatchProgress[plan.ModelId]=new ConnectionBatchProgress{Scope=plan.Batch,Poses=plan.Poses,Fixed=plan.Fixed,Parameters=plan.OriginalParameters,MateIds=plan.OriginalMateIds,InternalWitness=plan.HierarchyWitness};
         connectionTrialGoals.Remove(plan.ModelId);
     }
     void RequireConnectionBatchBaseline(string modelId,IModelDoc2 doc) {
@@ -62,12 +62,12 @@ public partial class Cad {
         var current=Transforms(doc);var flags=UserComponents(doc).ToDictionary(c=>c.Name2,c=>c.IsFixed());
         if(p.Failed||p.Poses.Count!=current.Count||p.Poses.Any(v=>!current.ContainsKey(v.Key)||!PoseValidation.Matches(v.Value,current[v.Key]))||
             flags.Count!=p.Fixed.Count||flags.Any(v=>!p.Fixed.ContainsKey(v.Key)||p.Fixed[v.Key]!=v.Value)||EGAllMates(doc).Length!=p.MateIds.Length||
-            CompletionOriginalParameters(doc,p.MateIds)!=p.Parameters)throw new CadFault("CONNECTION_PLAN_STALE","前批已验证的姿态、配合或固定状态发生改变，未采用漂移状态继续。");
+            CompletionOriginalParameters(doc,p.MateIds)!=p.Parameters||!ConnectionInternalWitnessMatches(p.InternalWitness,ConnectionInternalAssemblyWitness(GetUserModel(modelId),doc)))throw new CadFault("CONNECTION_PLAN_STALE","前批已验证的姿态、配合或固定状态发生改变，未采用漂移状态继续。");
     }
     void CompleteConnectionBatch(ConnectionPlan plan,IModelDoc2 doc) {
         if(plan.Batch==null){connectionTrialGoals[plan.ModelId]=plan.Goals;return;}
         var p=connectionBatchProgress[plan.ModelId];p.Goals.AddRange(plan.Goals);p.Next++;
-        p.MateIds=EGAllMates(doc).Select(f=>f.GetID()).ToArray();p.Parameters=CompletionOriginalParameters(doc,p.MateIds);p.Fixed=plan.ExpectedFixed;
+        p.MateIds=EGAllMates(doc).Select(f=>f.GetID()).ToArray();p.Parameters=CompletionOriginalParameters(doc,p.MateIds);p.Fixed=plan.ExpectedFixed;p.InternalWitness=ConnectionInternalAssemblyWitness(GetUserModel(plan.ModelId),doc);
         if(p.Next==plan.Batch.Count) {
             if(p.Goals.Count!=plan.Batch.GoalCount)throw new CadFault("CONNECTION_CREATE_FAILED","整装配目标数量未闭合，未准入验证。");
             connectionTrialGoals[plan.ModelId]=p.Goals;

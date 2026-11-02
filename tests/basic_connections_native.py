@@ -69,6 +69,25 @@ def main():
             overview=state.get('assembly_overview') or {}
             assert overview.get('accounting_complete') and overview['accounted_component_count']==overview['component_count']
             assert len({c['component_id'] for c in overview['components']})==overview['component_count']
+            if card.get('expected_hierarchy'):
+                from sw_mcp import assembly_hierarchy
+                surveyed=core.read(Path(state['directory'])/'session/通用配合原生调查.json')
+                hierarchy=assembly_hierarchy.analyze(surveyed['components'],require_native=True)
+                expected=card['expected_hierarchy'];by_name={c['instance']:c for c in surveyed['components']}
+                assert len(by_name)==expected['components'] and len(hierarchy['subassemblies'])==expected['subassemblies']
+                assert hierarchy['supported_for_connection_writes'] and not hierarchy['flexible_subassemblies']
+                from sw_mcp.conversation.motion_tasks import pose_snapshot,require_same_poses
+                expected_components=[{**c,'transform':expected['initial_world_poses'][name]} for name,c in by_name.items()]
+                imported_truth=require_same_poses(pose_snapshot(expected_components),pose_snapshot(surveyed['components']),'rigid_fixture_imported_truth')
+                core.write(folder/f'{index+1}-initial-hierarchy-pose-truth.json',imported_truth)
+                parent=by_name[expected['parent_instance']]
+                assert parent['subassembly_solving']==0 and not parent['fixed_component'] and hierarchy['parents'][parent['component_id']] is None
+                for name,fixed in expected['children_fixed_flags'].items():
+                    child=by_name[name];assert child['parent_document_fixed_component'] is fixed
+                    assert child['fixed_flag_observation_scope']=='root_context_only' and child['fixed_component'] is False
+                    assert hierarchy['parents'][child['component_id']]==parent['component_id']
+                assert len(hierarchy['rigid_child_pairs'])==expected['bindings']
+                core.write(folder/f'{index+1}-hierarchy-observed.json',hierarchy)
             if owner is None:owner=state['server_instance_id']
             assert owner==state['server_instance_id']
             case={'label':card['label'],'task_id':tid,'prepared_record':str(folder/f'{index+1}-prepared.json')}
@@ -119,6 +138,26 @@ def main():
                 assert all(v['passed'] and v['all_poses_restored'] for v in proof['trials'])
                 assert proof['completed_trials']==card['expected_trials']
                 if card.get('completion_scope')=='whole_assembly':assert proof['whole_assembly_declared_targets_passed'] and proof['batch_count']==card['expected_batches']
+                if card.get('expected_hierarchy'):
+                    from sw_mcp import connection_trials
+                    assert proof['native_rigid_subassembly_binding_checks']==card['expected_hierarchy']['bindings']
+                    session=Path(verified['directory'])/'session'
+                    inspection=core.read(session/'成果检查点.json')['inspection']
+                    parents=assembly_hierarchy.analyze(inspection['components'],require_native=True)['parents']
+                    poses={c['component_id']:c['transform'] for c in inspection['components']};goals=verified['proposal']['goals']
+                    bounds=[connection_trials.bind(g,poses) for g in goals]+core.read(session/'已有连接运动保留绑定.json')
+                    replayed=[]
+                    for record in proof['trials']:
+                        artifact=record['artifact'];path=core.no_links(Path(artifact['artifact_path']));path.relative_to(args.runtime_base.resolve())
+                        assert core.digest(path)==artifact['sha256'];raw=core.read(path)
+                        assert raw['internal_subassembly_state_unchanged'] and raw['fixed_reference_parents']==parents
+                        goal_index=next(i for i,g in enumerate(goals) if g['component_a']==raw['component_id'])
+                        trial=next(v for v in connection_trials.trials(goals[goal_index],poses) if v['label']==record['trial'])
+                        request=connection_trials.require_target_binding(raw,trial['target'],json.dumps(trial['target']))
+                        audited=connection_trials.audit(raw,bounds,goal_index,trial,poses,parents)
+                        assert audited['passed'] and audited['fixed_pose_audit']['expected_parent_scope_verified']
+                        replayed.append({'artifact':artifact,'request':request,'audit':audited})
+                    core.write(folder/f'{index+1}-hierarchy-trials-independent.json',replayed)
                 case.update(verification=proof,added_mates=planned['proposal']['expected_added_mates'])
                 try:client.tool('execute_mechanism_task',task_id=tid,plan_token=planned['plan_token'],confirmed=True,scope_confirmed=True);raise AssertionError('execution replay accepted')
                 except core.StopBatch as error:assert error.code=='TASK_ALREADY_EXECUTED'

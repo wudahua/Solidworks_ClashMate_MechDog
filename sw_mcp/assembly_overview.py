@@ -3,7 +3,7 @@ import copy
 import hashlib
 import json
 from collections import Counter,defaultdict
-from . import constraint_graph as cg,assembly_connections as joints,assembly_constraints as ac
+from . import constraint_graph as cg,assembly_connections as joints,assembly_constraints as ac,assembly_hierarchy
 
 
 def recommend(survey,review=None):
@@ -11,6 +11,7 @@ def recommend(survey,review=None):
     if not survey.get('inventory_complete') or not 1<=len(cs)<=128 or any(not isinstance(x,str) or not x for x in ids) or len(set(ids))!=len(ids):
         return {'status':'inventory_review_required','component_count':len(cs),'accounting_complete':False,
                 'components':[],'write_dispatched':False,'mechanical_intent_proven':False,'omissions_treated_as_complete':False}
+    hierarchy=assembly_hierarchy.analyze(cs)
     graph=cg.model(survey);by=graph.by_id
     # Common world grounding must not turn unrelated fixed parts into a rotor.
     internal=copy.deepcopy(survey)
@@ -18,8 +19,10 @@ def recommend(survey,review=None):
     internal['mates']=[m for m in internal['mates'] if not any(e.get('reference_owner_scope')=='assembly_root' for e in m.get('entities',[]))]
     observed_groups=sorted(cg.model(internal).report()['rigid_groups'],key=lambda r:tuple(sorted(r['components'])));groups=[];membership={}
     for n,row in enumerate(observed_groups,1):
-        members=row['components'];anchor=min(members,key=lambda x:(not by[x].get('fixed_component'),-len(graph.adj[x]),by[x]['instance']))
+        members=row['components'];anchor=min(members,key=lambda x:(hierarchy['parents'][x] is not None,not by[x].get('fixed_component'),-len(graph.adj[x]),by[x]['instance']))
         group={'group_id':'observed-group-'+str(n),'members':members,'instances':[by[x]['instance'] for x in members],
+               'top_level_target_instances':[by[x]['instance'] for x in members if hierarchy['parents'][x] is None],
+               'native_descendant_instances_preserved':[by[x]['instance'] for x in members if hierarchy['parents'][x] is not None],
                'anchor_instance':by[anchor]['instance'],'evidence':'supported_internal_constraints_without_fixed_flags_or_root_equations',
                'proposed_action':'preserve_observed_internal_relation','mechanical_membership_confirmed':False,'motion_verified':False}
         groups.append(group)
@@ -55,6 +58,10 @@ def recommend(survey,review=None):
         else:
             category='clarification_required';reason='insufficient_supported_connection_evidence'
         record={'component_id':cid,'instance':c['instance'],'category':category,'reason':reason,
+                'parent_component_id':hierarchy['parents'][cid],
+                'connection_target_selectable':hierarchy['parents'][cid] is None and hierarchy['supported_for_connection_writes'],
+                'fixed_flag_reference_scope':'root_context_only' if hierarchy['parents'][cid] is not None else 'assembly_root',
+                'parent_document_fixed_component':hierarchy['parent_document_fixed_components'][cid],
                 'observed_rigid_group_id':group,'observed_joint_options':sorted({r['suggested_kind'] for r in joint_options}),
                 'native_fixed_flag':c.get('fixed_component'),'supported_ground_rank':graph.rank(cid),
                 'active_native_link_count':len(graph.links[cid]),'unknown_native_feature_ids':unknown[cid],
@@ -68,6 +75,7 @@ def recommend(survey,review=None):
             'accounted_component_count':len(ledger),'accounting_complete':len(ledger)==len(cs),'snapshot_sha256':fingerprint,
             'components':ledger,'category_counts':dict(Counter(r['category'] for r in ledger)),
             'observed_rigid_groups':groups,'observed_joint_recommendations':relationships,
+            'native_hierarchy':hierarchy,
             'mechanical_question_groups':[{'reason':reason,'components':rows,
                 'instruction':'AI先结合用户已说明的用途和现有证据归组；只有仍不明确的机械用途集中询问，不逐个询问，不默认全部静止。'} for reason,rows in sorted(questions.items())],
             'complete_pair_geometry_scan_claimed':False,'all_components_mechanically_assigned':False,
@@ -84,6 +92,8 @@ def coverage(survey,goals,group_bindings=()):
     for i,g in enumerate(group_bindings):
         for key in ('component_a','component_b'):links[g[key]].append({'source':'group_binding','index':i,'kind':'rigid'})
     if set(links)-set(by):raise ValueError('completion_target_outside_inventory')
+    hierarchy=assembly_hierarchy.analyze(survey['components']);covered,inherited=assembly_hierarchy.inherited_coverage(set(links),hierarchy)
+    for row in inherited:links[row['component_id']].append({'source':'native_rigid_hierarchy','kind':'rigid','declared_ancestor':row['declared_ancestor']})
     rows=[{'component_id':cid,'instance':c['instance'],'declared_target_coverage':bool(links[cid]),
            'targets':links[cid],'native_motion_verified':False} for cid,c in sorted(by.items())]
     return {'component_count':len(by),'accounted_component_count':len(rows),'accounting_complete':True,
