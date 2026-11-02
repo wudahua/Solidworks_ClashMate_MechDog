@@ -303,3 +303,16 @@ prepare及只读plan的`assembly_overview`逐项登记完整组件、内部刚�
 ## 分层连续任务（alpha.36）
 
 plan_mechanism_task 增加 assembly_sequence=start/continue/stop，不能混用单层目标参数。start从新总装体检启动，按子文档先于父文档、根文档最后的顺序安排最多32个内部文档。仅处理原有支持范围；不以浮动数判断缺项。每层仍有具体方案和一次性令牌，必须确认后执行；已确认的用途可复用，但新写入授权不由旧令牌继承。finish keep_result=True 核对并保存后，AI通过已关闭任务continue准备绑定成果的下一层，不重放先前写入。原生、执行器和源文件收据未通过时停止。get无CAD调用读取持久序列；客户端重连复用活owner，不从JSON重建COM。前层成果保留、当前层恢复和全局完成分开报告；只有所有受支持层完成才登记该范围，存在拒绝层或目标未覆盖全部组件时不登记all_layers_completed。原输入不改，不实现所有层一次原子回滚。
+
+
+## alpha.37 只读结构与配合写入分离
+
+`connection_review.mode=readonly_structure`、`write_scope_allowed=false`且`all_mates_sufficient=null`。空候选表示没有开展候选搜索，不表示没有缺配合；`complete=false`保留总体未认证结论。`constraint_structure`给出已冻结组件／层级、当前根文档配合健康、写入阻断及续查入口。原生完整检查可能读取现有配合引用；未进行候选面遍历，不声称完全没有几何读取。
+
+组件和层级每页16行，游标绑定任务和快照。跨任务、错集合、非法页边界、丢失或篡改快照明确拒绝，不访问COM重新生成。`all_structure_pages_completed`不通过单页置真。前端断开再连接保持同一正式宿主及冻结快照；AI累计两类清单的前页，并在检查完成后恢复收尾。不把分页结果用作完整恢复基线；恢复使用保存的全组件位姿、全部原配合及原文件检查点。
+
+同一只读任务的scope选择、几何目标、顺序启动和执行明确拒绝，未派发CAD写入。需要内部补齐时，先finish并单独准备受支持子文档；不自动修改柔性、共享实例、配置或固定状态。已有普通刚性小装配流程保持。没有新增工具、测试服务或用户配置。
+
+`COPY_REFERENCE_REDIRECT_FAILED`保持原错误码，details.reason区分`direct_dependency_outside_traversed_input_set`与`native_replace_returned_false`，并附引用双方路径。前一情况的`source_documents_opened=false`及`native_replace_dispatched=false`描述该失败边，不表示此前没有对其他已关闭副本成功重定向。外部建模引用不是被证明丢失的组件；不以删引用、猜路径或忽略隔离来放行。
+
+只读上限500节点、每页16行；触发条件为预检节点数超过128或原生柔性阻断。保持完整inspect_model结果作为恢复基线，不能用分页压缩字段替代。报告仅认证已捕获的组件／层级清单及当前根文档原生健康观察；子文档递归健康、几何缺项、全局自由度、完整运动均未认证。已有写入仍限128节点及原受支持范围。

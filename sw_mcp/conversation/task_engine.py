@@ -240,6 +240,7 @@ class TaskEngine:
             if task_id not in self.tasks:raise core.StopBatch('TASK_NOT_IN_CURRENT_SERVER')
             record=self.tasks[task_id]
             if record.get('task_kind')!='assembly_constraints':raise core.StopBatch('CONNECTION_SCOPE_UNSUPPORTED','当前任务没有通用配合草案。')
+            if (record.get('connection_review') or {}).get('write_scope_allowed') is False:raise core.StopBatch('CONNECTION_SCOPE_UNSUPPORTED','只读结构模式没有几何草案游标；请使用constraint_structure的structure_cursor。')
             try:
                 snapshot=core.no_links(Path(record['directory'])/'session/通用配合原生调查.json')
                 snapshot.relative_to(core.no_links(self.work))
