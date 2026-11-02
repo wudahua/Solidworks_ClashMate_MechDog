@@ -206,7 +206,7 @@ class MotionTaskEngine(TaskEngine):
         super().__init__(project,work,runtime_base,session_factory)
 
     def prepare(self,path,moving='',reference='',task_kind='motion',motion='rotary',speed=12,
-                duration_s=1,output_fps=30,reverse_direction=False,minimum_travel=0):
+                duration_s=1,output_fps=30,reverse_direction=False,minimum_travel=0,_sequence_binding=None):
         assembly,settings=prepare_inputs(path,task_kind,motion,speed,duration_s,output_fps,reverse_direction,minimum_travel)
         validate_gear_hints(task_kind,moving,reference)
         with self.lock:
@@ -219,6 +219,9 @@ class MotionTaskEngine(TaskEngine):
                 task_kind=task_kind,motion_parameters=settings,moving_component_hint=moving,reference_component_hint=reference,
                 phase='created',busy=False,closed=False,confirmation_required=True,automatic_write_retry=False,
                 server_pid=__import__('os').getpid(),server_instance_id=self.server_instance_id)
+            if _sequence_binding is not None:
+                from .assembly_sequence import bind_new
+                bind_new(self,t,_sequence_binding)
             self.tasks[tid]=t;self.active=tid
         def operation():
             def stage(status,message):
@@ -232,7 +235,9 @@ class MotionTaskEngine(TaskEngine):
     def _proposals(self,t,value):
         if t.get('task_kind')=='assembly_constraints':
             from .connection_task import publish_review
-            return publish_review(self,t,value)
+            publish_review(self,t,value)
+            from .assembly_sequence import after_prepare
+            return after_prepare(self,t,self.sessions[t['task_id']])
         if t.get('task_kind')=='external_gear_pair':
             from .external_gears import public_card
             source_integrity.bind(t,self.sessions[t['task_id']]);suggestion=value['external_gear_pair']
@@ -268,14 +273,19 @@ class MotionTaskEngine(TaskEngine):
         t.pop('component_selection',None)
 
     def plan(self,task_id,candidate_id='',moving_component_hint='',reference_component_hint='',initial_state='saved',alignment_mode='strict',
-             gear_ratio_numerator=0,gear_ratio_denominator=0,input_shaft_hint='',output_shaft_hint='',input_gear_hint='',output_gear_hint='',stationary_component_hints=None,assembly_intent=None,connection_intent=None,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint=''):
+             gear_ratio_numerator=0,gear_ratio_denominator=0,input_shaft_hint='',output_shaft_hint='',input_gear_hint='',output_gear_hint='',stationary_component_hints=None,assembly_intent=None,connection_intent=None,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint='',assembly_sequence=''):
         t=self.tasks[task_id]
         if t.get('task_kind')=='assembly_constraints':
             if candidate_id or moving_component_hint or reference_component_hint or initial_state!='saved' or alignment_mode!='strict' or assembly_intent is not None or stationary_component_hints is not None or gear_ratio_numerator or gear_ratio_denominator or input_shaft_hint or output_shaft_hint or input_gear_hint or output_gear_hint:
                 raise core.StopBatch('CONNECTION_INTENT_INVALID','通用连接目标使用connection_intent，不混用齿轮分组、运动初态或圆边对齐参数。')
+            if assembly_sequence:
+                if connection_intent is not None or rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared' or assembly_scope_hint:
+                    raise core.StopBatch('CONNECTION_INTENT_INVALID','分层序列操作不混用单层目标或范围，未忽略任何参数。')
+                from .assembly_sequence import dispatch
+                return dispatch(self,t,assembly_sequence)
             from .connection_task import propose
             return propose(self,t,connection_intent,rigid_groups,release_fixed_components,completion_scope,assembly_scope_hint)
-        if connection_intent is not None or rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared' or assembly_scope_hint:raise core.StopBatch('CONNECTION_INTENT_INVALID','通用连接及completion_scope参数仅用于assembly_constraints，不静默忽略。')
+        if connection_intent is not None or rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared' or assembly_scope_hint or assembly_sequence:raise core.StopBatch('CONNECTION_INTENT_INVALID','通用连接及completion_scope参数仅用于assembly_constraints，不静默忽略。')
         if t.get('task_kind')=='external_gear_pair':
             from .external_gear_task import propose
             return propose(self,t,candidate_id,initial_state,alignment_mode,moving_component_hint,reference_component_hint,
@@ -405,6 +415,27 @@ class MotionTaskEngine(TaskEngine):
                 next_action={'tool':'finish_mechanism_task','arguments':{'task_id':task_id},
                     'instruction':'报告原生验证与曲线；恢复初始检查点并核对退出后再开始下一轮。'})
         return self._submit(t,'running',operation)
+
+    def get(self,task_id='',draft_cursor=''):
+        value=super().get(task_id,draft_cursor)
+        if draft_cursor:return value
+        from . import assembly_sequence
+        if task_id and self.tasks[task_id].get('assembly_sequence_id'):
+            value['assembly_sequence']=assembly_sequence.view(self,self.tasks[task_id])
+        elif not task_id:
+            # One canonical record per sequence; no CAD access or dispatch.
+            seen=set();values=[]
+            for t in self.tasks.values():
+                sid=t.get('assembly_sequence_id')
+                if sid and sid not in seen:
+                    seen.add(sid);values.append(assembly_sequence.view(self,t))
+            value['assembly_sequences']=values
+        return value
+
+    def _settle_closed(self,t,finish,integrity):
+        super()._settle_closed(t,finish,integrity)
+        from .assembly_sequence import closed
+        closed(self,t)
 
     def finish(self,task_id,close_unrestored=False,keep_result=False):
         if keep_result and close_unrestored:raise core.StopBatch('INCOMPATIBLE_FINISH_CHOICES')
