@@ -159,6 +159,48 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(value['connection_review']['mode'],'readonly_structure')
         self.assertNotIn('_survey_assembly_connections',[c.args[0] for c in self.s.call.call_args_list])
 
+    def test_unavailable_existing_identity_reports_readonly_health_without_write_permission(self):
+        from sw_mcp.conversation import connection_task
+        from sw_mcp.bridge import CadError
+        details={'reason':'native_mate_reference_identity_unavailable','mate_name':'重合3',
+                 'native_feature_id':30,'reference_index':1,'write_dispatched':False,'signature_complete':False}
+        self.s.import_preflight={'components':2};self.s.unknown=False;self.s.state=Mock()
+        native=layers(0);self.s.call.side_effect=[CadError('CONNECTION_REFERENCE_INVALID','native refusal',diagnostics={'details':details}),inspection(2),native]
+        value=connection_task.discover(self.s)
+        self.assertEqual(value['constraint_structure']['native_reference_identity_issue'],details)
+        self.assertEqual(value['connection_review']['write_scope_blockers'][0]['code'],'EXISTING_MATE_REFERENCE_IDENTITY_UNAVAILABLE')
+        self.assertFalse(value['connection_review']['write_scope_allowed'])
+        self.assertIsNone(value['connection_review']['all_mates_sufficient'])
+        self.assertEqual(self.s.call.call_count,3)
+
+    def test_unknown_state_and_other_reference_failures_never_fall_back_to_inventory(self):
+        from sw_mcp.conversation import connection_task
+        good={'reason':'native_mate_reference_identity_unavailable','write_dispatched':False,'signature_complete':False}
+        for code,unknown,details in [('CONNECTION_REFERENCE_INVALID',True,good),
+                ('COM_CALL_FAILED',False,good),('CONNECTION_REFERENCE_INVALID',False,{'reason':'another_refusal'}),
+                ('CONNECTION_REFERENCE_INVALID',False,{**good,'write_dispatched':True}),
+                ('CONNECTION_REFERENCE_INVALID',False,{**good,'signature_complete':True})]:
+            self.s.import_preflight={'components':2};self.s.unknown=unknown;self.s.state=Mock();self.s.call.reset_mock()
+            self.s.call.side_effect=core.StopBatch(code,diagnostics={'details':details})
+            with self.subTest(code=code,unknown=unknown,details=details),self.assertRaises(core.StopBatch):connection_task.discover(self.s)
+            self.assertEqual(self.s.call.call_count,1)
+
+    def test_unresolved_native_health_survives_readonly_identity_refusal(self):
+        self.pre={'components':2};self.original=inspection(2)
+        self.original['mate_health']={'error_count':0,'geometry_unresolved_mate_count':3,'unresolved_mates':[{'name':'重合3'}]}
+        self.s.call.side_effect=[self.original,layers(0)]
+        value=inv.discover(self.s,self.pre,reference_issue={'reason':'native_mate_reference_identity_unavailable'})
+        self.assertEqual(value['connection_review']['native_mate_health']['geometry_unresolved_mate_count'],3)
+        self.assertIsNone(value['connection_review']['all_mates_sufficient'])
+
+    def test_malformed_reference_diagnostics_do_not_hide_original_failure(self):
+        from sw_mcp.conversation import connection_task
+        for diagnostic in (None,'bad',{'details':'bad'}):
+            self.s.import_preflight={'components':2};self.s.unknown=False;self.s.state=Mock();self.s.call.reset_mock()
+            error=core.StopBatch('CONNECTION_REFERENCE_INVALID',diagnostics=diagnostic);self.s.call.side_effect=error
+            with self.subTest(diagnostic=diagnostic),self.assertRaises(core.StopBatch) as caught:connection_task.discover(self.s)
+            self.assertIs(caught.exception,error);self.assertEqual(self.s.call.call_count,1)
+
     def test_task_publication_retains_readonly_next_action_and_false_write_permission(self):
         from sw_mcp.conversation.motion_tasks import MotionTaskEngine
         value=inv.discover(self.s,self.pre);engine=SimpleNamespace(sessions={self.t['task_id']:self.s})
