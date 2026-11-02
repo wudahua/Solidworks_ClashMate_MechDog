@@ -46,7 +46,7 @@ class SchedulingTests(unittest.TestCase):
 class WorkflowTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
-        self.root = pathlib.Path(self.temp.name)
+        self.root = core.no_links(pathlib.Path(self.temp.name))  # TEMP may use an 8.3 alias on Windows CI.
         self.source = self.root / 'source.SLDASM'; self.source.write_bytes(b'original')
         self.copy_root = self.root / 'rt/experiments/user_assemblies' / ('b' * 32) / 'files'
         self.copy_root.mkdir(parents=True)
@@ -116,6 +116,14 @@ class WorkflowTests(unittest.TestCase):
         value, _ = seq._load(self.engine, self.task)
         self.assertEqual(value['status'], 'ready_to_continue')
         self.assertEqual(set(value['steps'][0]['result_inputs']), {str(self.result), str(self.part)})
+        # Importers may observe either Windows path spelling; both must bind
+        # to the canonical copied inventory used by ordinary prepare.
+        raw=pathlib.Path(self.temp.name)/'rt/experiments/user_assemblies'/('b'*32)/'files'
+        core.write(self.copy_root.parent/'import-evidence.json',{'copy_paths':[str(raw/'root.SLDASM'),str(raw/'part.SLDPRT')]})
+        canonical,inputs=seq._result_inputs(self.task)
+        self.assertEqual(canonical,self.result)
+        self.assertEqual(set(inputs),{str(self.result),str(self.part)})
+        if pathlib.Path(self.temp.name)!=self.root:print('ASSEMBLY_SEQUENCE_DISTINCT_TEMP_ALIAS_CANONICALIZED')
         self.assertEqual(self.task['next_action']['arguments']['assembly_sequence'], 'continue')
         seq.advance(self.engine, self.task)
         self.engine.continuation_gate.assert_called_once()

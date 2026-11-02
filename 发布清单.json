@@ -18,8 +18,8 @@
     },
     {
       "path": "发布说明_v0.4.3-alpha.36.md",
-      "bytes": 3996,
-      "sha256": "77eda5e35b12935947e376c534b609489291eaf0898218971e1ff281afd09461"
+      "bytes": 4374,
+      "sha256": "c1bb5782df3563b6bddb76f1a1ffe882e7bf13dfb59fa23cd3ea49df102e4030"
     },
     {
       "path": "LICENSE",
@@ -168,8 +168,8 @@
     },
     {
       "path": "tests/test_assembly_sequence.py",
-      "bytes": 15600,
-      "sha256": "e8badf372327e6e656cbad2255f38b3d56a4293a63893a58170b9e4220d2dc47"
+      "bytes": 16312,
+      "sha256": "af5e10a7565d72b20c60fd6e0f3ee8d5ceb7c759dc8561e84da4481d40634dfe"
     },
     {
       "path": "tests/test_assembly_hierarchy.py",
