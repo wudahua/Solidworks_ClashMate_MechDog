@@ -235,13 +235,13 @@ class ConnectionContractTests(unittest.TestCase):
         engine=SimpleNamespace(tasks={'a'*32:{}},plan=Mock(return_value={'accepted':True}))
         with patch.object(server,'_task_engine',engine):
             result=asyncio.run(server.mcp.call_tool('plan_mechanism_task',{'task_id':'a'*32}))
-        self.assertFalse(result.is_error,result);self.assertIsNone(engine.plan.call_args.args[-3])
+        self.assertFalse(result.is_error,result);self.assertIsNone(engine.plan.call_args.args[-4])
         engine.plan.reset_mock()
         with patch.object(server,'_task_engine',engine):
             result=asyncio.run(server.mcp.call_tool('plan_mechanism_task',{'task_id':'a'*32,'connection_intent':[
                 dict(component_a='滑块2-1',component_b='导轨-1',kind='prismatic')]}))
         self.assertFalse(result.is_error,result)
-        self.assertEqual(engine.plan.call_args.args[-3][0]['component_a'],'滑块2-1')
+        self.assertEqual(engine.plan.call_args.args[-4][0]['component_a'],'滑块2-1')
 
 
 class DeveloperAcceptanceWaitTests(unittest.TestCase):
@@ -258,9 +258,9 @@ class DeveloperAcceptanceWaitTests(unittest.TestCase):
             capture_output=True,text=True,encoding='utf8',timeout=30)
 
     def test_out_of_range_observation_wait_is_refused_before_files_or_cad(self):
-        for value in ('0','29','7201'):
+        for value in ('0','29','14401'):
             result=self.invoke(value);self.assertEqual(result.returncode,2)
-            self.assertIn('--wait-seconds must be an integer from 30 to 7200',result.stderr)
+            self.assertIn('--wait-seconds must be an integer from 30 to 14400',result.stderr)
             self.assertFalse((self.folder/'out').exists());self.assertFalse((self.folder/'runtime').exists())
 
     def test_noninteger_observation_wait_is_not_coerced(self):

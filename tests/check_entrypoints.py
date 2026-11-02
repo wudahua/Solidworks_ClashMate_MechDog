@@ -1,5 +1,7 @@
 """Check entry point classification; native CAD is always an explicit workflow."""
 ENTRIES = {
+  "test_assembly_overview": {"mode": "unittest", "caller": "test_assembly_overview.py", "scope": "complete component accounting, internal evidence and no implicit stationary ownership; no CAD"},
+  "test_connection_batches": {"mode": "unittest", "caller": "test_connection_batches.py", "scope": "whole-plan exact payload manifests, serial batch scope and import rollback boundaries; no CAD"},
   "test_connection_groups": {"mode": "unittest", "caller": "test_connection_groups.py", "scope": "declared group expansion, fixed-release scope, whole-plan mobility conflicts and closed public routing; no CAD"},
   "test_constraint_graph": {"mode": "unittest", "caller": "test_constraint_graph.py", "scope": "indirect constraint projection, root grounding, rigid floating groups, unknown and pattern boundaries; no CAD"},
   "test_connection_target_binding": {"mode": "unittest", "caller": "test_connection_target_binding.py", "scope": "exact request SHA256, strict binary64 round-trip limits, real .NET serializer and unchanged physical refusal"},

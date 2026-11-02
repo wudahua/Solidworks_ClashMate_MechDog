@@ -108,8 +108,8 @@ class GroupProtocolTests(unittest.TestCase):
         engine=SimpleNamespace(tasks={'a'*32:{}},plan=Mock(return_value={'accepted':True}))
         with patch.object(server,'_task_engine',engine):
             result=asyncio.run(server.mcp.call_tool('plan_mechanism_task',{'task_id':'a'*32,'rigid_groups':[{'name':'转子','members':['轴-1','键-1']}],'release_fixed_components':['键-1']}))
-        self.assertFalse(result.is_error,result);self.assertEqual(engine.plan.call_args.args[-2][0]['members'],['轴-1','键-1'])
-        self.assertEqual(engine.plan.call_args.args[-1],['键-1']);self.assertEqual(len(asyncio.run(server.mcp.list_tools())),30)
+        self.assertFalse(result.is_error,result);self.assertEqual(engine.plan.call_args.args[-3][0]['members'],['轴-1','键-1'])
+        self.assertEqual(engine.plan.call_args.args[-2],['键-1']);self.assertEqual(engine.plan.call_args.args[-1],'declared');self.assertEqual(len(asyncio.run(server.mcp.list_tools())),30)
 
     def test_closed_nested_group_schema_rejects_unknown_fields_before_engine(self):
         import motion_server as server

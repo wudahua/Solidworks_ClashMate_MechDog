@@ -6,9 +6,10 @@ using System.Threading;
 using SolidWorks.Interop.sldworks;
 
 public partial class Cad {
-    public object BuildBasicConnectionFixture(bool multiple=false,bool fixedMoving=false) {
+    public object BuildBasicConnectionFixture(bool multiple=false,bool fixedMoving=false,int explicitComponentCount=0) {
         if((Sw.GetDocuments() as object[]??new object[0]).Length!=0)throw new Exception("FIXTURE_REQUIRES_EMPTY_OWNED_CAD");
-        string folder=Path.Combine(Root,"fixtures",fixedMoving?"basic_fixed_joint":multiple?"multi_joint":"basic_joint");
+        if(explicitComponentCount!=0&&(explicitComponentCount<2||explicitComponentCount>16))throw new Exception("FIXTURE_COMPONENT_BUDGET");
+        string folder=Path.Combine(Root,"fixtures",explicitComponentCount>0?"basic_batch_joint":fixedMoving?"basic_fixed_joint":multiple?"multi_joint":"basic_joint");
         if(Directory.Exists(folder))throw new Exception("FIXTURE_ALREADY_EXISTS");Directory.CreateDirectory(folder);
         foreach(string name in new[]{"base","moving"}) {
             var doc=New("part");var body=((IModeler)Sw.GetModeler()).CreateBodyFromCyl(new[]{0.0,0,0,0,0,1,.01,.02});
@@ -16,7 +17,8 @@ public partial class Cad {
             Save(doc,Path.Combine(folder,name+".SLDPRT"));Sw.CloseDoc(doc.GetTitle());
         }
         var asm=New("assembly");var ad=(IAssemblyDoc)asm;
-        int placement=0;foreach(string name in multiple?new[]{"base","moving","moving","moving","moving","moving"}:new[]{"base","moving"}) {
+        var instances=explicitComponentCount>0?Enumerable.Range(0,explicitComponentCount).Select(i=>i==0?"base":"moving").ToArray():multiple?new[]{"base","moving","moving","moving","moving","moving"}:new[]{"base","moving"};
+        int placement=0;foreach(string name in instances) {
             string path=Path.Combine(folder,name+".SLDPRT");int error=0,warning=0;
             Sw.OpenDoc6(path,1,1,"",ref error,ref warning);Sw.ActivateDoc3(asm.GetTitle(),false,0,ref error);
             var component=ad.AddComponent5(path,0,"",false,"",0,0,0) as IComponent2;
@@ -28,7 +30,7 @@ public partial class Cad {
         }
         if(!asm.EditRebuild3()||BasicMateFeatures(asm).Length!=0)throw new Exception("FIXTURE_INITIAL_STATE_FAILED");
         string assembly=Path.Combine(folder,"basic_joint.SLDASM");Save(asm,assembly);
-        var receipt=new{assembly=assembly,components=multiple?6:2,initial_mates=0,base_fixed=true,moving_floating=!fixedMoving,moving_initially_fixed=fixedMoving,
+        var receipt=new{assembly=assembly,components=instances.Length,initial_mates=0,base_fixed=true,moving_floating=!fixedMoving,moving_initially_fixed=fixedMoving,
             initial_relative_rotation="identity",initial_axis="global_Z",initial_axial_offset_m=.05,
             geometry="two_native_cylinders_with_default_datum_planes",source="generated_test_truth_not_user_design_intent",contact_validated=false};
         Sw.CloseAllDocuments(true);if((Sw.GetDocuments() as object[]??new object[0]).Length!=0)throw new Exception("FIXTURE_DOCUMENT_CLOSE_UNCONFIRMED");
@@ -42,7 +44,7 @@ class BasicConnectionFixtureControl {
         try {using(var gate=new Mutex(false,"Local\\SolidWorksClashMate_MechDog_Executor")) {
             if(!gate.WaitOne(0))throw new Exception("EXECUTOR_ALREADY_RUNNING");
             try {var cad=new Cad(args[0]);if(cad.Sw.GetProcessID()!=int.Parse(args[1]))throw new Exception("OWNED_PID_MISMATCH");
-                File.WriteAllText(args[2],Cad.Json.Serialize(cad.BuildBasicConnectionFixture(args.Length>3&&args[3]=="multi",args.Length>3&&args[3]=="fixed")));return 0;
+                File.WriteAllText(args[2],Cad.Json.Serialize(cad.BuildBasicConnectionFixture(args.Length>3&&args[3]=="multi",args.Length>3&&args[3]=="fixed",args.Length>3&&args[3]=="batch"?10:0)));return 0;
             }finally{gate.ReleaseMutex();}}
         }catch(Exception error){Console.Error.WriteLine(error.ToString());return 1;}
     }

@@ -13,6 +13,8 @@ public partial class Cad {
         public string Id,ModelId,Signature,OriginalParameters;public int Revision;
         public bool Consumed;public List<Dictionary<string,object>> Actions,Goals,FixedChanges;
         public Dictionary<string,double[]> Poses;public Dictionary<string,bool> Fixed,ExpectedFixed;
+        public ConnectionBatchScope Batch;
+        public int[] OriginalMateIds;
     }
     readonly Dictionary<string,ConnectionPlan> connectionPlans=new Dictionary<string,ConnectionPlan>();
     readonly HashSet<string> connectionModelScopes=new HashSet<string>();
@@ -112,15 +114,18 @@ public partial class Cad {
         ConnectionReference(doc,cb,(string)a["reference_b"],(string)a["reference_kind_b"]);
     }
     public object PreviewAssemblyConnections(string id,string proposalJson) {
-        var m=GetUserModel(id);var data=Json.Deserialize<Dictionary<string,object>>(proposalJson);
+        var m=GetUserModel(id);var outer=Json.Deserialize<Dictionary<string,object>>(proposalJson);Dictionary<string,object> data;
+        var batchScope=ReadConnectionBatch(id,outer,out data);
         using(var scope=new Scope(this,m.Path,null))using(var batch=new NativeCommandBatch(()=>Sw.CommandInProgress,v=>Sw.CommandInProgress=v)) {
             var doc=scope.Doc;Fingerprint(doc,m.Path);RequireMatesHealthy(doc);
+            RequireConnectionBatchBaseline(id,doc);
             if((string)data["reference_state_signature"]!=MateSignature(m,doc))throw new CadFault("CONNECTION_PLAN_STALE","只读方案已过期。");
             var actions=Json.Deserialize<List<Dictionary<string,object>>>(Json.Serialize(data["actions"]));
             var goals=Json.Deserialize<List<Dictionary<string,object>>>(Json.Serialize(data["goals"]));
             var changes=data.ContainsKey("fixed_state_changes")?Json.Deserialize<List<Dictionary<string,object>>>(Json.Serialize(data["fixed_state_changes"])):new List<Dictionary<string,object>>();
             var bindings=data.ContainsKey("group_bindings")?Json.Deserialize<List<Dictionary<string,object>>>(Json.Serialize(data["group_bindings"])):new List<Dictionary<string,object>>();
             if(actions.Count>64||goals.Count<1||goals.Count>8)throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","首批每项最多8个连接目标、64项新增约束。");
+            if(batchScope!=null&&goals.Count!=Math.Min(8,batchScope.GoalCount-batchScope.Index*8))throw new CadFault("CONNECTION_REFERENCE_INVALID","批次目标范围未闭合。");
             if(changes.Count>16||bindings.Count>128)throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","固定状态和刚性组范围超出预算。");
             var declaredTargets=new HashSet<string>(goals.Select(g=>(string)g["component_a"]));
             foreach(var binding in bindings) {
@@ -147,8 +152,8 @@ public partial class Cad {
                 if(goal.TryGetValue("rotary_trial_driver",out trialDriver)&&trialDriver!=null)ValidateConnectionAction(m,doc,Json.Deserialize<Dictionary<string,object>>(Json.Serialize(trialDriver)));
             }
             var plan=new ConnectionPlan{Id=Guid.NewGuid().ToString("N"),ModelId=id,Revision=m.Revision,
-                Signature=MateSignature(m,doc),OriginalParameters=CompletionOriginalParameters(doc,EGAllMates(doc).Select(f=>f.GetID()).ToArray()),Actions=actions,Goals=goals,
-                Poses=Transforms(doc),Fixed=cs.ToDictionary(c=>c.Name2,c=>c.IsFixed()),FixedChanges=changes,
+                Signature=MateSignature(m,doc),OriginalParameters=CompletionOriginalParameters(doc,EGAllMates(doc).Select(f=>f.GetID()).ToArray()),OriginalMateIds=EGAllMates(doc).Select(f=>f.GetID()).ToArray(),Actions=actions,Goals=goals,
+                Poses=Transforms(doc),Fixed=cs.ToDictionary(c=>c.Name2,c=>c.IsFixed()),FixedChanges=changes,Batch=batchScope,
                 ExpectedFixed=cs.ToDictionary(c=>c.Name2,c=>c.IsFixed()&&!released.Contains(GTComponentId(doc,c)))};connectionPlans[plan.Id]=plan;
             if(cs.Any(c=>!ConnectionRigidTransform((double[])c.GetTotalTransform(false).ArrayData))) {
                 connectionPlans.Remove(plan.Id);throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","有界验证首批要求单位尺度的刚体变换。");
@@ -199,6 +204,7 @@ public partial class Cad {
         using(var scope=new Scope(this,m.Path,null))if(MateSignature(m,scope.Doc)!=p.Signature||m.Revision!=p.Revision)throw new CadFault("CONNECTION_PLAN_STALE","当前模型与方案不一致。");
         p.Consumed=true;string cp=null;bool mutating=false;
         try {
+            BeginConnectionBatch(p);
             Progress(activeJobId,"connection_create_checkpoint",0,0,null);
             var checkpoint=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(CreateUserCheckpoint(m.Id)));cp=(string)checkpoint["checkpoint_id"];
             Progress(activeJobId,"connection_checkpoint_reopen",0,0,null);
@@ -239,12 +245,14 @@ public partial class Cad {
                 if(UserComponents(doc).Any(c=>c.IsFixed()!=p.ExpectedFixed[c.Name2]))throw new CadFault("CONNECTION_CREATE_FAILED","补齐固定状态超出明确方案。");
                 Progress(activeJobId,"connection_save_verified_result",0,0,null);
                 SaveOwnedDocuments(m);m.Revision++;SaveUserModel(m);VerifyUserSources(m);LastOperationRestoration="restored";
-                connectionTrialGoals[m.Id]=p.Goals;
+                CompleteConnectionBatch(p,doc);
                 return new{model_id=m.Id,plan_id=planId,checkpoint_id=cp,checkpoint_probe=probe,initial_state_preparation=prepared,
+                    batch_transaction=p.Batch==null?null:new{transaction_id=p.Batch.Id,batch_index=p.Batch.Index,batch_count=p.Batch.Count,payload_sha256=p.Batch.Manifest.Split(':')[p.Batch.Index],all_batches_completed=p.Batch.Index+1==p.Batch.Count},
                     added_mates=p.Actions.Count,fixed_state_changes=p.FixedChanges,fixed_state_changes_verified=true,goals=p.Goals,evidence=evidence,native_health_verified=true,motion_verified=false,
                     source_files_unchanged=true,restoration_status="restored"};
             }
         }catch(Exception error) {
+            FailConnectionBatch(p);
             if(error is COMException||error is NativeCommandStateException||LastContextRestoration=="unknown") {LastOperationRestoration="unknown";throw new CadFault("CONNECTION_NATIVE_UNKNOWN","原生状态未知，未重试写入或恢复。",new{checkpoint_id=cp,original_failure=FailureEvidence(error)});}
             if(!mutating)throw;
             try{RestoreUserCheckpoint(m.Id,cp);LastOperationRestoration="restored";}catch(Exception rollback){LastOperationRestoration="unknown";throw new CadFault("CONNECTION_NATIVE_UNKNOWN","已知失败后恢复未验证。",new{checkpoint_id=cp,original_failure=FailureEvidence(error),rollback_failure=FailureEvidence(rollback)});}
@@ -269,6 +277,7 @@ public partial class Cad {
         return accepted;
     }
     public object ProbeAssemblyConnectionPose(string id,string componentId,string targetJson,string checkpointId,string probeId,int goalIndex=-1,bool allowedTrial=false) {
+        RequireCompletedConnectionBatches(id);
         if(!System.Text.RegularExpressions.Regex.IsMatch(probeId,"^[a-f0-9]{32}$"))throw new CadFault("CONNECTION_REFERENCE_INVALID","试验ID无效。");
         var timing=new OperationTiming("connection_probe_native_body_before_artifact_write_and_transport");timing.Start("parse_model_and_target");
         var m=GetUserModel(id);string requestHash=ConnectionRequestFingerprint.Hash(targetJson);var target=Json.Deserialize<double[]>(targetJson);string path=Path.Combine(Root,"runs","connection-probes",probeId+".json");Directory.CreateDirectory(Path.GetDirectoryName(path));

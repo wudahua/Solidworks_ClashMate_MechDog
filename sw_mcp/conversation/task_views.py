@@ -8,6 +8,10 @@ def present(value):
         'repeated_dispatch_allowed':False,'heartbeat_is_native_progress_proof':False,'duration_is_estimate':False}
     record=core.Path(value['directory'])/'任务状态.json'
     def pointer(path):return {'full_record_path':str(record),'json_pointer':path,'scope':'presentation_only_full_evidence_retained'}
+    transaction=value.get('connection_transaction')
+    if isinstance(transaction,dict) and 'payloads' in transaction:
+        transaction.pop('payloads')
+        transaction['frozen_payloads']=pointer('/connection_transaction/payloads')
     scope=value.get('scope_review')
     if isinstance(scope,dict):
         resolved=value.get('requires_stationary_scope_review') is False
