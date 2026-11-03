@@ -11,7 +11,9 @@ namespace SolidWorks.Interop.sldworks {
  public interface IComponent2 {string Name2{get;}}
  public interface IMateEntity2 {object Reference{get;}object ReferenceComponent{get;}int ReferenceType2{get;}}
  public interface IMate2 {int Type{get;}int Alignment{get;}object[] DisplayDimension2{get;}int GetMateEntityCount();IMateEntity2 MateEntity(int i);}
- public interface IFeature {int GetID();object GetSpecificFeature2();object GetDefinition();object IsSuppressed2(int scope,object configs);string Name{get;}}
+ public interface IFeature {int GetID();string GetTypeName2();object GetSpecificFeature2();object GetDefinition();object IsSuppressed2(int scope,object configs);string Name{get;}}
+ public interface IScrewMateFeatureData {int RevolutionType{get;}double RevolutionVal{get;}bool Reverse{get;}int MateAlignment{get;}}
+ public interface IDistanceMateFeatureData {bool IsAdvancedMate{get;}double MinimumDistance{get;}double MaximumDistance{get;}bool FlipDimension{get;}int MateAlignment{get;}}
  public interface IConcentricMateFeatureData {bool LockRotation{get;}}
  public interface IGearMateFeatureData {double GearRatioNumerator{get;}double GearRatioDenominator{get;}bool Reverse{get;}}
  public interface IDisplayDimension {object GetDimension2(int index);}
@@ -27,8 +29,11 @@ class ReadEntity:IMateEntity2 {
 class ReadDimension:IDimension,IDisplayDimension {
  public double Value;public double SystemValue{get{return Value;}}public object GetDimension2(int i){return this;}
 }
-class ReadDefinition:IConcentricMateFeatureData,IGearMateFeatureData {
+class ReadDefinition:IConcentricMateFeatureData,IGearMateFeatureData,IScrewMateFeatureData,IDistanceMateFeatureData {
  public bool Locked=true,Reversed=true;public double Numerator=2,Denominator=3;
+ public int RevolutionMode=1;public double Lead=.3,Minimum=.001,Maximum=.755;public bool Advanced;
+ public int RevolutionType{get{return RevolutionMode;}}public double RevolutionVal{get{return Lead;}}public int MateAlignment{get{return 1;}}
+ public bool IsAdvancedMate{get{return Advanced;}}public double MinimumDistance{get{return Minimum;}}public double MaximumDistance{get{return Maximum;}}public bool FlipDimension{get{return false;}}
  public bool LockRotation{get{return Locked;}}public double GearRatioNumerator{get{return Numerator;}}
  public double GearRatioDenominator{get{return Denominator;}}public bool Reverse{get{return Reversed;}}
 }
@@ -39,8 +44,9 @@ class ReadMate:IMate2 {
  public int GetMateEntityCount(){return Entities.Length;}public IMateEntity2 MateEntity(int i){return Entities[i];}
 }
 class ReadFeature:IFeature {
- public int Id,SpecificReads;public bool Suppressed;public ReadMate Mate;public ReadDefinition Definition=new ReadDefinition();
- public int GetID(){return Id;}public object GetSpecificFeature2(){SpecificReads++;return Mate;}public object GetDefinition(){return Definition;}
+ public int Id,SpecificReads;public bool Suppressed;public ReadMate Mate;public ReadDefinition Definition=new ReadDefinition();public bool Limit,MissingDefinition;
+ public string GetTypeName2(){return Limit?"MateLimitDistanceDim":"MateDistanceDim";}
+ public int GetID(){return Id;}public object GetSpecificFeature2(){SpecificReads++;return Mate;}public object GetDefinition(){return MissingDefinition?null:Definition;}
  public object IsSuppressed2(int scope,object configs){if(scope!=1||configs!=null)throw new Exception("SUPPRESSION_SCOPE_CHANGED");return new[]{Suppressed};}
  public string Name{get{return "配合"+Id;}}
 }
@@ -87,6 +93,20 @@ class MateSnapshotReadTests {
   Console.OutputEncoding=new System.Text.UTF8Encoding(false);
   try {
    string mode=args[0];var w=ReadWorld.Create();var cad=new Cad();bool identity=mode.StartsWith("identity")||mode.StartsWith("bad_ref");bool refs=identity||mode=="discarded_refs";
+   if(mode.StartsWith("nonlinear_")) {
+    bool limit=mode.Contains("limit"),identityMode=mode.Contains("identity");var f=w.F(3);f.Mate.Kind=limit?5:17;f.Limit=limit;f.Definition.Advanced=limit;
+    if(mode.Contains("missing"))f.MissingDefinition=true;
+    if(mode.Contains("invalid_bounds"))f.Definition.Minimum=2;
+    if(mode.Contains("invalid_lead"))f.Definition.Lead=double.NaN;
+    if(mode.Contains("missing")||mode.Contains("invalid_")){Console.WriteLine(Cad.Json.Serialize(new{error=Error(()=>cad.TestRead(w.Doc,false,identityMode,identityMode))}));return 0;}
+    string before=cad.TestRead(w.Doc,false,identityMode,identityMode);
+    if(mode.Contains("changed_current"))f.Mate.Dimension.Value=.1;
+    if(mode.Contains("changed_bounds"))f.Definition.Maximum=.8;
+    if(mode.Contains("changed_lead"))f.Definition.Lead=.4;
+    if(mode.Contains("changed_reverse"))f.Definition.Reversed=false;
+    if(mode.Contains("changed_mode"))f.Definition.RevolutionMode=0;
+    string after=cad.TestRead(w.Doc,false,identityMode,identityMode);Console.WriteLine(Cad.Json.Serialize(new{changed=before!=after,rows=Cad.Json.DeserializeObject(after)}));return 0;
+   }
    if(mode=="identity_without_refs")refs=false;
    if(mode=="empty")w.Doc.Features=new IFeature[0];
    if(mode=="duplicate")w.Doc.Features=w.Doc.Features.Concat(new[]{new ReadFeature{Id=1,Mate=new ReadMate{Kind=99,Entities=new ReadEntity[0]}}}).ToArray();

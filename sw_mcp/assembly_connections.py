@@ -211,7 +211,11 @@ def plan(survey, intents,whole_assembly=False):
         if a.get('fixed_component') and not b.get('fixed_component'): a_id,b_id=b_id,a_id;a,b=b,a
         if a.get('fixed_component'):raise ValueError('both_components_fixed_no_floating_target_for_native_trial')
         full=(a.get('constraint_state') or {}).get('status')=='observed' and (a.get('constraint_state') or {}).get('fully_constrained') is True
-        if kind!='rigid' and full:raise ValueError('native_fully_constrained_mobile_goal_requires_review')
+        coupled=None
+        if kind!='rigid' and full:
+            from . import coupled_connections
+            coupled=coupled_connections.review(survey,a_id,b_id,kind)
+            if coupled is None:raise ValueError('native_fully_constrained_mobile_goal_requires_review')
         pair=pairs.get(pair_key,{'rows':[]})
         choices=_axes(survey,a,b,raw.get('axis_hint'),pair,origin,scale,kind) if kind!='rigid' else [{'axis_global':None,'reference_point_global_m':None,'source':'declared_rigid_goal'}]
         selected=raw.get('candidate_id')
@@ -230,6 +234,7 @@ def plan(survey, intents,whole_assembly=False):
         if len(ac.basis(target+effective['rows']))>len(ac.basis(target)):
             raise ValueError('existing_indirect_constraints_conflict_with_declared_motion')
         target_global=lift(target,a_id,b_id);before=matrix.trial(target_global);start=len(actions)
+        if coupled is not None and before:raise ValueError('native_fully_constrained_mobile_goal_requires_review')
         preserve_native_full=whole_assembly and kind=='rigid' and full and bool(before)
         if full and before and not preserve_native_full:raise ValueError('native_full_constraint_conflicts_with_supported_missing_rank')
         native_links=[m for m in survey['mates'] if m.get('suppressed') is not True and any(e.get('component_id')==a_id for e in m.get('entities',[]))]
@@ -275,6 +280,8 @@ def plan(survey, intents,whole_assembly=False):
             'preserved_native_full_constraint_observation':preserve_native_full,
             'supported_target_fulfilment_certified':not bool(remaining),
             'rotary_trial_driver':rotary_driver,'motion_verified':False})
+        if coupled is not None:goals[-1].update(coupled_verification_only=True,coupling_evidence=coupled,supported_target_fulfilment_certified=False)
+    if actions and any(g.get('coupled_verification_only') for g in goals):raise ValueError('coupled_verification_cannot_mix_supplements')
     planned=constraint_graph.Graph(survey);planned.matrix.pivots=matrix.pivots.copy()
     for goal in goals:
         if goal['kind']=='rigid':continue

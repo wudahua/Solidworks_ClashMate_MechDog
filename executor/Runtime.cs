@@ -339,7 +339,7 @@ public partial class Cad {
             case "_select_connection_layer": return SelectConnectionLayer((string)p["model_id"],(string)p["instance"]);
             case "_verify_connection_layer": return VerifyConnectionLayer((string)p["model_id"],p.ContainsKey("rebuild_root")&&Convert.ToBoolean(p["rebuild_root"]));
             case "_survey_assembly_connections": return SurveyAssemblyConnections((string)p["model_id"]);
-            case "_connection_reference_state": return ConnectionReferenceState((string)p["model_id"]);
+            case "_connection_reference_state": return ConnectionReferenceState((string)p["model_id"],p.ContainsKey("verification_details")&&Convert.ToBoolean(p["verification_details"]));
             case "_test_connection_parameter_readers": return CompareConnectionParameterReaders((string)p["model_id"]);
             case "_preview_assembly_connections": return PreviewAssemblyConnections((string)p["model_id"],(string)p["proposal_json"]);
             case "_apply_assembly_connections": return ApplyAssemblyConnections((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));

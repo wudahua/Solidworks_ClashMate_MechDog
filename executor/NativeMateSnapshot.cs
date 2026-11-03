@@ -5,6 +5,25 @@ using SolidWorks.Interop.sldworks;
 
 public partial class Cad {
     sealed partial class ProbeWorkingState {
+        public static Dictionary<string,object> NonlinearParameters(IFeature feature,IMate2 mate,int type) {
+            Dictionary<string,object> result=null;
+            if(type==17) {
+                var data=feature.GetDefinition() as IScrewMateFeatureData;
+                if(data==null)throw NonlinearUnavailable(feature,type,"screw_definition");
+                double value=data.RevolutionVal;if(double.IsNaN(value)||double.IsInfinity(value)||value<=0)throw NonlinearUnavailable(feature,type,"screw_revolution_value");
+                result=new Dictionary<string,object>{{"kind","screw"},{"native_revolution_type",data.RevolutionType},{"native_revolution_value",value},{"reverse",data.Reverse},{"mate_alignment",data.MateAlignment}};
+            } else if(type==5&&feature.GetTypeName2().IndexOf("limit",StringComparison.OrdinalIgnoreCase)>=0) {
+                var data=feature.GetDefinition() as IDistanceMateFeatureData;
+                if(data==null||!data.IsAdvancedMate)throw NonlinearUnavailable(feature,type,"limit_definition");
+                double minimum=data.MinimumDistance,maximum=data.MaximumDistance;
+                if(double.IsNaN(minimum)||double.IsInfinity(minimum)||double.IsNaN(maximum)||double.IsInfinity(maximum)||minimum>maximum)throw NonlinearUnavailable(feature,type,"limit_bounds");
+                result=new Dictionary<string,object>{{"kind","limit_distance"},{"minimum_distance_m",minimum},{"maximum_distance_m",maximum},{"flip_dimension",data.FlipDimension},{"mate_alignment",data.MateAlignment}};
+            }
+            return result;
+        }
+        static CadFault NonlinearUnavailable(IFeature feature,int type,string field) {
+            return new CadFault("CONNECTION_REFERENCE_INVALID","既有非线性配合参数未完整读取，未建立可写入或联动验证签名。",new{reason="native_nonlinear_parameters_unavailable",native_feature_id=feature.GetID(),native_mate_type=type,parameter=field,write_dispatched=false,signature_complete=false});
+        }
         static string MateReferenceIdentity(IModelDoc2 doc,IFeature feature,IMate2 mate,int index) {
             var entity=mate.MateEntity(index);object reference=entity==null?null:entity.Reference;
             byte[] persistent=reference==null?null:doc.Extension.GetPersistReference3(reference) as byte[];
@@ -33,16 +52,20 @@ public partial class Cad {
                 .GroupBy(f=>f.id).Select(g=>g.First()).OrderBy(f=>f.id);
             return rows.Select(observed=>{
                 var feature=observed.feature;var mate=(IMate2)feature.GetSpecificFeature2();int type=mate.Type;
+                var nonlinear=NonlinearParameters(feature,mate,type);
                 var lockData=type==(int)SolidWorks.Interop.swconst.swMateType_e.swMateCONCENTRIC?feature.GetDefinition() as IConcentricMateFeatureData:null;
                 double? distance=null,angle=null;
                 if(type==5||type==6) {
                     var dimension=mate.DisplayDimension2[0] as IDisplayDimension;
                     if(dimension==null)throw new Exception("MATE_PARAMETER_UNREADABLE");
                     double value=((IDimension)dimension.GetDimension2(0)).SystemValue;
-                    if(type==5)distance=value;else angle=value;
+                    // The current separation of a limit mate is a pose observation,
+                    // not a constant parameter. Bounds remain guarded in both modes.
+                    if(type==5){if(!parameters||nonlinear==null)distance=value;}else angle=value;
                 }
                 var row=new Dictionary<string,object>{{"id",observed.id},{"type",type},{"alignment",mate.Alignment},
                     {"lock_rotation",lockData==null?(bool?)null:lockData.LockRotation},{"distance_m",distance},{"angle_rad",angle}};
+                if(nonlinear!=null)row.Add("nonlinear_parameters",nonlinear);
                 int count=parameters||includeReferences?mate.GetMateEntityCount():0;
                 string[] references=includeReferences?Enumerable.Range(0,count).Select(i=>MateReferenceIdentity(doc,feature,mate,i)).ToArray():null;
                 if(!parameters)row.Add("references",references);

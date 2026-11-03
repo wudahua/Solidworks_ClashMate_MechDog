@@ -46,6 +46,15 @@ public partial class Cad {
     }
     object ConnectionNonlinearObservation(IFeature feature,IMate2 mate) {
         try {
+            var guarded=ProbeWorkingState.NonlinearParameters(feature,mate,mate.Type);
+            if(guarded!=null) {
+                var result=new Dictionary<string,object>(guarded);
+                result["native_feature_id"]=feature.GetID();result["status"]="observed";
+                result["parameters_in_input_signature"]=true;result["modelled_as_linear_equality"]=false;result["observation_not_native_motion_verification"]=true;
+                result["components"]=Enumerable.Range(0,mate.GetMateEntityCount()).Select(i=>{var c=mate.MateEntity(i).ReferenceComponent as IComponent2;return c==null?null:c.Name2;}).ToArray();
+                if(mate.Type==5)result["distance_m"]=((IDistanceMateFeatureData)feature.GetDefinition()).Distance;
+                return result;
+            }
             if(mate.Type==17) {
                 var data=feature.GetDefinition() as IScrewMateFeatureData;
                 if(data==null)return new{native_feature_id=feature.GetID(),kind="screw",status="definition_unavailable"};

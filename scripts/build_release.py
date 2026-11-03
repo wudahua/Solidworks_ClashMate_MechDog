@@ -8,13 +8,14 @@ from pathlib import Path
 from verify_release import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.3-alpha.39"
+VERSION = "0.4.3-alpha.40"
 
 
 def build(candidate=False):
     # Keep the installed/CI regression suite identical to the development suite.
-    sources = [ROOT/name for name in ("README.md", "CONTRACT.md", "发布说明_v0.4.3-alpha.39.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
+    sources = [ROOT/name for name in ("README.md", "CONTRACT.md", "发布说明_v0.4.3-alpha.40.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
     sources += [ROOT/'tests/test_managed_late_response.py',ROOT/'tests/test_managed_feedback.py',ROOT/'tests/test_upgrade_host_runtime.py',ROOT/'tests/test_connection_recommendations.py']
+    sources += [ROOT/'tests/test_coupled_connections.py']
     sources += [ROOT/'tests/test_mate_snapshot.py',ROOT/'tests/MateSnapshotReadTests.cs']
     sources += [ROOT/'tests/test_motion_reference_read.py',ROOT/'tests/test_constraint_inventory.py', ROOT/'tests/test_constraint_graph.py',ROOT/'tests/test_connection_groups.py',ROOT/'tests/test_assembly_overview.py',ROOT/'tests/test_connection_batches.py']
     sources += [ROOT/'tests/SequenceFixture.cs', ROOT/'tests/assembly_sequence_native.py', ROOT/'tests/LayeredConnectionGuardFixture.cs', ROOT/'tests/LayeredConnectionFixture.cs', ROOT/'tests/layered_connection_fixture_native.py', ROOT/'tests/test_connection_layers.py', ROOT/'tests/test_assembly_sequence.py', ROOT/'tests/test_assembly_hierarchy.py', ROOT/'tests/RigidAssemblyFixture.cs', ROOT/'tests/rigid_assembly_fixture_native.py']
