@@ -34,18 +34,28 @@ def discover(s):
     draft=recommendations.draft(survey,review,binding=str(s.folder.parent.absolute()));s.connection_draft=draft
     core.write(s.folder/'装配连接自动草案.json',draft)
     overview=assembly_overview.recommend(survey,review);core.write(s.folder/'整装配组件推荐与遗漏检查.json',overview)
+    from .. import assembly_assessment
+    assessment=assembly_assessment.build(survey,review,overview,draft,binding=str(s.folder.parent.absolute()))
+    s.assembly_assessment=assessment;core.write(s.folder/'首轮装配处理结论.json',assessment)
     from ..connection_layers import catalog
     layers=catalog(s.call('_survey_connection_layers',model_id=s.model))
     s.assembly_layers=layers;core.write(s.folder/'分层装配检查清单.json',layers)
-    return {'connection_review':review,'connection_draft':draft,'assembly_overview':overview,'assembly_layers':layers}
+    return {'connection_review':review,'connection_draft':draft,'assembly_overview':overview,'assembly_layers':layers,'assembly_assessment':assessment}
 
 
 def publish_review(engine,t,value):
     s=engine.sessions[t['task_id']];source_integrity.bind(t,s)
     t['assembly_layers']=value.get('assembly_layers')
+    assessment=value.get('assembly_assessment')
+    if assessment is None:
+        from .. import assembly_assessment
+        assessment=assembly_assessment.readonly(getattr(s,'connection_survey',{}),value['connection_review'])
+    t['assembly_assessment']=assessment
     t.update(model_id=s.model,phase='constraint_review_ready',connection_review=value['connection_review'],connection_draft=value['connection_draft'],assembly_overview=value.get('assembly_overview'),
         next_action={'tool':'plan_mechanism_task','arguments':{'task_id':t['task_id']},
             'instruction':'AI先解释原生配合故障、压缩项及局部连接线索。按用户已说明的机械目标，用connection_intent填写组件名称及rigid/revolute/prismatic；可自动采用唯一几何轴线，仅真实歧义才集中询问。不把局部秩当全机构自由度，不为消除浮动而锁死运动。若仅体检，可直接finish恢复收尾。'})
+    if assessment.get('automatic_plan_available'):
+        t['next_action'].update(arguments={'task_id':t['task_id'],'auto_plan':True},instruction='AI解释首轮完整分类，自动读取建议目标的原生预演。建议机械用途仍待具体方案确认，不直接execute。')
 
     if value.get('constraint_structure'):
         from .constraint_inventory import publish
@@ -98,12 +108,28 @@ def select_scope(engine,t,row):
     engine.save(t)
 
 
-def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint=''):
+def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint='',auto_plan=False):
+    if type(auto_plan) is not bool:raise core.StopBatch('CONNECTION_INTENT_INVALID','auto_plan须为布尔值。')
     if completion_scope not in {'declared','whole_assembly'}:raise core.StopBatch('CONNECTION_INTENT_INVALID','completion_scope须为declared或whole_assembly。')
     whole=completion_scope=='whole_assembly'
     engine._require_session(t['task_id'])
     if t['phase'] not in {'constraint_review_ready','awaiting_confirmation'}:raise core.StopBatch('TASK_NOT_READY_FOR_PLAN')
     s=engine.sessions[t['task_id']]
+    if auto_plan:
+        if (t.get('connection_review') or {}).get('write_scope_allowed') is False:
+            from .constraint_inventory import require_write_scope
+            require_write_scope(t)
+        if intents is not None or rigid_groups is not None or release_fixed_components is not None or assembly_scope_hint or t['phase']!='constraint_review_ready':
+            raise core.StopBatch('CONNECTION_INTENT_INVALID','自动预演须从新体检开始，不混用手填目标或替换待确认方案。')
+        assessment=t.get('assembly_assessment') or {}
+        if not assessment.get('automatic_plan_available'):
+            return {'task_id':t['task_id'],'needs_mechanical_clarification':bool(assessment.get('mechanical_question_groups')),
+                    'needs_scope_review':bool(assessment.get('proposal_review_issues') or assessment.get('write_scope_blockers')),'assembly_assessment':assessment,
+                    'write_dispatched':False,'confirmation_token_created':False,'instruction':'AI集中解释未覆盖组件及阻断；有明确用途后填写普通连接目标，不反复调用auto_plan。'}
+        selected=assessment['suggested_plan_arguments'];intents=selected['connection_intent'];completion_scope=selected['completion_scope'];whole=completion_scope=='whole_assembly'
+        t['automatic_mechanical_goal_proposal']=True
+    elif intents is not None or rigid_groups is not None or release_fixed_components is not None:
+        t.pop('automatic_mechanical_goal_proposal',None)
     if (t.get('connection_review') or {}).get('write_scope_allowed') is False:
         if intents is None and rigid_groups is None and release_fixed_components is None and completion_scope=='declared' and not assembly_scope_hint:
             return {'task_id':t['task_id'],'readonly_structure':True,'constraint_structure':t['constraint_structure'],
@@ -125,6 +151,7 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
                 t.pop('plan_token',None);t.pop('proposal',None);t.update(phase='constraint_review_ready',plan_token_revoked=True);engine.save(t)
             return engine._submit(t,'selecting_assembly_layer',lambda:select_scope(engine,t,row))
     if intents is None and rigid_groups is None and release_fixed_components is None:return {'task_id':t['task_id'],'needs_connection_intent':True,
+        'assembly_assessment':t.get('assembly_assessment'),
         'connection_draft':getattr(s,'connection_draft',None) or recommendations.draft(s.connection_survey),
         'connection_review':t['connection_review'],'assembly_overview':t.get('assembly_overview'),'assembly_layers':t.get('assembly_layers'),'selected_assembly_layer':t.get('selected_assembly_layer'),'write_dispatched':False,
         'instruction':'AI读取connection_draft，用候选connection_intent及推荐依据形成整组方案；已有机械目标可直接选择，真正歧义集中询问。草案不是原生预演或执行授权，实际plan仍须传具体connection_intent。现有方案不因只读草案查询自动撤销。'}
@@ -191,6 +218,9 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
         core.write(s.folder/'通用连接补齐规划.json',proposal)
         payload=connection_batches.request(transaction,0,s.connection_survey['reference_state_signature']) if whole else {**proposal,'reference_state_signature':s.connection_survey['reference_state_signature']}
         native=s.call('_preview_assembly_connections',model_id=s.model,proposal_json=json.dumps(payload,ensure_ascii=False))
+        from .. import assembly_assessment
+        assessment=assembly_assessment.for_plan(s.connection_survey,proposal);assessment['native_preview_completed']=True
+        t['assembly_assessment']=assessment;core.write(s.folder/'具体目标逐组件结论.json',assessment)
         if whole:t['connection_transaction']=transaction
         else:t.pop('connection_transaction',None)
         t.update(phase='awaiting_confirmation',plan_token=uuid.uuid4().hex,plan_token_revoked=False,proposal={**native,
@@ -205,6 +235,7 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
             'finish_policy':'restore_import_checkpoint_by_default'},
             next_action={'tool':'execute_mechanism_task','arguments':{'task_id':t['task_id']},
                 'instruction':('本方案仅验证已有丝杆联动：新增0项，不解除固定；保留全约束原生观测。正反向各创建临时线性马达，0.1mm/s、1秒、30fps，逐帧核对丝杆关系、限位和接地参考并恢复移除；不添加临时距离配合。' if any(g.get('coupled_verification_only') for g in proposal['goals']) else '允许方向可使用临时距离或角度约束驱动，逐次恢复成果检查点移除。')+'解释连接目标、自动采用轴线、逐项新增配合、保留的旧约束及未知项、仅副本初态准备和有界试验范围。禁止方向用装配移动求解。取得当前具体方案授权后一次执行。未证明全行程、受力或接触；默认恢复原导入状态。'})
+        if t.get('automatic_mechanical_goal_proposal'):t['next_action']['instruction']='这些连接用途由AI提出，尚未证明设计意图。先向用户集中确认各运动组应保留的运动及具体改动，再执行。'+t['next_action']['instruction']
     return engine._submit(t,'planning',operation)
 
 
