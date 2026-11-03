@@ -6,7 +6,7 @@ alpha.31整装配间接约束：`connection_review.assembly_constraint_graph`在
 
 装配根参考仅在原生`IComponent2.IsRoot`确认且真实几何已读出时标记`reference_owner_scope=assembly_root, root_reference_verified=true`，不按名称或库存外ID猜地面，也不据此注册创建参考。`nonlinear_constraints`保留限位距离的SI长度及螺旋配合的原生RevolutionType、RevolutionVal、Reverse、Alignment；螺旋原始数值未经单位／类型解释，不直接冒充已求出的导程或耦合运动。未知或无法读取保持unavailable，观察成功不等于运动通过。
 
-目标冲突诊断附`component_state_observations`、`nonlinear_constraints_observed`及`constraint_graph_path`。非线性列表是完整清单观察，不是被证明的根因；AI不得把列表中无关配合直接当作应删除项。导轨当前仍保留全约束冲突门禁，不以增加约束、解除固定或重复plan解决未认证的原生运动路径；完整Motion任务的历史成绩不替代本次通用模式验证。
+目标冲突诊断附`component_state_observations`、`nonlinear_constraints_observed`及`constraint_graph_path`。非线性列表是完整清单观察，不是被证明的根因；AI不得把列表中无关配合直接当作应删除项。alpha.31阶段导轨保留全约束冲突门禁，不以增加约束、解除固定或重复plan解决未认证的原生运动路径；完整Motion任务的历史成绩不替代本次通用模式验证。
 
 alpha.30只读恢复核对：完整检查点关闭重开结束后，使用重新取得的组件对象，在一个`NativeCommandBatch`内读取全组件位姿、旧配合健康与参数、配合数量和固定状态。检查点恢复本身在批处理之外，不缓存跨重开的COM对象，不删除检查项。探针工件的`native_timings`记录顺序阶段及尚未归属的耗时，计时在最后一个已结束阶段冻结；工件写入、冻结后阶段、外层序列化、运输和整个任务准备不在总计内。`post_restore_native_batch`仅证明该批处理进入及恢复标志，不能单独证明机械检查通过。客户端仍读取任务结论和原始工件。
 
@@ -334,3 +334,14 @@ prepare返回`connection_review.mode=readonly_structure`、`write_scope_allowed=
 原生getter失败仍使整个快照失败。持久参考对象或字节为空仍为`CONNECTION_REFERENCE_INVALID`和`native_mate_reference_identity_unavailable`，保留原诊断；只读转接条件不变，不把未观察字段当成已通过。每次扰动前后及恢复后全部原配合、固定状态、数量和姿态检查不删减；检查点恢复路径未改。
 
 冻结的alpha.38读取器仅供已有、显式故障测试开关保护的内部对照入口，不增加公开MCP工具；正常任务调用新读取器。同文档交替读取比较完整JSON字节而非少量字段，另验证一次原生状态变化和恢复后输出。读取器计时和整项任务耗时分开，不能将局部加速比乘到整条链路，也不能把受控缺项开发变体计为独立真实新机构。
+
+
+## alpha.40 既有耦合的零新增受限验证
+
+原生全约束观察原样保留。仅在完整、健康的当前约束清单中，受支持的滑动目标秩5、参考接地秩6、螺母刚性随动、轴相对接地为转动、恰一条已认证丝杆关系、全部其他非等式仅为已认证安全限位时，允许`coupled_verification_only=true`。丝杆仅解释`RevolutionType=1`的正有限SI每转距离；0.1mm试验对应轴转角不得超过既有1度预算。未知、混合增补、整组／整装配写入、近限位或缺失参数仍拒绝；不将螺旋方程插入受支持线性矩阵，也不自动新建螺旋配合。圆边只作为已存在丝杆参考观察，须已认证整圆和原生持久参考回读；不放开任意边缘／草图写入。
+
+草案可自动区分已有联动，推荐零新增检查；实际plan仍冻结当前原生状态、驱动面、轴线、参考及具体试验。正反允许方向各用0.1mm/s、1秒、30fps临时线性马达；31帧全部组件按材料参考核对方向、位移、丝杆比例、限位、接地和其他受支持连接，位姿仍受5mm／1度封顶。原生返回成功或位移绝对值均不足以判定通过。丝杆带符号关系依据实际观测一致性，不冒充未知设计意图或Reverse枚举语义。禁止方向仍用原生装配移动求解。每个允许方向之后核验原配合参数、数量、固定状态、全部姿态和历史算例状态恢复，再开始下一项。
+
+`linear_allowed_trial_strategy`在此模式明确为临时Motion；`native_motion_study_solved`仅在真实Motion分支通过时为true。`global_DOF_certified`、`whole_travel_certified`继续为false。失败不改换驱动重算，已知状态可恢复；原生未知不得恢复或重试写入。恢复时发生原生崩溃仍是失败，不将早先成功的局部求解升级为整任务通过。
+
+螺旋原生模式、数值、Reverse和Alignment，以及限位最小／最大距离、Flip和Alignment在身份与参数快照中保护。参数模式仅排除限位的可变当前距离；身份模式继续记录当前距离，实际全部位姿门禁保留。非线性参数不可读取返回`CONNECTION_REFERENCE_INVALID`与`native_nonlinear_parameters_unavailable`，不以空值认证签名。完整普通参数、持久参考和健康校验不删减，旧读取对照器保持冻结。额外配合参数／数量／固定／算例状态证据只在内部`verification_details=true`时采集，不增加公开工具或日常批次的重复读取。

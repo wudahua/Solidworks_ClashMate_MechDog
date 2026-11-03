@@ -14,11 +14,14 @@ public partial class Cad {
         public ConnectionInternalWitness InternalWitness;public string Parameters;public int[] MateIds;public Dictionary<string,double[]> Poses;public Dictionary<string,bool> Fixed;
     }
     readonly Dictionary<string,ConnectionBatchProgress> connectionBatchProgress=new Dictionary<string,ConnectionBatchProgress>();
-    public object ConnectionReferenceState(string id) {
+    public object ConnectionReferenceState(string id,bool verificationDetails=false) {
         var model=GetUserModel(id);
         using(var scope=new Scope(this,model.Path,null))using(var batch=new NativeCommandBatch(()=>Sw.CommandInProgress,v=>Sw.CommandInProgress=v)) {
             Fingerprint(scope.Doc,model.Path);RequireMatesHealthy(scope.Doc);RequireConnectionBatchBaseline(id,scope.Doc);
             return new{model_id=id,reference_state_signature=MateSignature(model,scope.Doc),
+                mate_parameters_signature=verificationDetails?StableId("parameters_",ImportMateParameters(scope.Doc)):null,
+                native_mate_count=verificationDetails?(int?)EGAllMates(scope.Doc).Length:null,study_states=verificationDetails?StudyStates(scope.Doc):null,
+                fixed_states=verificationDetails?UserComponents(scope.Doc).ToDictionary(c=>GTComponentId(scope.Doc,c),c=>c.IsFixed()):null,
                 signature_domain="full_mate_plan_saved_and_live_state_not_circular_query",write_dispatched=false};
         }
     }

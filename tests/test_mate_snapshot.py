@@ -57,5 +57,19 @@ class MateSnapshotTests(unittest.TestCase):
     def test_empty_persistent_bytes_refused(self):self.assertEqual(self.read('bad_ref_empty')['error']['details']['reason'],'native_mate_reference_identity_unavailable')
     def test_native_getter_failure_not_swallowed(self):self.assertEqual(self.read('name_failure')['error']['message'],'COMPONENT_NAME_READ_FAILED')
     def test_numeric_output_does_not_follow_localized_decimal_separator(self):self.assertEqual(self.read('culture')['rows'][2]['distance_m'],.0123)
+    def test_screw_parameters_are_in_snapshot(self):
+        r=self.read('nonlinear_screw')['rows'][2]['nonlinear_parameters'];self.assertEqual(r['native_revolution_value'],.3);self.assertTrue(r['reverse'])
+    def test_screw_lead_change_is_not_cached(self):self.assertTrue(self.read('nonlinear_screw_changed_lead')['changed'])
+    def test_screw_reverse_change_is_guarded(self):self.assertTrue(self.read('nonlinear_screw_changed_reverse')['changed'])
+    def test_screw_mode_change_is_guarded(self):self.assertTrue(self.read('nonlinear_screw_changed_mode')['changed'])
+    def test_screw_identity_contains_parameters(self):self.assertTrue(self.read('nonlinear_screw_identity_changed_lead')['changed'])
+    def test_missing_screw_definition_refuses_signature(self):self.assertEqual(self.read('nonlinear_screw_missing')['error']['code'],'CONNECTION_REFERENCE_INVALID')
+    def test_nonfinite_screw_lead_refused(self):self.assertEqual(self.read('nonlinear_screw_invalid_lead')['error']['details']['parameter'],'screw_revolution_value')
+    def test_limit_current_separation_is_not_a_constant_parameter(self):
+        r=self.read('nonlinear_limit_changed_current');self.assertFalse(r['changed']);self.assertIsNone(r['rows'][2]['distance_m'])
+    def test_limit_current_separation_still_changes_identity(self):self.assertTrue(self.read('nonlinear_limit_identity_changed_current')['changed'])
+    def test_limit_bounds_are_guarded(self):self.assertTrue(self.read('nonlinear_limit_changed_bounds')['changed'])
+    def test_limit_definition_must_be_observed(self):self.assertEqual(self.read('nonlinear_limit_missing')['error']['details']['parameter'],'limit_definition')
+    def test_limit_invalid_bounds_refused(self):self.assertEqual(self.read('nonlinear_limit_invalid_bounds')['error']['details']['parameter'],'limit_bounds')
 
 if __name__=='__main__':unittest.main()

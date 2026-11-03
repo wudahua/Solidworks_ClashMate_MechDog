@@ -87,6 +87,14 @@ def draft(survey,review=None,cursor='',binding=''):
         pair=pairs.get(key,{'rows':[],'native_feature_ids':[]});rows=pair['rows']
         effective=graph.relative(a['component_id'],b['component_id']);effective_rows=effective['rows']
         observed=joints.mobility(effective_rows,origin,scale)
+        coupled=None
+        if observed.get('recommended_joint_type')=='prismatic':
+            from . import coupled_connections
+            coupled=coupled_connections.review(survey,a['component_id'],b['component_id'],'prismatic')
+            if coupled is None and coupled_connections.review(survey,b['component_id'],a['component_id'],'prismatic') is not None:
+                a,b=b,a;effective=graph.relative(a['component_id'],b['component_id']);effective_rows=effective['rows']
+                observed=joints.mobility(effective_rows,origin,scale)
+                coupled=coupled_connections.review(survey,a['component_id'],b['component_id'],'prismatic')
         axes=_coaxial(a,b)
         guides=_guide_hints(a,b,rows,origin,scale)
         if not rows and not axes:continue  # Datum alignment alone is not a connection.
@@ -138,6 +146,10 @@ def draft(survey,review=None,cursor='',binding=''):
         option_count=len(options);options=options[:4]
         has_motion=any(o['kind']!='rigid' for o in options)
         blocker='native_lock_trial_unsupported' if locked else 'native_full_constraint_mobile_goal_requires_review' if full and has_motion else None
+        if coupled is not None and not locked:
+            blocker=None
+            for o in options:
+                if o['kind']=='prismatic':o.update(existing_coupling_review=coupled,verification_only=True,persistent_mates_added=0)
         if a['component_id'] in graph.patterns or b['component_id'] in graph.patterns:blocker='native_pattern_instance_requires_seed_goal'
         preferred=next((i for i,o in enumerate(options) if o['source'] in {'supported_existing_constraint_rows','supported_indirect_constraint_rows'}),None)
         if preferred is None:
@@ -150,7 +162,7 @@ def draft(survey,review=None,cursor='',binding=''):
             'indirect_connection_evaluation_scope':effective['scope'],
             'supported_whole_inventory_effective_rank':effective['supported_effective_rank'],
             'supported_direct_rank':effective['supported_direct_rank'],'indirect_constraint_gain':effective['indirect_constraint_gain'],
-            'status':'review_required' if blocker else 'existing_supported_joint' if observed['recommended_joint_type'] else 'mechanical_goal_confirmation_required',
+            'status':'review_required' if blocker else 'existing_coupled_joint_requires_native_verification' if coupled else 'existing_supported_joint' if observed['recommended_joint_type'] else 'mechanical_goal_confirmation_required',
             'blocker':blocker,'preferred_option_index':preferred if not blocker else None,
             'options':options,'options_complete':option_count<=4,'omitted_option_count':max(0,option_count-4),
             'evidence':{'coaxial_material_lines_observed':len(axes),'material_lines_considered_for_options':min(len(axes),3),'guide_direction_hypotheses':guides,
