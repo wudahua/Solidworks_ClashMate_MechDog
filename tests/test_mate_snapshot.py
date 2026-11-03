@@ -71,5 +71,11 @@ class MateSnapshotTests(unittest.TestCase):
     def test_limit_bounds_are_guarded(self):self.assertTrue(self.read('nonlinear_limit_changed_bounds')['changed'])
     def test_limit_definition_must_be_observed(self):self.assertEqual(self.read('nonlinear_limit_missing')['error']['details']['parameter'],'limit_definition')
     def test_limit_invalid_bounds_refused(self):self.assertEqual(self.read('nonlinear_limit_invalid_bounds')['error']['details']['parameter'],'limit_bounds')
+    def test_existing_limit_uses_actual_mate_not_untrusted_definition_alignment(self):
+        r=self.read('nonlinear_limit_untrusted_definition_alignment')['rows'][2]['nonlinear_parameters'];self.assertEqual(r['mate_alignment'],1);self.assertEqual(r['mate_alignment_source'],'IMate2.Alignment')
+    def test_existing_screw_uses_actual_mate_alignment(self):self.assertEqual(self.read('nonlinear_screw_untrusted_definition_alignment')['rows'][2]['nonlinear_parameters']['mate_alignment'],1)
+    def test_actual_limit_alignment_change_remains_guarded(self):self.assertTrue(self.read('nonlinear_limit_changed_alignment')['changed'])
+    def test_actual_screw_alignment_change_remains_guarded(self):self.assertTrue(self.read('nonlinear_screw_changed_alignment')['changed'])
+    def test_invalid_actual_alignment_refuses_signature(self):self.assertEqual(self.read('nonlinear_limit_invalid_alignment')['error']['details']['parameter'],'native_mate_alignment')
 
 if __name__=='__main__':unittest.main()

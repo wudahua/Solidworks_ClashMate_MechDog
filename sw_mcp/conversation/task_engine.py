@@ -329,6 +329,12 @@ class TaskEngine:
                                 'arguments':{'model_id':s.model,'checkpoint_id':s.checkpoint}},
                             'instruction':'用户授权恢复原状态后，仅在原活连接和旧请求结束均核对通过时恢复导入检查点；不换实例、不重放写入。'}
             from . import task_views
+            if s and not t.get('busy') and not t.get('closed') and getattr(s,'proc',None) and s.proc.poll() is not None:
+                from . import dead_native_close
+                retirement=dead_native_close.review(t,s);value['dead_native_retirement']=retirement
+                if retirement['eligible']:
+                    value['next_action']={'tool':'finish_mechanism_task','arguments':{'task_id':task_id,'close_unrestored':True},
+                        'automatic_retry':False,'instruction':'原CAD已确认退出且原响应结束；经明确同意保留现有副本并失败归档后，仅正常释放本任务执行器，不重连COM或恢复，不记任务通过。'}
             if s and not t.get('closed'):value=task_progress.current_view(s,value)
             return task_views.present(value)
     def mark_recovered(self,task_id,value):
@@ -601,6 +607,14 @@ class TaskEngine:
         if task_id not in self.sessions and t.get('server_instance_id')!=self.server_instance_id:
             return self.close_orphan(t,close_unrestored)
         if not t.get('busy') and completed_close.has_receipt(t):return self.archive_completed_close(t,close_unrestored)
+        session=self.sessions.get(task_id)
+        if session and getattr(session,'proc',None) and session.proc.poll() is not None:
+            from . import dead_native_close
+            proof=dead_native_close.review(t,session)
+            if close_unrestored is not True:
+                raise core.StopBatch('ORPHAN_CLOSE_CONFIRMATION_REQUIRED','原CAD已退出；可保留副本并按失败归档，仅正常关闭本任务空闲执行器，恢复结果不记通过。',proof)
+            if not proof['eligible']:raise core.StopBatch('ORPHAN_NATIVE_OUTCOME_UNCONFIRMED','原生退出或原响应证据未完整，保留现场。',proof)
+            return self._submit(t,'finishing_failed_native',lambda:dead_native_close.finish(self,t,session))
         self._require_session(task_id)
         def operation():
             s=self.sessions.get(task_id)

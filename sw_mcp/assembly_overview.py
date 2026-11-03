@@ -38,6 +38,7 @@ def recommend(survey,review=None):
         row={'component_a':a,'component_b':b,'instance_a':by[a]['instance'],'instance_b':by[b]['instance'],
              'suggested_kind':kind,'axis_global':mobility.get('axis_global'),'axis_point_global_m':mobility.get('axis_point_global_m'),
              'supported_effective_rank':rel['supported_effective_rank'],'evidence':'supported_current_whole_inventory_projection',
+             'supported_direct_rank':rel['supported_direct_rank'],
              'mechanical_goal_confirmed':False,'proposed_action':'preserve_observed_mobility','motion_verified':False}
         relationships.append(row)
         neighbors[a].append(row);neighbors[b].append(row)

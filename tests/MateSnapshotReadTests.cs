@@ -31,15 +31,15 @@ class ReadDimension:IDimension,IDisplayDimension {
 }
 class ReadDefinition:IConcentricMateFeatureData,IGearMateFeatureData,IScrewMateFeatureData,IDistanceMateFeatureData {
  public bool Locked=true,Reversed=true;public double Numerator=2,Denominator=3;
- public int RevolutionMode=1;public double Lead=.3,Minimum=.001,Maximum=.755;public bool Advanced;
- public int RevolutionType{get{return RevolutionMode;}}public double RevolutionVal{get{return Lead;}}public int MateAlignment{get{return 1;}}
+ public int RevolutionMode=1;public double Lead=.3,Minimum=.001,Maximum=.755;public bool Advanced,ThrowAlignment;
+ public int RevolutionType{get{return RevolutionMode;}}public double RevolutionVal{get{return Lead;}}public int MateAlignment{get{if(ThrowAlignment)throw new Exception("UNTRUSTED_FEATURE_ALIGNMENT_READ");return 1;}}
  public bool IsAdvancedMate{get{return Advanced;}}public double MinimumDistance{get{return Minimum;}}public double MaximumDistance{get{return Maximum;}}public bool FlipDimension{get{return false;}}
  public bool LockRotation{get{return Locked;}}public double GearRatioNumerator{get{return Numerator;}}
  public double GearRatioDenominator{get{return Denominator;}}public bool Reverse{get{return Reversed;}}
 }
 class ReadMate:IMate2 {
- public int Kind,TypeReads;public bool MissingDimension;public ReadDimension Dimension=new ReadDimension();public ReadEntity[] Entities;
- public int Type{get{TypeReads++;return Kind;}}public int Alignment{get{return 1;}}
+ public int Kind,TypeReads,ActualAlignment=1;public bool MissingDimension;public ReadDimension Dimension=new ReadDimension();public ReadEntity[] Entities;
+ public int Type{get{TypeReads++;return Kind;}}public int Alignment{get{return ActualAlignment;}}
  public object[] DisplayDimension2{get{return new object[]{MissingDimension?null:Dimension};}}
  public int GetMateEntityCount(){return Entities.Length;}public IMateEntity2 MateEntity(int i){return Entities[i];}
 }
@@ -98,6 +98,8 @@ class MateSnapshotReadTests {
     if(mode.Contains("missing"))f.MissingDefinition=true;
     if(mode.Contains("invalid_bounds"))f.Definition.Minimum=2;
     if(mode.Contains("invalid_lead"))f.Definition.Lead=double.NaN;
+    if(mode.Contains("invalid_alignment"))f.Mate.ActualAlignment=999;
+    if(mode.Contains("untrusted_definition_alignment"))f.Definition.ThrowAlignment=true;
     if(mode.Contains("missing")||mode.Contains("invalid_")){Console.WriteLine(Cad.Json.Serialize(new{error=Error(()=>cad.TestRead(w.Doc,false,identityMode,identityMode))}));return 0;}
     string before=cad.TestRead(w.Doc,false,identityMode,identityMode);
     if(mode.Contains("changed_current"))f.Mate.Dimension.Value=.1;
@@ -105,6 +107,7 @@ class MateSnapshotReadTests {
     if(mode.Contains("changed_lead"))f.Definition.Lead=.4;
     if(mode.Contains("changed_reverse"))f.Definition.Reversed=false;
     if(mode.Contains("changed_mode"))f.Definition.RevolutionMode=0;
+    if(mode.Contains("changed_alignment"))f.Mate.ActualAlignment=0;
     string after=cad.TestRead(w.Doc,false,identityMode,identityMode);Console.WriteLine(Cad.Json.Serialize(new{changed=before!=after,rows=Cad.Json.DeserializeObject(after)}));return 0;
    }
    if(mode=="identity_without_refs")refs=false;

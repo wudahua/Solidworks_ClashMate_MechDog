@@ -1,5 +1,19 @@
 # AI 客户端与开发者契约
 
+## alpha.41 首轮分类、自动预演及退出后异常归档
+
+`prepare_mechanism_task(task_kind="assembly_constraints")`返回`assembly_assessment`：组件逐项状态、category_counts、完整记账、剩余候选游标、未决连接对、集中用途问题和受限已有耦合路线。它是确认前观察，不认证机械意图、运动、缺项或全局自由度。组件有其他目标仍可能存在未决连接对；候选缺席不证明不需约束。只读参考身份失败继续报告全部结构，但保持写入禁止。
+
+`plan_mechanism_task(auto_plan=true)`是新增布尔参数，不是新增工具。仅用于尚未有待确认方案的普通assembly_constraints整装配任务；不能混用手写目标、组、固定释放名单、层选择或序列动作。最多8页候选、16个自动目标，超预算给出技术原因，不让用户猜参数；原普通整装配规划上限不变。不满足完整搜索、支持组合、全部组件及待定连接处理条件时返回分类和澄清/范围原因，不派发CAD、不创建令牌。满足条件时仍走原普通规划、当前原生状态核对和whole_assembly原生预演；确认机械用途、精确补项和试验范围后方可execute。零新增并不证明运动通过。`assembly_assessment.observation_stage`及native_verified/confirmed字段表达快照阶段，不能将预演前分类冒充执行结论；执行结果读verification和finish。
+
+丝杆已有耦合仍只能以声明范围独立检查，整装配自动组合不混入它。固定标志不直接构成刚性组；直接支持秩不足的瞬时投影不充当机械用途。大型、未知参考、复杂耦合、健康故障等仍可能仅报告或需要澄清，不自动批量锁死、删除或修复原配合。
+
+原生螺旋/限位距离的对齐签名统一读取一次`IMate2.Alignment`，仅接受swMateAlign_e的0/1/2，同时作为该配合外层与参数层的对齐值；不再依赖本机限位定义`MateAlignment`返回的越界整数。上下界、比例、方向等仍逐项读取保护；不是忽略对齐或放宽签名。依据为原生实际配合Alignment接口及本机前后读回，不据此推断所有COM异常根因。
+
+`get_mechanism_task`可提供`dead_native_retirement`。仅同一保留CAD Popen已观察退出、当前owner/创建身份/模型/运行目录绑定、原请求已结束、无pending/quarantine且完整响应哈希匹配时eligible；不采用裸PID存活或心跳替代证据。默认finish要求ORPHAN_CLOSE_CONFIRMATION_REQUIRED；明确`close_unrestored=true`后再次核对，只stdin EOF并等待本执行器退出，保持未知日志和副本，不调用CAD、不恢复或强杀。结束为closed_unverified、failed_native_exited_resources_released、previous_task_passed=false、restoration_status=not_verified；原失败保留。执行器退出不确认则继续持有任务和租约。CAD仍活、请求未结束或身份不明仍拒绝。
+
+真实CAD的已退出资源归档采用“空闲执行器先EOF，再正常ExitApp”的受控中断安排；不是实际崩溃复现，也未原生覆盖“CAD先退出而执行器仍活”的顺序，后者仅离线夹具覆盖。历史崩溃根因未消除。本机通过、失败保留和未验证范围须分别报告。
+
 alpha.31整装配间接约束：`connection_review.assembly_constraint_graph`在完整清单内构造受支持瞬时约束模型，列出内部刚性组、地面约束观察、配合连接分区、阵列依赖和未知项。分区只包含已观察的配合边，不是整机断连证明；阵列依赖不是刚性运动证明。未知方程不加入受支持矩阵，但必须保留其存在与不确定性，不能据此认定额外自由度或缺配合。`global_DOF_certified`和`motion_verified`仍为false。
 
 草案保留`supported_direct_rank`和`supported_whole_inventory_effective_rank`，逐个选项的`supported_whole_inventory_missing_coordinates_if_goal_chosen`只在该目标成立时表示所需独立增补数。它与规划器共用秩判据，并在独立副本矩阵中计算，不修改共享快照；全部候选的`missing_connection_proven`仍为false。间接约束已充分时不添加冗余配合，与间接链冲突时在原生预演前返回`CONNECTION_GOAL_CONFLICT`及`existing_indirect_constraints_conflict_with_declared_motion`。这些线性关系不能取代原生预演、小位移验证和恢复。
