@@ -1,5 +1,7 @@
 """Check entry point classification; native CAD is always an explicit workflow."""
 ENTRIES = {
+    "test_mate_snapshot": {"mode": "unittest", "caller": "test_mate_snapshot.py", "scope": "actual production collector vs frozen alpha38 reader with pure getter stand-ins; no CAD or COM"},
+    "MateSnapshotReadTests": {"mode": "manual_offline", "scope": "compiled by test_mate_snapshot; production collector bytes, mutation and error parity with no SolidWorks DLL"},
   "LayeredConnectionGuardFixture": {"mode": "native_cad", "scope": "actual owned non-target fixed-flag disturbance, expected refusal and whole-copy restoration"},
   "LayeredConnectionFixture": {"mode": "native_cad", "scope": "wrap only an already isolated registered assembly copy, no source edits"},
   "layered_connection_fixture_native": {"mode": "native_cad", "scope": "explicit owned import and wrapper generation; source hashes and producer exit separate"},

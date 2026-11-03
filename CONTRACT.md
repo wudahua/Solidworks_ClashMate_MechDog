@@ -325,3 +325,12 @@ plan_mechanism_task 增加 assembly_sequence=start/continue/stop，不能混用�
 prepare返回`connection_review.mode=readonly_structure`、`write_scope_allowed=false`和`all_mates_sufficient=null`。原始参考诊断在`constraint_structure.native_reference_identity_issue`，同时进入写入阻断清单。组件／层级仍是冻结分页快照，结构完整不代表几何缺项、全局自由度、递归子文档健康或完整运动已认证。只读上限500、写入原128节点及唯一刚性文档边界保持。预演、范围选择、序列启动、执行和保留未经验证成果均拒绝；AI解释已有结果后finish恢复收尾。
 
 低层配合预演、检查点和其他调用仍要求完整身份，返回明确错误后由AI核对证据；没有普遍吞掉异常或自动改引用。相同错误码但其他reason、缺少明确未写入声明、未知原生状态和COM故障继续原失败流程，不进入只读转接。不可读取不是“已证明引用丢失”，没有自动删除、压缩、猜测替换或补冗余配合。
+
+
+## alpha.39 单次同步快照与读取契约
+
+`ImportMateParameters`和`ProbeWorkingState.MateIdentity`共用字段读取实现；只在单次同步调用内部复用原生配合对象、类型以及按原生组件对象索引的名称。每个新快照独立建立清单和名称表，不按文件路径合并不同实例，不跨请求、写入、配置或重开复用。未知配合类型、对齐、锁旋转、距离、角度、组件绑定、抑制、齿轮比例与方向保持原字段；身份模式仍核验每项持久参考。显式要求计算参考但不返回参考的参数模式也保持原校验。
+
+原生getter失败仍使整个快照失败。持久参考对象或字节为空仍为`CONNECTION_REFERENCE_INVALID`和`native_mate_reference_identity_unavailable`，保留原诊断；只读转接条件不变，不把未观察字段当成已通过。每次扰动前后及恢复后全部原配合、固定状态、数量和姿态检查不删减；检查点恢复路径未改。
+
+冻结的alpha.38读取器仅供已有、显式故障测试开关保护的内部对照入口，不增加公开MCP工具；正常任务调用新读取器。同文档交替读取比较完整JSON字节而非少量字段，另验证一次原生状态变化和恢复后输出。读取器计时和整项任务耗时分开，不能将局部加速比乘到整条链路，也不能把受控缺项开发变体计为独立真实新机构。
