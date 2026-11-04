@@ -61,6 +61,8 @@ def build(survey,review,overview,draft,binding=''):
             'accounting_complete':overview.get('accounting_complete') is True,'automatic_plan_available':False,
             'mechanical_intent_inferred':False,'native_motion_verified':False,'write_dispatched':False,'confirmation_token_created':False,
             'scope':'first_pass_proposed_goals_not_arbitrary_assembly_completion'}
+    from . import group_review
+    result['group_seed_suggestions']=group_review.seed_suggestions(survey,overview)
     if not result['accounting_complete'] or len(by)!=len(cs):
         result.update(status='inventory_incomplete',accounting_complete=False,components=[]);return result
     # Keep the bounded search visible; no last-page or missing-candidate claim.
@@ -166,5 +168,5 @@ def build(survey,review,overview,draft,binding=''):
                 suggested_plan_arguments={'connection_intent':goals,'completion_scope':'whole_assembly'},
                 confirmation_scope='confirm_proposed_mechanical_goals_and_precise_supplements_before_execute')
         else:result['proposal_review_issues'].append({'reason':'existing_coupling_requires_declared_goal_scope'})
-    result['instruction']='AI先给出全部组件的分类及建议连接。候选机械用途需要在具体方案中确认；已有关系足够可以新增0项。未覆盖、未知或超范围不能算完成。只在自动方案可用时auto_plan=true读取原生预演，否则集中澄清后使用普通连接目标。'
+    result['instruction']='AI先给出全部组件的分类及建议连接。复用用户已明确的机械用途，自动选运动组代表件，以group_seeds只读推荐附件归属；仅有冲突或可能改变既有运动的归属集中澄清，不让用户逐个指定零件。分组和候选用途仍须具体方案确认；已有关系足够可以新增0项。未覆盖、未知或超范围不能算完成。只在自动方案可用时auto_plan=true读取原生预演，否则按明确用途使用普通连接目标及rigid_groups。'
     return result
