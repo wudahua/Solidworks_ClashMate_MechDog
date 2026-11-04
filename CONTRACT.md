@@ -1,5 +1,15 @@
 # AI 客户端与开发者契约
 
+## alpha.43 普通局部组的完整阵列种子链
+
+assembly_constraints普通rigid_groups新增有界准入，不增工具或参数。局部组仍最多32成员，展开最多8连接目标，机械归属须明确；AI可从group_seeds返回的已观察种子归属假设组合完整局部组，不能由几何接近或固定标志推断用途。
+
+新局部路径只支持原生LocalLPattern/LocalCirPattern。结构特征扫描完整、issues为空、组件身份/布尔阵列标志齐全且唯一；每个派生件的父特征与阵列子特征双向一致，原生种子非空、无陌生成员、同组且无循环。递归种子须完整，同一共享链只检查一次；GetParents取到64、GetChildren取到256上限时保守拒绝，不冒充完整。未知/被压缩类型、种子跨组、缺失与截断返回CONNECTION_SCOPE_UNSUPPORTED及pattern_group_requires_seed_scope_review，诊断给出scope_reason和可识别种子名称；AI先核对同用途范围，不让用户抄实体ID、不重试写派生件。原整装配路径和覆盖要求不变。
+
+pattern_scope_reviews记录种子和特征身份，不是刚性证明。派生件不生成单独配合动作，只保留group_bindings；每项真实有界试验核对全部绑定、旧连接、固定状态与全组件恢复。verification.declared_pattern_bindings_checked_per_trial明确数量。已有刚性种子的零新增方案须包含明确验证目标才执行试验；纯只读“无需新增”答复不能记作运动认证。默认finish恢复导入状态，仅明确要求才保留已验证副本。
+
+整件轴承的静止归属来自此前明确机械目标，本例4件不是内外圈分别建模，不认证滚动接触、摩擦或受力；其他模型不能按bearing名称自动归静止。没有放宽原生全约束冲突、旧配合保护、姿态预算或未知状态恢复门禁。
+
 ## alpha.42 通用命名运动组的只读推荐
 
 `plan_mechanism_task(group_seeds={组名:[代表件名称,...],...})`仅用于assembly_constraints的只读归属查询。AI应自行从已明确机械用途选择代表件，可参考assembly_assessment.group_seed_suggestions；疑义才集中问用户，不要求用户逐件选零件或抄ID。支持1–128个命名组，每组1–128个不重叠代表件，当前只限平层装配或已选内部层的平层清单；普通具体rigid_groups仍为最多8组。多个独立运动件可各为单件组，不强行锁成刚性组。片段超过8个非单件组时明确plan_fragment_blockers，不截断输出部分计划。

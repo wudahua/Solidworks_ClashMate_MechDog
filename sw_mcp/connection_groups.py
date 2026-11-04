@@ -8,6 +8,54 @@ class GroupIntentError(ValueError):
         self.diagnostics=diagnostics;super().__init__(reason)
 
 
+def _local_pattern_scope(survey,ids,patterns,label):
+    """Admit only complete, observed local seed chains in one declared group.
+
+    This verifies dependency identity, not rigidity. Every derived member stays
+    a verification binding; native seeds receive ordinary minimum complements.
+    """
+    structure=survey.get('structural_relations') or {};by={c['component_id']:c for c in survey['components']}
+    def stop(reason,**details):raise GroupIntentError('pattern_group_requires_seed_scope_review',group=label,scope_reason=reason,**details)
+    observed=structure.get('components',[]);features=structure.get('patterns',[])
+    if structure.get('feature_inventory_truncated') is not False or structure.get('issues')!=[]:
+        stop('structural_inventory_incomplete_or_unresolved')
+    rows={r['component_id']:r for r in observed}
+    if len(rows)!=len(observed) or set(rows)!=set(by) or any(type(r.get('is_pattern_instance')) is not bool for r in observed):
+        stop('structural_component_inventory_mismatch')
+    feature_rows={r['native_feature_id']:r for r in observed}
+    native={r['native_feature_id']:r for r in features}
+    if len(feature_rows)!=len(rows) or len(native)!=len(features) or set(feature_rows)&set(native):stop('structural_feature_identity_ambiguous')
+    reviewed={}
+    def visit(cid,path):
+        if cid not in ids:stop('seed_outside_declared_group',required_seed_instances=[by[cid]['instance']] if cid in by else [],unresolved_seed_ids=[] if cid in by else [cid])
+        if cid not in patterns:return
+        if cid in path:stop('cyclic_pattern_seed_dependency',instance=by[cid]['instance'])
+        if cid in reviewed:return
+        row=rows[cid];fid=row['native_feature_id'];parents={p['native_feature_id'] for p in row.get('parent_features',[])}
+        if len(row.get('parent_features',[]))>=64:stop('pattern_parent_scan_limit_reached',instance=by[cid]['instance'])
+        matched=[p for k,p in native.items() if k in parents or any(c['native_feature_id']==fid for c in p.get('child_features',[]))]
+        if not matched:stop('pattern_feature_not_identified',instance=by[cid]['instance'])
+        seeds=set()
+        for p in matched:
+            if p.get('suppressed') is not False or p.get('type') not in {'LocalLPattern','LocalCirPattern'}:
+                stop('native_pattern_type_or_suppression_requires_review',instance=by[cid]['instance'])
+            if not p.get('seed_component_ids'):stop('pattern_seed_identity_unavailable',instance=by[cid]['instance'])
+            if len(p.get('child_features',[]))>=256:stop('pattern_child_scan_limit_reached',instance=by[cid]['instance'])
+            if p['native_feature_id'] not in parents or not any(c['native_feature_id']==fid for c in p.get('child_features',[])):
+                stop('pattern_parent_child_observations_disagree',instance=by[cid]['instance'])
+            seeds.update(p['seed_component_ids'])
+        # Preserve additional observed component dependencies, never drop a
+        # foreign/omitted seed to manufacture an apparently closed chain.
+        seeds.update(feature_rows[k]['component_id'] for k in parents if k in feature_rows)
+        if cid in seeds:stop('cyclic_pattern_seed_dependency',instance=by[cid]['instance'])
+        for seed in sorted(seeds):visit(seed,path|{cid})
+        reviewed[cid]={'component_id':cid,'instance':by[cid]['instance'],'seed_component_ids':sorted(seeds),
+            'pattern_feature_ids':sorted(p['native_feature_id'] for p in matched),
+            'native_pattern_preserved':True,'individual_mate_write_allowed':False,'rigid_motion_proven':False}
+    for cid in sorted(set(ids)&patterns):visit(cid,set())
+    return list(reviewed.values())
+
+
 def expand(survey,intents,groups=None,release_names=None,whole_assembly=False):
     cs=survey['components'];by={c['component_id']:c for c in cs};names={}
     hierarchy=assembly_hierarchy.analyze(cs)
@@ -32,7 +80,7 @@ def expand(survey,intents,groups=None,release_names=None,whole_assembly=False):
     if released and not any(c.get('fixed_component') is True and hierarchy['parents'][c['component_id']] is None and c['component_id'] not in released for c in cs):
         raise GroupIntentError('fixed_release_requires_an_existing_fixed_reference_to_remain')
     moving={g['component_a'] for g in intents if g['kind']!='rigid'}
-    memberships={};normalized=[];group_names=set()
+    memberships={};normalized=[];group_names=set();pattern_reviews=[]
     for raw in groups or []:
         if not isinstance(raw,dict) or set(raw)-{'name','members','anchor'}:raise GroupIntentError('invalid_rigid_group_fields')
         label=raw.get('name');members=raw.get('members');anchor_name=raw.get('anchor','')
@@ -46,7 +94,7 @@ def expand(survey,intents,groups=None,release_names=None,whole_assembly=False):
         for cid in ids:memberships[cid]=label
         if any(g['kind']!='rigid' and g['component_a'] in ids and g['component_b'] in ids for g in intents):raise GroupIntentError('mobile_joint_inside_declared_rigid_group',group=label)
         if any(cid in patterns for cid in ids):
-            if not whole_assembly:raise GroupIntentError('pattern_group_requires_seed_scope_review',group=label)
+            if not whole_assembly:pattern_reviews.extend(_local_pattern_scope(survey,ids,patterns,label))
             deps={r['component_id']:r for r in assembly_constraints.analyze(cs,survey['mates'],structural_relations=survey.get('structural_relations'))['pattern_dependencies']}
             def valid_seed(cid,seen):
                 if cid not in ids:return False
@@ -122,6 +170,7 @@ def expand(survey,intents,groups=None,release_names=None,whole_assembly=False):
     return {'status':'group_expanded' if active else 'supported_groups_need_no_write',
         'goals':active,'planning_survey':virtual,'group_bindings':bindings,'rigid_groups':normalized,'skipped_existing_pairs':skipped,
         'construction_reference_choices':references,
+        'pattern_scope_reviews':pattern_reviews,
         'fixed_state_changes':[{'component_id':cid,'instance':by[cid]['instance'],'before':True,'after':False,'action':'release_fixed','reason':'explicit_declared_motion_or_rigid_group_target'} for cid in released],
         'unassigned_components':[c['instance'] for c in cs if c['component_id'] not in assembly_hierarchy.inherited_coverage(set(memberships)|{g[k] for g in active for k in ('component_a','component_b')},hierarchy)[0]],
         'mechanical_ownership_of_unassigned_components_inferred':False,'write_dispatched':False}

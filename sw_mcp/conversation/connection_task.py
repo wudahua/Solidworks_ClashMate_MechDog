@@ -58,6 +58,7 @@ def publish_review(engine,t,value):
         t['next_action'].update(arguments={'task_id':t['task_id'],'auto_plan':True},instruction='AI解释首轮完整分类，自动读取建议目标的原生预演。建议机械用途仍待具体方案确认，不直接execute。')
     elif assessment.get('group_seed_suggestions'):
         t['next_action']['instruction']+='组件较多时，AI先复用已明确用途和group_seed_suggestions，自选各运动组代表件调用group_seeds只读推荐附件；只集中澄清仍冲突的归属，不把选代表件或逐件填清单交给用户。'
+    t['next_action']['instruction']+='阵列件优先按已观察的完整种子链组成同用途局部组，仅为种子补必要约束，保留派生关系并逐次验证全部组成员；不要求用户逐个指定派生件。'
 
     if value.get('constraint_structure'):
         from .constraint_inventory import publish
@@ -207,6 +208,7 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
             raise ValueError('coupled_verification_cannot_mix_supplements')
         if expansion:
             proposal.update(group_bindings=expansion['group_bindings'],rigid_groups=expansion['rigid_groups'],
+                pattern_scope_reviews=expansion.get('pattern_scope_reviews',[]),
                 fixed_state_changes=expansion['fixed_state_changes'],skipped_existing_pairs=expansion['skipped_existing_pairs'],
                 unassigned_components=expansion['unassigned_components'],mechanical_ownership_of_unassigned_components_inferred=False)
     except (ValueError,TypeError) as error:
@@ -218,6 +220,7 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
             'existing_indirect_constraints_conflict_with_declared_motion':'受支持的间接约束链与目标运动冲突；AI核对整装配约束图，不把直接配合较少当成缺项，不自动删除旧约束。',
             'proposed_group_constraints_conflict_with_declared_motion':'整组补充约束会限制已声明的运动；方案未派发，AI核对分组或未解除的固定，不部分提交。',
             'both_components_fixed_no_floating_target_for_native_trial':'目标两件均固定；先澄清机械目标，未自动解除固定。'}.get(reason,'连接目标或当前受支持范围未通过校验；AI核对诊断，不重试写入。')
+        if reason=='pattern_group_requires_seed_scope_review':explanation='局部阵列的种子链、原生关系或同组范围未完整认证。AI先核对诊断中的种子归属并补全同用途组；不让用户逐个填写实体，不对派生件重试写入。'
         raise core.StopBatch(code,explanation,{'reason':reason,'cad_dispatched':False,'write_dispatched':False,
             'native_state_review_path':str(s.folder/'通用配合体检.json'),
             'constraint_graph_path':str(s.folder/'整装配约束图.json'),
@@ -256,6 +259,7 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
             'batches':transaction['batches'] if whole else None,'component_coverage':proposal.get('component_coverage'),
             'all_or_restore_import_checkpoint':whole,'omitted_native_feature_ids':proposal['omitted_native_feature_ids'],
             'group_bindings':proposal.get('group_bindings',[]),'rigid_groups':proposal.get('rigid_groups',[]),
+            'pattern_scope_reviews':proposal.get('pattern_scope_reviews',[]),
             'skipped_existing_pairs':proposal.get('skipped_existing_pairs',[]),'unassigned_components':proposal.get('unassigned_components',[]),
             'scope':'declared_basic_joints_small_trials_only_not_global_DOF_or_full_travel',
             'finish_policy':'restore_import_checkpoint_by_default'},
@@ -355,6 +359,7 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
             'connection_count':declared_count,'existing_supported_connection_checks':len(bounds)-declared_count-group_extra_count-hierarchy_extra_count,
             'native_rigid_subassembly_binding_checks':hierarchy_extra_count,
             'additional_group_binding_checks':group_extra_count,'declared_group_bindings_checked_per_trial':len(t['proposal'].get('group_bindings',[])),
+            'declared_pattern_bindings_checked_per_trial':len(t['proposal'].get('pattern_scope_reviews',[])),
             'existing_connection_scope':'supported_native_pair_relations_only_not_unknown_constraints_or_global_DOF',
             'omitted_native_feature_ids':observed['omitted_native_feature_ids'],
             'coupled_verification_only':bool(coupled_bounds),'persistent_mates_added_for_coupled_review':0 if coupled_bounds else None,
