@@ -56,6 +56,8 @@ def publish_review(engine,t,value):
             'instruction':'AI先解释原生配合故障、压缩项及局部连接线索。按用户已说明的机械目标，用connection_intent填写组件名称及rigid/revolute/prismatic；可自动采用唯一几何轴线，仅真实歧义才集中询问。不把局部秩当全机构自由度，不为消除浮动而锁死运动。若仅体检，可直接finish恢复收尾。'})
     if assessment.get('automatic_plan_available'):
         t['next_action'].update(arguments={'task_id':t['task_id'],'auto_plan':True},instruction='AI解释首轮完整分类，自动读取建议目标的原生预演。建议机械用途仍待具体方案确认，不直接execute。')
+    elif assessment.get('group_seed_suggestions'):
+        t['next_action']['instruction']+='组件较多时，AI先复用已明确用途和group_seed_suggestions，自选各运动组代表件调用group_seeds只读推荐附件；只集中澄清仍冲突的归属，不把选代表件或逐件填清单交给用户。'
 
     if value.get('constraint_structure'):
         from .constraint_inventory import publish
@@ -108,13 +110,37 @@ def select_scope(engine,t,row):
     engine.save(t)
 
 
-def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint='',auto_plan=False):
+def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint='',auto_plan=False,group_seeds=None):
     if type(auto_plan) is not bool:raise core.StopBatch('CONNECTION_INTENT_INVALID','auto_plan须为布尔值。')
     if completion_scope not in {'declared','whole_assembly'}:raise core.StopBatch('CONNECTION_INTENT_INVALID','completion_scope须为declared或whole_assembly。')
     whole=completion_scope=='whole_assembly'
     engine._require_session(t['task_id'])
     if t['phase'] not in {'constraint_review_ready','awaiting_confirmation'}:raise core.StopBatch('TASK_NOT_READY_FOR_PLAN')
     s=engine.sessions[t['task_id']]
+    if group_seeds is not None:
+        if intents is not None or rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared' or assembly_scope_hint or auto_plan:
+            raise core.StopBatch('CONNECTION_INTENT_INVALID','group_seeds仅只读推荐归属，不混用写入目标、范围选择或自动预演。')
+        from .constraint_inventory import require_write_scope
+        require_write_scope(t)
+        from .. import group_review
+        if not isinstance(group_seeds,dict):raise core.StopBatch('CONNECTION_INTENT_INVALID','group_seeds须为命名运动组到代表件名称列表。')
+        normalized={}
+        for label,names in group_seeds.items():
+            if not isinstance(names,list):raise core.StopBatch('CONNECTION_INTENT_INVALID','每组代表件须为名称列表。')
+            normalized[label]=[]
+            for name in names:
+                if not isinstance(name,str) or not name.strip():raise core.StopBatch('CONNECTION_INTENT_INVALID','代表件名称不能为空。')
+                found=matching_components(s.connection_survey['components'],name,None)
+                if len(found)!=1:return {'task_id':t['task_id'],'needs_mechanical_clarification':True,'group':label,'name_hint':name,
+                    'choices':mechanical_choices(s.connection_survey['components'],name,None),'write_dispatched':False,'confirmation_token_created':False,
+                    'question':'请用用途或实例后缀澄清这个组的代表件；AI不要求实体ID。'}
+                normalized[label].append(found[0]['instance'])
+        try:result=group_review.recommend(s.connection_survey,normalized)
+        except (ValueError,TypeError) as error:raise core.StopBatch('CONNECTION_INTENT_INVALID','运动组推荐输入或范围未通过核对。',{'reason':str(error),'cad_dispatched':False}) from error
+        path=s.folder/('装配分组推荐-'+uuid.uuid4().hex+'.json');core.write(path,result)
+        t['group_recommendation']={**result,'evidence_path':str(path),'observation_scope':'prepare_snapshot_not_current_native_preflight'};engine.save(t)
+        return {'task_id':t['task_id'],'group_recommendation':t['group_recommendation'],'write_dispatched':False,'confirmation_token_created':False,
+            'pending_plan_preserved':t['phase']=='awaiting_confirmation','instruction':result['instruction']}
     if auto_plan:
         if (t.get('connection_review') or {}).get('write_scope_allowed') is False:
             from .constraint_inventory import require_write_scope

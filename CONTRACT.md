@@ -1,5 +1,17 @@
 # AI 客户端与开发者契约
 
+## alpha.42 通用命名运动组的只读推荐
+
+`plan_mechanism_task(group_seeds={组名:[代表件名称,...],...})`仅用于assembly_constraints的只读归属查询。AI应自行从已明确机械用途选择代表件，可参考assembly_assessment.group_seed_suggestions；疑义才集中问用户，不要求用户逐件选零件或抄ID。支持1–128个命名组，每组1–128个不重叠代表件，当前只限平层装配或已选内部层的平层清单；普通具体rigid_groups仍为最多8组。多个独立运动件可各为单件组，不强行锁成刚性组。片段超过8个非单件组时明确plan_fragment_blockers，不截断输出部分计划。
+
+此查询不能混用connection_intent、rigid_groups、固定释放、completion_scope、层选择、序列或auto_plan。不访问CAD，不创建令牌；待确认方案不被撤销或改写。返回group_recommendation及持久证据路径，完整结果亦保存在任务记录；观察来自prepare快照，不是当前原生预检。名称歧义给可理解的实例选择；真正规划仍重新核对当前原生引用、参数、健康和姿态。
+
+传播只使用健康、已识别的原生参考拓扑和已有内部刚性观察，固定标志或名称本身不产生附件归属。原方程不能支持时仍保留其拓扑及不确定性，不能删除该边后虚构唯一组路径；无完整参考、健康故障或多组路径继续待定。已连到代表件的内部刚性观察可先保留；它不是有限运动或设计用途证明。名称仅用于对疑似整件轴承增加否定性歧义提示，不能据此正向归静止/轴组。跳过的未定轴承或参考边界仍保留阻断，不能把它另一侧的零件误判为唯一归属。全部轴承和定距环的具体用途可复用当前对话此前的明确确认。
+
+原生阵列的同组种子只传播归属假设，不证明阵列运动。不支持种子或冲突不自动消除。group_membership_reviews逐组列出建议和可能被消除的现有相对运动；mechanical_questions集中列出待定归属，支持分别保留独立运动。all_memberships_proposed只表示每件都有草案；membership_confirmed、motion_verified仍false，不是配合完善或用户已确认。
+
+plan_input_fragment只给普通rigid_groups的待审核片段，不自动推断组间运动、宣称whole_assembly、释放固定或派发补齐。AI结合已明确用途补全普通connection_intent，获得具体原生方案和精确范围确认后再execute。80件分组完整不代表应在一次事务中全部写入；本轮真实减速器仅验证单盖板局部补齐和两轴运动保留，整机附件补齐未认证。原安全门禁、原始配合保留、位姿预算、失败恢复和未知状态不重试规则不变。
+
 ## alpha.41 首轮分类、自动预演及退出后异常归档
 
 `prepare_mechanism_task(task_kind="assembly_constraints")`返回`assembly_assessment`：组件逐项状态、category_counts、完整记账、剩余候选游标、未决连接对、集中用途问题和受限已有耦合路线。它是确认前观察，不认证机械意图、运动、缺项或全局自由度。组件有其他目标仍可能存在未决连接对；候选缺席不证明不需约束。只读参考身份失败继续报告全部结构，但保持写入禁止。

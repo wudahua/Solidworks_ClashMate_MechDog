@@ -1,5 +1,6 @@
 """Check entry point classification; native CAD is always an explicit workflow."""
 ENTRIES = {
+    "test_group_review": {"mode":"unittest","caller":"test_group_review.py","scope":"named mechanical seeds, ambiguous paths, no hidden locking or CAD dispatch"},
     "test_assembly_assessment": {"mode":"unittest","caller":"test_assembly_assessment.py","scope":"first-pass full component accounting and bounded proposed goals, no CAD"},
     "test_dead_native_close": {"mode":"unittest","caller":"test_dead_native_close.py","scope":"retained exited CAD and completed response retirement; no CAD or termination"},
     "test_coupled_connections": {"mode":"unittest","caller":"test_coupled_connections.py","scope":"zero-supplement screw linkage eligibility and numeric material-frame audit; no CAD"},
