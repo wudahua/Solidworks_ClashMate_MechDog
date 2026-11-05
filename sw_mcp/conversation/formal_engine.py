@@ -5,6 +5,15 @@ from .task_engine import core,release_executor
 from .motion_tasks import MotionTaskEngine,validate_prepare_arguments
 
 
+class _ManagedRecoveryBridge:
+    """Keep SDK validation, but wait on the session's one original request."""
+    def __init__(self,session):self.session=session
+    def __getattr__(self,name):return getattr(self.session.bridge,name)
+    def request(self,operation,**arguments):
+        if operation=='restore_model_checkpoint':return self.session.call(operation,**arguments)
+        return self.session.bridge.request(operation,**arguments)
+
+
 class FormalEngine:
     def __init__(self,project,work,runtime):
         import motion_server as product
@@ -72,7 +81,7 @@ class FormalEngine:
                 if name=='restore_model_checkpoint':
                     if self.tasks.tasks[self.tasks.active].get('busy'):raise core.StopBatch('TASK_BUSY')
                     recovery_session.admit_owned_recovery(arguments.get('model_id'),arguments.get('checkpoint_id'),arguments.get('allow_replacement_session',False))
-                self.product.bridge=recovery_session.bridge;bridge_override=True
+                self.product.bridge=(_ManagedRecoveryBridge(recovery_session) if name=='restore_model_checkpoint' else recovery_session.bridge);bridge_override=True
             if binding:
                 from sw_mcp.artifacts import Artifacts
                 runtime,task,session=binding

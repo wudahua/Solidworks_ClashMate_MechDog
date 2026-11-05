@@ -209,6 +209,49 @@ class CompletionTests(unittest.TestCase):
         s=self.fixture();s['mates']=[mate(1,'a','b','lock')]
         self.assertEqual(self.plan(s)['actions'],[])
 
+    def full_native(self,s):
+        s['components'][1]['constraint_state']={'status':'observed','native_value':3,'fully_constrained':True}
+        return s
+
+    def test_native_full_stationary_is_preserved_without_fabricating_supported_rank(self):
+        s=self.full_native(self.fixture());p=self.plan(s)
+        self.assertEqual(p['actions'],[]);self.assertEqual(p['initial_supported_rank'],p['planned_supported_rank'])
+        self.assertEqual(p['uncompleted_components'],[])
+        r=p['preserved_native_full_stationary_components'];self.assertEqual(len(r),1)
+        self.assertEqual(r[0]['supported_missing_rank'],1);self.assertEqual(r[0]['anchor_component_id'],'a')
+        self.assertFalse(r[0]['supported_target_fulfilment_certified']);self.assertTrue(r[0]['motion_verification_required'])
+        self.assertFalse(p['motion_verified']);self.assertEqual(p['fixed_state_changes'],[])
+
+    def test_unobserved_or_inconsistent_native_flag_does_not_enable_preservation(self):
+        for state in ({'status':'unavailable','native_value':3,'fully_constrained':True},
+                      {'status':'observed','native_value':1,'fully_constrained':True},
+                      {'status':'observed','native_value':True,'fully_constrained':True},
+                      {'status':'observed','native_value':3,'fully_constrained':False}):
+            s=self.fixture();s['components'][1]['constraint_state']=state
+            self.assertEqual(self.plan(s)['preserved_native_full_stationary_components'],[])
+
+    def test_floating_stationary_anchor_cannot_use_native_full_as_grounding_proof(self):
+        s=self.full_native(self.fixture());s['components'][0]['fixed_component']=False
+        self.assertEqual(self.plan(s)['preserved_native_full_stationary_components'],[])
+
+    def test_moving_group_member_cannot_use_stationary_preservation(self):
+        s=self.full_native(self.fixture());p=completion.plan(s,{'stationary':['a'],'input':['i','b'],'output':['o']},{'stationary':'a','input':'i','output':'o'})
+        self.assertEqual(p['preserved_native_full_stationary_components'],[])
+
+    def test_child_or_subassembly_cannot_use_top_level_part_preservation(self):
+        for fields in ({'parent_component_id':'parent'},{'document_type':2}):
+            s=self.full_native(self.fixture());s['components'][1].update(fields)
+            self.assertEqual(self.plan(s)['preserved_native_full_stationary_components'],[])
+
+    def test_unmated_or_unhealthy_component_cannot_use_native_full_preservation(self):
+        s=self.full_native(self.fixture());s['mates']=[];self.assertEqual(self.plan(s)['preserved_native_full_stationary_components'],[])
+        s=self.full_native(self.fixture())
+        for m in s['mates']:m['suppressed']=True
+        self.assertEqual(self.plan(s)['preserved_native_full_stationary_components'],[])
+        for fields in ({'warning':True},{'error':1}):
+            s=self.full_native(self.fixture());s['mates'][0].update(fields)
+            self.assertEqual(self.plan(s)['preserved_native_full_stationary_components'],[])
+
     def test_pattern_child_is_reused_without_individual_constraint(self):
         s=self.fixture();s['structural_relations']={'components':[{'component_id':'b','is_pattern_instance':True}]}
         p=self.plan(s)

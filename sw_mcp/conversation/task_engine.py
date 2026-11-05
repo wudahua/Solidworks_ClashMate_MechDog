@@ -199,6 +199,8 @@ class ConversationSession(mate_worker.Session):
         if self.bridge:
             try:release_executor(self.bridge,self.folder)
             except Exception:self.unknown=True;raise
+            # Retain original handles and response for a later observed CAD exit.
+            self.released_executor_bridge=self.bridge
             self.bridge=None
         if self.proc and self.proc.poll() is not None:
             # Retained process handle, never a new PID lookup or a replacement COM connection.
@@ -271,9 +273,10 @@ class TaskEngine:
             if s and not t.get('busy') and not t.get('closed') and getattr(s,'pending_native_response',None):
                 from . import managed_wait
                 try:
-                    managed_wait.reconcile(s)
-                    proof=getattr(s,'late_response_reconciled',None)
-                    if proof and proof['native_state_known'] and (t.get('error') or {}).get('code')=='CAD_TIMEOUT':
+                    pending=dict(s.pending_native_response)
+                    response=managed_wait.reconcile(s)
+                    proof=managed_wait.matched_completion(s,pending,response,t.get('error'))
+                    if proof and (t.get('error') or {}).get('code')=='CAD_TIMEOUT':
                         t['original_failure']=t.pop('error')
                         t.update(phase='incomplete_after_late_response',late_native_outcome=proof,
                             task_outcome='native_request_ended_whole_task_incomplete',

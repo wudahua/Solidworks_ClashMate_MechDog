@@ -15,8 +15,18 @@ def review(task,session,allow_busy=False):
     try:
         if task.get('busy') and not allow_busy:return block('task_still_busy')
         proc=getattr(session,'proc',None);bridge=getattr(session,'bridge',None)
+        already_released=bridge is None
+        if already_released:bridge=getattr(session,'released_executor_bridge',None)
         if not proc or proc.poll() is None:return block('retained_CAD_exit_not_observed')
         if not bridge or not bridge._process:return block('retained_executor_handle_missing')
+        if already_released:
+            receipt_path=core.no_links(session.folder/'执行器收尾.json')
+            receipt=core.read(receipt_path)
+            if (bridge._process.poll()!=0 or receipt.get('executor_pid')!=bridge._process.pid
+                    or receipt.get('ownership')!='retained_Bridge_Popen' or receipt.get('confirmed') is not True
+                    or receipt.get('executor_exit_code')!=0 or receipt.get('force_kill') is not False):
+                return block('previous_normal_executor_exit_not_proven')
+            result['executor_receipt_sha256']=core.digest(receipt_path)
         ownership=core.read(core.no_links(session.folder/'活会话归属.json'))
         if not str(ownership.get('owner',{}).get('created','')).isdecimal() or same_process(ownership['owner'])['status']!='same':return block('owner_creation_identity_unconfirmed')
         if (ownership.get('owner',{}).get('pid')!=os.getpid() or task.get('server_pid')!=os.getpid()
@@ -29,6 +39,7 @@ def review(task,session,allow_busy=False):
             if identity.get('pid')!=child.pid or not str(identity.get('created','')).isdecimal():return block('bound_resource_identity_missing')
             state=same_process(identity)
             if role=='CAD' and state['status'] not in {'exited','pid_reused'}:return block('CAD_exit_identity_unconfirmed')
+            if role=='executor' and already_released and state['status'] not in {'exited','pid_reused'}:return block('released_executor_exit_identity_unconfirmed')
             if role=='executor' and state['status'] not in {'same','exited','pid_reused'}:return block('executor_identity_unconfirmed')
             if role=='executor' and child.poll() is None and state['status']!='same':return block('live_executor_identity_changed')
         with bridge._state_lock:
@@ -45,7 +56,8 @@ def review(task,session,allow_busy=False):
         result.update(eligible=True,CAD_pid=proc.pid,CAD_exit_code=proc.poll(),executor_pid=bridge._process.pid,
             native_request_id=request,native_response_sha256=response['response_sha256'],
             original_native_status=state.get('status'),same_retained_handles=True,
-            copy_preserved_without_saving=True,journal_rewritten=False,executor_close_method='stdin_EOF_and_observed_exit')
+            copy_preserved_without_saving=True,journal_rewritten=False,executor_already_released=already_released,
+            executor_close_method='previous_normal_EOF_exit_retained_handle' if already_released else 'stdin_EOF_and_observed_exit')
         return result
     except (core.StopBatch,CadError,OSError,ValueError,TypeError,KeyError,AttributeError) as error:
         return block('retirement_evidence_unavailable:'+str(error)[:160])
@@ -59,7 +71,10 @@ def finish(engine,task,session):
     native={'owned_pid':proof['CAD_pid'],'native_process_exited':True,'exit_code':proof['CAD_exit_code'],
             'normal_zero_exit':proof['CAD_exit_code']==0,'force_kill':False,'native_exit_observed_by':'retained_Popen'}
     core.write(session.folder/'exit.json',native)
-    executor=release_executor(session.bridge,session.folder);session.bridge=None
+    if proof['executor_already_released']:
+        executor=core.read(core.no_links(session.folder/'执行器收尾.json'))
+    else:executor=release_executor(session.bridge,session.folder)
+    session.bridge=None;session.released_executor_bridge=None
     session.proc=None;session.ended=True;session.import_restored=False;session.persist_ownership({})
     receipt={'ended':True,'model_id':session.model,'checkpoint_id':session.checkpoint,'runtime':str(session.runtime),
              'import_checkpoint_restored':False,'finish_mode':'failed_native_exited_copy_preserved_without_restore'}

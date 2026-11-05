@@ -31,7 +31,7 @@ def terminal(session, pending):
     response=record['response'];result=response.get('result') or {}
     restoration=result.get('restoration_status',result.get('restoration',{}).get('status','not_required')) if response.get('ok') else response.get('error',{}).get('restoration_status','unknown')
     session.unknown=state.get('recovery_required') is not False or restoration in {'unknown','pending'}
-    proof={'request_id':pending['request_id'],'operation':pending['operation'],'response_sha256':record['response_sha256'],
+    proof={'request_id':pending['request_id'],'operation':pending['operation'],'model_id':pending['model_id'],'response_sha256':record['response_sha256'],
            'response_received_at':record['received_at'],'response_ok':response.get('ok') is True,
            'restoration_status':restoration,'native_state_known':not session.unknown,
            'native_error':response.get('error'),
@@ -55,6 +55,9 @@ def wait(session, error, operation, arguments, started):
     pending={'request_id':request,'operation':operation,'arguments':arguments,'model_id':state.get('model_id'),
              'primary_timeout':json.loads(json.dumps(diagnostics)), 'call_wait_budget_s':MAX_CALL_WAIT_S,
              'started_monotonic':started,'same_original_request':True,'additional_native_dispatches':0}
+    # The previous call's successful late receipt remains in its own file. It
+    # cannot be used as the completion evidence for this new pending request.
+    session.late_response_reconciled=None
     session.pending_native_response=pending
     core.write(session.folder/('等待超时-'+request+'.json'),{k:v for k,v in pending.items() if k!='started_monotonic'})
     session.persist_ownership()
@@ -84,3 +87,18 @@ def reconcile(session):
     pending=getattr(session,'pending_native_response',None)
     if pending:return terminal(session,pending)
     return None
+
+
+def matched_completion(session,pending,response,error):
+    """Admit only the fresh terminal response for the currently timed-out call."""
+    proof=getattr(session,'late_response_reconciled',None)
+    if not isinstance(response,dict) or not isinstance(proof,dict):return None
+    diagnostics=(error or {}).get('diagnostics') or {}
+    request=pending.get('request_id')
+    if (not request or request!=diagnostics.get('request_id') or request!=proof.get('request_id')
+            or request!=response.get('id') or proof.get('operation')!=pending.get('operation')
+            or proof.get('model_id')!=pending.get('model_id') or pending.get('model_id')!=session.model
+            or getattr(session,'pending_native_response',None) is not None
+            or getattr(session,'unknown',True) or proof.get('native_state_known') is not True
+            or proof.get('same_retained_handles') is not True or proof.get('additional_native_dispatches')!=0):return None
+    return proof

@@ -121,7 +121,7 @@ def plan(survey, groups, anchors):
     structure=survey.get('structural_relations') or {}
     pattern_ids={c['component_id'] for c in structure.get('components',[]) if c.get('is_pattern_instance')}
     planes={c['component_id']:c.get('completion_planes',[]) for c in cs}
-    actions=[];uncompleted=[]
+    actions=[];uncompleted=[];preserved=[];components={c['component_id']:c for c in cs}
     for label in ['stationary']+sorted(set(groups)-{'stationary'}):
         anchor=anchors[label]
         # Existing relations are never suppressed. Pattern instances are never
@@ -132,6 +132,20 @@ def plan(survey, groups, anchors):
             needed=matrix.trial(target)
             if not needed:continue
             native_links=[m for m in survey['mates'] if m.get('suppressed') is not True and any(e.get('component_id')==cid for e in m.get('entities',[]))]
+            component=components[cid];state=component.get('constraint_state') or {}
+            if (label=='stationary' and components[anchor].get('fixed_component') is True
+                    and component.get('fixed_component') is False and component.get('parent_component_id') is None
+                    and component.get('document_type',1)==1 and state.get('status')=='observed'
+                    and type(state.get('native_value')) is int and state['native_value']==3 and state.get('fully_constrained') is True
+                    and native_links and all(m.get('suppressed') is False and type(m.get('error')) is int and m['error']==0 and m.get('warning') is False for m in native_links)):
+                # Keep unsupported native constraints intact. Do not add rows to
+                # the supported matrix or infer other components' grounding.
+                # Native eligibility is checked again; all-component Motion is
+                # still required to prove this declared stationary purpose.
+                preserved.append({'component_id':cid,'anchor_component_id':anchor,
+                    'supported_missing_rank':needed,'supported_target_fulfilment_certified':False,
+                    'native_recheck_required':True,'motion_verification_required':True})
+                continue
             if not native_links:
                 # A genuinely unmated seed can be attached by one native rigid
                 # mate. This does not fix it to the world or suppress old mates.
@@ -173,12 +187,14 @@ def plan(survey, groups, anchors):
             if matrix.trial(target):uncompleted.append(cid)
     # A part processed before its support may become fully constrained when
     # later supplements anchor that support. Judge completeness at the end.
-    uncompleted=[cid for label,members in groups.items() for cid in members if cid!=anchors[label] and cid not in pattern_ids
+    preserved_ids={r['component_id'] for r in preserved}
+    uncompleted=[cid for label,members in groups.items() for cid in members if cid!=anchors[label] and cid not in pattern_ids and cid not in preserved_ids
                  and matrix.trial(lifted([[float(i==j) for i in range(6)] for j in range(6)],cid,anchors[label]))]
     return {'schema_version':1,'groups':groups,'anchors':anchors,'actions':actions,
         'initial_supported_rank':initial_rank,'planned_supported_rank':len(matrix.pivots),
         'uncompleted_components':uncompleted,'omitted_native_feature_ids':omitted,
         'reused_pattern_component_ids':sorted(pattern_ids),'pattern_motion_verified':False,
+        'preserved_native_full_stationary_components':preserved,
         'fixed_state_changes':[],'existing_mates_suppressed':[],'existing_mates_deleted':[],
         'minimality_scope':'greedy_independent_supplements_not_proven_global_minimum_mate_count',
         'requires_explicit_confirmation':True,'native_compatibility_verified':False,

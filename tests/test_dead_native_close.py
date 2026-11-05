@@ -13,7 +13,7 @@ class RetirementTests(unittest.TestCase):
         self.session=SimpleNamespace(proc=self.cad,bridge=self.bridge,folder=folder,runtime=runtime,model='model',checkpoint='cp',current_call_for_observation={},pending_native_response=None,persist_ownership=Mock(),unknown=True,ended=False,import_restored=False)
         self.task={'task_id':'b'*32,'model_id':'model','server_pid':os.getpid(),'busy':False,'error':{'code':'RESTORATION_FAILED'}}
         self.ownership={'owner':{'pid':os.getpid(),'created':'1'},'CAD':{'pid':101,'created':'2'},'executor':{'pid':202,'created':'3'},'model_id':'model','runtime':str(runtime),'in_flight':{}}
-        self.write();self.identity=patch.object(d,'same_process',side_effect=lambda v:{'status':'exited' if v['pid']==101 else 'same'});self.identity.start();self.addCleanup(self.identity.stop)
+        self.write();self.identity=patch.object(d,'same_process',side_effect=lambda v:{'status':'exited' if v['pid']==101 or v['pid']==202 and self.executor.poll() is not None else 'same'});self.identity.start();self.addCleanup(self.identity.stop)
     def write(self):core.write(self.session.folder/'活会话归属.json',self.ownership)
     def review(self):return d.review(self.task,self.session)
     def test_completed_failure_and_retained_cad_exit_are_eligible_without_restore(self):
@@ -48,3 +48,29 @@ class RetirementTests(unittest.TestCase):
         with patch('sw_mcp.conversation.task_engine.release_executor',side_effect=core.StopBatch('EXECUTOR_EXIT_UNCONFIRMED')):
             with self.assertRaises(core.StopBatch):d.finish(engine,self.task,self.session)
         self.assertIs(self.session.bridge,self.bridge);engine._settle_closed.assert_not_called()
+    def released(self):
+        self.executor.poll.return_value=0;self.session.bridge=None;self.session.released_executor_bridge=self.bridge
+        self.receipt={'executor_pid':202,'ownership':'retained_Bridge_Popen','confirmed':True,'executor_exit_code':0,'force_kill':False}
+        core.write(self.session.folder/'执行器收尾.json',self.receipt)
+    def test_already_eof_executor_and_later_cad_exit_are_retirable(self):
+        self.released();r=self.review();self.assertTrue(r['eligible']);self.assertTrue(r['executor_already_released']);self.assertEqual(r['CAD_calls'],0)
+    def test_receipt_cannot_replace_original_retained_executor_handle(self):
+        self.released();self.session.released_executor_bridge=None;self.assertFalse(self.review()['eligible'])
+    def test_released_but_running_executor_is_not_retired(self):
+        self.released();self.executor.poll.return_value=None;self.assertFalse(self.review()['eligible'])
+    def test_nonzero_or_unconfirmed_or_foreign_exit_receipt_is_refused(self):
+        for key,value in [('executor_exit_code',1),('confirmed',False),('executor_pid',999),('force_kill',True),('ownership','lookup_PID')]:
+            with self.subTest(key=key):
+                self.released();self.receipt[key]=value;core.write(self.session.folder/'执行器收尾.json',self.receipt);self.assertFalse(self.review()['eligible'])
+    def test_missing_released_receipt_cannot_be_inferred_from_process_exit(self):
+        self.released();(self.session.folder/'执行器收尾.json').unlink();self.assertFalse(self.review()['eligible'])
+    def test_released_executor_does_not_skip_bound_response_validation(self):
+        self.released();self.record['model_id']='foreign';self.assertFalse(self.review()['eligible'])
+    def test_released_executor_process_identity_must_be_confirmed_exited(self):
+        self.released()
+        with patch.object(d,'same_process',side_effect=lambda v:{'status':'exited' if v['pid']==101 else 'same'}):self.assertFalse(self.review()['eligible'])
+    def test_finish_after_eof_does_not_signal_or_reopen_executor(self):
+        self.released();engine=SimpleNamespace(_source_review=Mock(return_value={'unchanged':True}),_settle_closed=Mock(),save=Mock())
+        with patch('sw_mcp.conversation.task_engine.release_executor') as eof:d.finish(engine,self.task,self.session)
+        eof.assert_not_called();self.assertIsNone(self.session.released_executor_bridge);self.assertEqual(self.task['phase'],'closed_unverified')
+        self.assertEqual(engine._settle_closed.call_args.args[1]['executor_exit'],self.receipt)

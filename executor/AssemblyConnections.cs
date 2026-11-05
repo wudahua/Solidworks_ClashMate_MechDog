@@ -14,7 +14,7 @@ public partial class Cad {
         public bool Consumed;public List<Dictionary<string,object>> Actions,Goals,FixedChanges;
         public Dictionary<string,double[]> Poses;public Dictionary<string,bool> Fixed,ExpectedFixed;
         public ConnectionBatchScope Batch;
-        public int[] OriginalMateIds;public ConnectionInternalWitness HierarchyWitness;
+        public int[] OriginalMateIds;public ConnectionInternalWitness HierarchyWitness;public object SignatureIdentity;
     }
     readonly Dictionary<string,ConnectionPlan> connectionPlans=new Dictionary<string,ConnectionPlan>();
     readonly HashSet<string> connectionModelScopes=new HashSet<string>();
@@ -174,8 +174,9 @@ public partial class Cad {
                 if(goal.TryGetValue("linear_trial_driver",out trialDriver)&&trialDriver!=null)ValidateConnectionAction(m,doc,Json.Deserialize<Dictionary<string,object>>(Json.Serialize(trialDriver)));
                 if(goal.TryGetValue("rotary_trial_driver",out trialDriver)&&trialDriver!=null)ValidateConnectionAction(m,doc,Json.Deserialize<Dictionary<string,object>>(Json.Serialize(trialDriver)));
             }
+            object planSignatureTiming,planSignatureIdentity;string planSignature=MateSignature(m,doc,out planSignatureTiming,out planSignatureIdentity);
             var plan=new ConnectionPlan{Id=Guid.NewGuid().ToString("N"),ModelId=id,Revision=m.Revision,
-                Signature=MateSignature(m,doc),OriginalParameters=CompletionOriginalParameters(doc,EGAllMates(doc).Select(f=>f.GetID()).ToArray()),OriginalMateIds=EGAllMates(doc).Select(f=>f.GetID()).ToArray(),Actions=actions,Goals=goals,
+                Signature=planSignature,SignatureIdentity=planSignatureIdentity,OriginalParameters=CompletionOriginalParameters(doc,EGAllMates(doc).Select(f=>f.GetID()).ToArray()),OriginalMateIds=EGAllMates(doc).Select(f=>f.GetID()).ToArray(),Actions=actions,Goals=goals,
                 Poses=Transforms(doc),Fixed=cs.ToDictionary(c=>c.Name2,c=>c.IsFixed()),FixedChanges=changes,Batch=batchScope,HierarchyWitness=ConnectionInternalAssemblyWitness(m,doc),
                 ExpectedFixed=cs.ToDictionary(c=>c.Name2,c=>c.IsFixed()&&!released.Contains(GTComponentId(doc,c)))};connectionPlans[plan.Id]=plan;
             if(cs.Any(c=>!ConnectionRigidTransform((double[])c.GetTotalTransform(false).ArrayData))) {
@@ -224,7 +225,15 @@ public partial class Cad {
         if(testFault&&p.Actions.Count==0&&p.FixedChanges.Count==0)throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","回滚夹具必须有待写入动作，不能将无写入当回滚验证。");
         if(testFault&&System.Environment.GetEnvironmentVariable("SW_MCP_FAULT_TESTS")!="1")throw new Exception("FAULT_TEST_DISABLED");
         var m=GetUserModel(p.ModelId);
-        using(var scope=new Scope(this,m.Path,null))if(MateSignature(m,scope.Doc)!=p.Signature||m.Revision!=p.Revision||!ConnectionInternalWitnessMatches(p.HierarchyWitness,ConnectionInternalAssemblyWitness(m,scope.Doc)))throw new CadFault("CONNECTION_PLAN_STALE","当前模型与方案不一致。");
+        using(var scope=new Scope(this,m.Path,null)) {
+            object actualTiming,actualIdentity;string actualSignature=MateSignature(m,scope.Doc,out actualTiming,out actualIdentity);
+            bool revisionChanged=m.Revision!=p.Revision;
+            bool hierarchyChanged=!ConnectionInternalWitnessMatches(p.HierarchyWitness,ConnectionInternalAssemblyWitness(m,scope.Doc));
+            if(actualSignature!=p.Signature||revisionChanged||hierarchyChanged)throw new CadFault("CONNECTION_PLAN_STALE","当前模型与方案不一致；具体变化已保留，未消费方案或重试写入。",new{
+                changed_fields=ConnectionSignatureDiff.Fields(Json.Serialize(p.SignatureIdentity),Json.Serialize(actualIdentity)),
+                before=p.SignatureIdentity,after=actualIdentity,revision_changed=revisionChanged,hierarchy_changed=hierarchyChanged,
+                write_dispatched=false,plan_consumed=false,automatic_retry=false});
+        }
         p.Consumed=true;string cp=null;bool mutating=false;
         try {
             BeginConnectionBatch(p);
@@ -277,7 +286,7 @@ public partial class Cad {
             }
         }catch(Exception error) {
             FailConnectionBatch(p);
-            if(error is COMException||error is NativeCommandStateException||LastContextRestoration=="unknown") {LastOperationRestoration="unknown";throw new CadFault("CONNECTION_NATIVE_UNKNOWN","原生状态未知，未重试写入或恢复。",new{checkpoint_id=cp,original_failure=FailureEvidence(error)});}
+            if(error is COMException||error is ComponentInventoryReadFault||error is NativeCommandStateException||LastContextRestoration=="unknown") {LastOperationRestoration="unknown";throw new CadFault("CONNECTION_NATIVE_UNKNOWN","原生状态未知，未重试写入或恢复。",new{checkpoint_id=cp,original_failure=FailureEvidence(error)});}
             if(!mutating)throw;
             try{RestoreUserCheckpoint(m.Id,cp);LastOperationRestoration="restored";}catch(Exception rollback){LastOperationRestoration="unknown";throw new CadFault("CONNECTION_NATIVE_UNKNOWN","已知失败后恢复未验证。",new{checkpoint_id=cp,original_failure=FailureEvidence(error),rollback_failure=FailureEvidence(rollback)});}
             throw new CadFault("CONNECTION_APPLY_ROLLED_BACK","基础连接未通过，已恢复检查点。",new{checkpoint_id=cp,original_failure=FailureEvidence(error),rollback_verified=true});
@@ -394,7 +403,7 @@ public partial class Cad {
             timing.Finish();
             if(touched){
                 LastOperationRestoration="unknown";
-                if(!(error is COMException)&&!(error is NativeCommandStateException)&&LastContextRestoration!="unknown") {
+                if(!(error is COMException)&&!(error is ComponentInventoryReadFault)&&!(error is NativeCommandStateException)&&LastContextRestoration!="unknown") {
                     try {
                         RestoreUserCheckpoint(id,checkpointId);m=GetUserModel(id);
                         using(var scope=new Scope(this,m.Path,null)) {
