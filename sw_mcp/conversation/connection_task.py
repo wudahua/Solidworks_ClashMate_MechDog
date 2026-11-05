@@ -146,9 +146,18 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
         if (t.get('connection_review') or {}).get('write_scope_allowed') is False:
             from .constraint_inventory import require_write_scope
             require_write_scope(t)
-        if intents is not None or rigid_groups is not None or release_fixed_components is not None or assembly_scope_hint or t['phase']!='constraint_review_ready':
-            raise core.StopBatch('CONNECTION_INTENT_INVALID','自动预演须从新体检开始，不混用手填目标或替换待确认方案。')
+        if rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared' or assembly_scope_hint or t['phase']!='constraint_review_ready':
+            raise core.StopBatch('CONNECTION_INTENT_INVALID','自动预演须从新体检开始；可用connection_intent补充局部用途，不混用分组、解除固定、范围或替换待确认方案。')
         assessment=t.get('assembly_assessment') or {}
+        if intents is not None:
+            from .. import assembly_assessment
+            overrides,question=resolve(s,intents,assembly_assessment.MAX_AUTOMATIC_GOALS)
+            if question:return {'task_id':t['task_id'],**question}
+            try:assessment=assembly_assessment.clarify(s.connection_survey,assessment,overrides)
+            except (ValueError,TypeError) as error:
+                raise core.StopBatch('CONNECTION_INTENT_INVALID','局部用途与当前装配证据不兼容；未派发原生预演。',{'reason':str(error),'write_dispatched':False}) from error
+            t['clarified_assembly_assessment']=assessment;engine.save(t)
+            core.write(s.folder/'局部用途与整机目标合并.json',assessment)
         if not assessment.get('automatic_plan_available'):
             return {'task_id':t['task_id'],'needs_mechanical_clarification':bool(assessment.get('mechanical_question_groups')),
                     'needs_scope_review':bool(assessment.get('proposal_review_issues') or assessment.get('write_scope_blockers')),'assembly_assessment':assessment,
