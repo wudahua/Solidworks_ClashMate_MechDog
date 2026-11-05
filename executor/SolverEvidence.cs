@@ -18,6 +18,13 @@ public partial class Cad {
         } catch(CadFault){throw;}
         catch(Exception error){throw new CadFault("SOLVER_SETTINGS_UNVERIFIED","设置或回读算例时发生异常；未判定设置成功。",new{model_id=modelId,study=name,stage=stage,requested=new{type=4,duration_s=duration,output_fps=fps},before=before,native_returns=new{set_duration=durationAccepted,set_frame_rate=fpsAccepted},active=active,playing=playing,failure=FailureEvidence(error)});}
     }
+    void RequireCurrentFreshSolveResults(IMotionStudy study,string modelId,string name,string stage){
+        // Time selection/activation can replace the study's native results
+        // interface. Acquire it for this observation, before validation; never
+        // retry a disconnected interface or reuse one from before sampling.
+        var current=(IMotionStudyResults)study.GetResults(4);
+        RequireFreshSolveResults(study,current,modelId,name,stage);
+    }
     void RequireFreshSolveResults(IMotionStudy study,IMotionStudyResults results,string modelId,string name,string stage){
         if(results==null)throw new CadFault("RESULTS_STALE","原生求解未返回可读取结果对象。",new{model_id=modelId,study=name,stage=stage,native_calculate_return=true,result_object_returned=false,results_out_of_date=(bool?)null,settings=HistorySettings(study),active=study.IsActive,root_cause="not_proven"});
         bool stale=results.IsOutOfDate();

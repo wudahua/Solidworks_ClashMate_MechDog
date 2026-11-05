@@ -3,11 +3,75 @@
 Only the ordinary planner can certify a supported gap for a proposed goal;
 native preview, explicit confirmation, measured motion and restoration remain.
 """
+import copy
 from collections import Counter,defaultdict
 from . import assembly_connections as joints,assembly_hierarchy,connection_recommendations as drafts
 
 MAX_DRAFT_PAGES=8
 MAX_AUTOMATIC_GOALS=16
+
+
+def clarify(survey, assessment, overrides):
+    """Merge explicit mechanical purposes into a frozen, read-only assessment.
+
+    Overrides contain resolved component identities, never removed mate IDs.
+    Keeping observed goals avoids making the caller restate the whole machine.
+    Every merged combination still goes through the ordinary joint planner.
+    """
+    result=copy.deepcopy(assessment)
+    result.update(automatic_plan_available=False,write_dispatched=False,confirmation_token_created=False,
+                  mechanical_intent_inferred=False,native_motion_verified=False)
+    result.pop('suggested_plan_arguments',None)
+    if (not result.get('accounting_complete') or
+            not result.get('candidate_search',{}).get('all_pair_ranges_read')):
+        result.update(status='clarification_requires_complete_supported_assessment')
+        return result
+    by={c['component_id']:c for c in survey['components']}
+    names={c['instance']:c['component_id'] for c in survey['components']}
+    if len(names)!=len(by):raise ValueError('clarification_component_identity_ambiguous')
+    merged={}
+    for raw in result.get('proposed_connection_intent',[]):
+        goal={**raw,**{k:names[raw[k]] for k in ('component_a','component_b')}}
+        merged[frozenset((goal['component_a'],goal['component_b']))]=goal
+    clarified=set()
+    for raw in overrides:
+        goal=copy.deepcopy(raw);a,b=goal['component_a'],goal['component_b']
+        if a not in by or b not in by or a==b:raise ValueError('clarification_component_outside_inventory')
+        pair=frozenset((a,b))
+        if pair in clarified:raise ValueError('clarification_duplicate_component_pair')
+        clarified.add(pair);merged[pair]=goal
+    goals=list(merged.values())
+    if len(goals)>MAX_AUTOMATIC_GOALS:
+        result.update(status='clarification_goal_budget_exceeded',proposal_review_issues=[{'reason':'automatic_goal_budget_exceeded','proposed_count':len(goals),'automatic_limit':MAX_AUTOMATIC_GOALS}])
+        return result
+    pending=[row for row in result.get('unresolved_connection_candidates',[])
+             if frozenset(names[row[k]] for k in ('instance_a','instance_b')) not in clarified]
+    # Ordinary planner retains native-health, hierarchy, rank, reference and
+    # coupled-joint gates. Explicit purpose is not a waiver for unsupported CAD.
+    proposal=joints.plan(survey,goals,whole_assembly=len(goals)>8)
+    result.update(for_plan(survey,proposal))
+    result.update(unresolved_connection_candidates=pending,proposal_review_issues=[],
+                  clarified_goal_count=len(clarified),retained_observed_goal_count=len(merged)-len(clarified))
+    result['proposed_connection_intent']=[{**g,**{k:by[g[k]]['instance'] for k in ('component_a','component_b')}} for g in goals]
+    questions=[{'reason':'component_without_proposed_target','instances':[r['instance'] for r in result['components'] if not r['proposed_targets']]}]
+    questions=[q for q in questions if q['instances']]
+    if pending:
+        unknown={row[k] for row in pending for k in ('instance_a','instance_b')}
+        for row in result['components']:
+            if row['instance'] in unknown:row.update(status='mechanical_clarification_required',reason='unresolved_connection_purpose')
+        questions.append({'reason':'unresolved_connection_purpose','instances':sorted(unknown),
+                          'pairs':[{'a':r['instance_a'],'b':r['instance_b'],'options':sorted({o['kind'] for o in r['options']})} for r in pending]})
+    result['category_counts']=dict(Counter(r['status'] for r in result['components']))
+    result['mechanical_question_groups']=questions
+    supported=proposal.get('status')=='plan_ready' and not any(g.get('coupled_verification_only') for g in proposal.get('goals',[]))
+    if supported and result['all_components_have_proposed_targets'] and not questions:
+        result.update(status='automatic_native_preview_available',automatic_plan_available=True,
+                      suggested_plan_arguments={'connection_intent':result['proposed_connection_intent'],'completion_scope':'whole_assembly'},
+                      confirmation_scope='confirm_merged_mechanical_goals_and_precise_supplements_before_execute')
+    else:
+        result['status']='mechanical_review_required'
+        if not supported:result['proposal_review_issues']=[{'reason':proposal.get('status') if proposal.get('status')!='plan_ready' else 'existing_coupling_requires_declared_goal_scope'}]
+    return result
 
 
 def _goal(a,b,kind,axis=None):
@@ -168,5 +232,5 @@ def build(survey,review,overview,draft,binding=''):
                 suggested_plan_arguments={'connection_intent':goals,'completion_scope':'whole_assembly'},
                 confirmation_scope='confirm_proposed_mechanical_goals_and_precise_supplements_before_execute')
         else:result['proposal_review_issues'].append({'reason':'existing_coupling_requires_declared_goal_scope'})
-    result['instruction']='AI先给出全部组件的分类及建议连接。复用用户已明确的机械用途，自动选运动组代表件，以group_seeds只读推荐附件归属；仅有冲突或可能改变既有运动的归属集中澄清，不让用户逐个指定零件。分组和候选用途仍须具体方案确认；已有关系足够可以新增0项。未覆盖、未知或超范围不能算完成。只在自动方案可用时auto_plan=true读取原生预演，否则按明确用途使用普通连接目标及rigid_groups。'
+    result['instruction']='AI先给出全部组件的分类及建议连接。复用用户已明确的机械用途，自动选运动组代表件，以group_seeds只读推荐附件归属；仅有冲突或可能改变既有运动的归属集中澄清，不让用户逐个指定零件。分组和候选用途仍须具体方案确认；已有关系足够可以新增0项。未覆盖、未知或超范围不能算完成。可用auto_plan=true与少量connection_intent合并局部用途，保留已观察整机目标；未澄清连接仍阻断，不需重填整机。分组及解除固定仍使用普通目标与rigid_groups。'
     return result

@@ -26,7 +26,7 @@ plan_input_fragment只给普通rigid_groups的待审核片段，不自动推断�
 
 `prepare_mechanism_task(task_kind="assembly_constraints")`返回`assembly_assessment`：组件逐项状态、category_counts、完整记账、剩余候选游标、未决连接对、集中用途问题和受限已有耦合路线。它是确认前观察，不认证机械意图、运动、缺项或全局自由度。组件有其他目标仍可能存在未决连接对；候选缺席不证明不需约束。只读参考身份失败继续报告全部结构，但保持写入禁止。
 
-`plan_mechanism_task(auto_plan=true)`是新增布尔参数，不是新增工具。仅用于尚未有待确认方案的普通assembly_constraints整装配任务；不能混用手写目标、组、固定释放名单、层选择或序列动作。最多8页候选、16个自动目标，超预算给出技术原因，不让用户猜参数；原普通整装配规划上限不变。不满足完整搜索、支持组合、全部组件及待定连接处理条件时返回分类和澄清/范围原因，不派发CAD、不创建令牌。满足条件时仍走原普通规划、当前原生状态核对和whole_assembly原生预演；确认机械用途、精确补项和试验范围后方可execute。零新增并不证明运动通过。`assembly_assessment.observation_stage`及native_verified/confirmed字段表达快照阶段，不能将预演前分类冒充执行结论；执行结果读verification和finish。
+`plan_mechanism_task(auto_plan=true)`是新增布尔参数，不是新增工具。仅用于尚未有待确认方案的普通assembly_constraints整装配任务；可用connection_intent补充局部机械用途并复用其他建议目标，不能混用组、固定释放名单、层选择或序列动作。最多8页候选、16个自动目标，超预算给出技术原因，不让用户猜参数；原普通整装配规划上限不变。不满足完整搜索、支持组合、全部组件及待定连接处理条件时返回分类和澄清/范围原因，不派发CAD、不创建令牌。满足条件时仍走原普通规划、当前原生状态核对和whole_assembly原生预演；确认机械用途、精确补项和试验范围后方可execute。零新增并不证明运动通过。`assembly_assessment.observation_stage`及native_verified/confirmed字段表达快照阶段，不能将预演前分类冒充执行结论；执行结果读verification和finish。
 
 丝杆已有耦合仍只能以声明范围独立检查，整装配自动组合不混入它。固定标志不直接构成刚性组；直接支持秩不足的瞬时投影不充当机械用途。大型、未知参考、复杂耦合、健康故障等仍可能仅报告或需要澄清，不自动批量锁死、删除或修复原配合。
 
@@ -381,3 +381,8 @@ prepare返回`connection_review.mode=readonly_structure`、`write_scope_allowed=
 `linear_allowed_trial_strategy`在此模式明确为临时Motion；`native_motion_study_solved`仅在真实Motion分支通过时为true。`global_DOF_certified`、`whole_travel_certified`继续为false。失败不改换驱动重算，已知状态可恢复；原生未知不得恢复或重试写入。恢复时发生原生崩溃仍是失败，不将早先成功的局部求解升级为整任务通过。
 
 螺旋原生模式、数值、Reverse和Alignment，以及限位最小／最大距离、Flip和Alignment在身份与参数快照中保护。参数模式仅排除限位的可变当前距离；身份模式继续记录当前距离，实际全部位姿门禁保留。非线性参数不可读取返回`CONNECTION_REFERENCE_INVALID`与`native_nonlinear_parameters_unavailable`，不以空值认证签名。完整普通参数、持久参考和健康校验不删减，旧读取对照器保持冻结。额外配合参数／数量／固定／算例状态证据只在内部`verification_details=true`时采集，不增加公开工具或日常批次的重复读取。
+
+局部用途澄清：`plan_mechanism_task(auto_plan=true, connection_intent=[...])` 允许 AI 只补充少量明确的连接用途，复用当前首轮体检的其他建议目标。同一零件对只能出现一次；未澄清连接、未覆盖组件、候选搜索未完成、原生不支持项仍会阻断，不生成执行令牌。不可同时传分组、解除固定、范围或替换已有待确认方案。合并方案仍须原普通规划及原生预演，并确认全部机械目标及精确补项后执行。该能力不依据被删配合 ID，也不证明任意设计意图可自动推断。
+
+
+alpha.45发布状态：局部用途合并及三类缺项补齐/保存重开通过；完整运动对照7/8，第三套成果反向原生时间轴结果获取断连，失败恢复及资源退出已核对。按用户要求先行预发布，不解除原完整Motion验收要求，不认证任意装配或另机启动问题已修复。

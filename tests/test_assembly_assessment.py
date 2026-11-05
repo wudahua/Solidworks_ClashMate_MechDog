@@ -57,7 +57,7 @@ class AssessmentTests(unittest.TestCase):
         t={'task_id':'a'*32,'phase':'awaiting_confirmation'};e=SimpleNamespace(_require_session=Mock(),sessions={t['task_id']:SimpleNamespace()})
         with self.assertRaises(core.StopBatch):connection_task.propose(e,t,None,auto_plan=True)
     def test_auto_never_silently_ignores_manual_goal(self):
-        t={'task_id':'a'*32,'phase':'constraint_review_ready'};e=SimpleNamespace(_require_session=Mock(),sessions={t['task_id']:SimpleNamespace()})
+        t={'task_id':'a'*32,'phase':'constraint_review_ready'};e=SimpleNamespace(_require_session=Mock(),sessions={t['task_id']:SimpleNamespace(connection_survey=scene())})
         with self.assertRaises(core.StopBatch):connection_task.propose(e,t,[{}],auto_plan=True)
     def test_unavailable_auto_returns_grouped_question_without_cad(self):
         t={'task_id':'a'*32,'phase':'constraint_review_ready','assembly_assessment':{'automatic_plan_available':False,'mechanical_question_groups':[{'instances':['loose']}]}};s=SimpleNamespace(call=Mock());e=SimpleNamespace(_require_session=Mock(),sessions={t['task_id']:s})
