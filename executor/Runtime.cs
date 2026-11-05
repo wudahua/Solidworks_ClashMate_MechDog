@@ -36,17 +36,30 @@ public partial class Cad {
         Dictionary<string,double[]> original;
         OwnedMotionSnapshot ownedSnapshot;
         public bool Restored;
+        public bool SnapshotRestoreAttempted {get;private set;}
+        public bool ContextRestoreAttempted {get;private set;}
         public double RestoreDelta;
         public Dictionary<string,double[]> InitialPoses {get{return original;}}
         public string DocumentPath {get{return expectedPath;}}
         public StudyState[] InitialStudyStates {get{return ownedSnapshot==null?null:ownedSnapshot.InputStudies;}}
         public StudyHistory.Observation HistoryObservation;
+        readonly NativeRestorationGate restorationGate=new NativeRestorationGate();
+        string commandModel;Action<Exception,bool> previousCommandObserver;bool commandObserverAttached;
+        public bool RestorationDeferred {get{return restorationGate.Deferred;}}
+        public bool DeferRestoration(Exception failure) {
+            bool deferred=restorationGate.Defer(failure);
+            if(deferred){Restored=false;cad.LastContextRestoration="unknown";cad.LastOperationRestoration="unknown";}
+            return deferred;
+        }
+        void StopAfterRestoreFailure(){restorationGate.StopAfterRestoreFailure();Restored=false;cad.LastContextRestoration="unknown";cad.LastOperationRestoration="unknown";}
+        void OnCommandFailure(Exception failure,bool previous) {StopAfterRestoreFailure();cad.deferredNativeCommand.Remember(commandModel,previous);if(previousCommandObserver!=null)previousCommandObserver(failure,previous);}
         SolvePerformance timing;
         void Timing(string name){if(timing!=null)timing.Phase(name);}
         public Scope(Cad owner,string path,string studyName,SolvePerformance measurement=null) {
             timing=measurement;Timing("scope_read_active_context");
             cad=owner;owner.LastContextRestoration="pending"; previous=(IModelDoc2)owner.Sw.ActiveDoc;
             previousTitle=previous==null?null:previous.GetTitle();previousPath=previous==null?null:previous.GetPathName();targetStudyName=studyName;
+            previousCommandObserver=NativeCommandBatch.FailureObserver;NativeCommandBatch.FailureObserver=OnCommandFailure;commandObserverAttached=true;
             try {
                 owner.LastContextRestoration="pending";
                 Log("SCOPE_OPEN_BEGIN "+path);
@@ -57,6 +70,7 @@ public partial class Cad {
                 Timing("scope_validate_and_activate_document");
                 if(!Doc.GetPathName().Equals(Path.GetFullPath(path),StringComparison.OrdinalIgnoreCase))throw new Exception("ASSEMBLY_OPEN_PATH_MISMATCH");
                 var registered=owner.userModels.Values.FirstOrDefault(m=>m.Path.Equals(path,StringComparison.OrdinalIgnoreCase));
+                commandModel=registered==null?null:registered.Id;
                 if(registered!=null&&!string.IsNullOrEmpty(registered.Configuration)&&Doc.ConfigurationManager.ActiveConfiguration.Name!=registered.Configuration)throw new Exception("MODEL_CONFIGURATION_CHANGED");
                 expectedPath=Doc.GetPathName();expectedConfiguration=Doc.ConfigurationManager.ActiveConfiguration.Name;
                 var current=(IModelDoc2)owner.Sw.ActiveDoc;if(current==null||!string.Equals(current.GetPathName(),expectedPath,StringComparison.OrdinalIgnoreCase))owner.Sw.ActivateDoc3(Doc.GetTitle(),false,0,ref e);
@@ -77,7 +91,7 @@ public partial class Cad {
                     owner.LastOperationRestoration="pending";
                     OriginalTime=Study.GetTime(); Study.Activate();
                 }
-            } catch(Exception failure) { try{Dispose();}catch(Exception rollback){owner.LastOperationRestoration="unknown";throw new CadFault("RESTORATION_FAILED","打开或激活失败，且无法核验原窗口恢复。",new{original_error=failure.ToString(),rollback_error=rollback.ToString()});}if(failure is COMException)owner.LastOperationRestoration="unknown";throw; }
+            } catch(Exception failure) { DeferRestoration(failure);try{Dispose();}catch(Exception rollback){owner.LastOperationRestoration="unknown";throw new CadFault("RESTORATION_FAILED","打开或激活失败，且无法核验原窗口恢复。",new{original_error=failure.ToString(),rollback_error=rollback.ToString()});}if(failure is COMException)owner.LastOperationRestoration="unknown";throw; }
         }
         public void RefreshStudy() {
             // Rebuild/Calculate can invalidate the old document/study proxies.
@@ -95,10 +109,15 @@ public partial class Cad {
                 throw new Exception("SESSION_CONFLICT: active document or configuration changed");
         }
         public void Dispose() {
+            try{if(!restorationGate.Restore(RestoreSnapshotAndContext)){Restored=false;cad.LastContextRestoration="unknown";cad.LastOperationRestoration="unknown";}}
+            finally{if(commandObserverAttached){NativeCommandBatch.FailureObserver=previousCommandObserver;commandObserverAttached=false;}}
+        }
+        void RestoreSnapshotAndContext() {
             Timing("scope_restore_snapshot_and_context");
             Exception restoreCause=null;
             try {
                 if(Study!=null&&original!=null) {
+                    SnapshotRestoreAttempted=true;
                     if(ownedSnapshot!=null){Doc=ownedSnapshot.Restore(HistoryObservation);Study=(IMotionStudy)((IMotionStudyManager)Doc.Extension.GetMotionStudyManager()).GetMotionStudy(targetStudyName);var diagnostic=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(ownedSnapshot.Diagnostics));RestoreDelta=Convert.ToDouble(diagnostic["maximum_transform_delta"]);Restored=true;}
                     else {
                     Study.SetTime(OriginalTime); Application.DoEvents();
@@ -108,8 +127,8 @@ public partial class Cad {
                     Restored=RestoreDelta<1e-7 && Math.Abs(Study.GetTime()-OriginalTime)<1e-7;
                     }
                 } else Restored=true;
-            } catch(Exception e){restoreCause=e;Restored=false;} finally {
-                try{if(previousTitle!=null) {var active=(IModelDoc2)cad.Sw.ActiveDoc;if(active==null||!string.Equals(active.GetPathName(),previousPath,StringComparison.OrdinalIgnoreCase)){int e=0;var activated=cad.Sw.ActivateDoc3(previousTitle,false,0,ref e);if(activated==null||e!=0)Restored=false;}}}catch(Exception e){restoreCause=e;Restored=false;}
+            } catch(Exception e){restoreCause=e;Restored=false;StopAfterRestoreFailure();} finally {
+                try{if(!RestorationDeferred&&previousTitle!=null) {ContextRestoreAttempted=true;var active=(IModelDoc2)cad.Sw.ActiveDoc;if(active==null||!string.Equals(active.GetPathName(),previousPath,StringComparison.OrdinalIgnoreCase)){int e=0;var activated=cad.Sw.ActivateDoc3(previousTitle,false,0,ref e);if(activated==null||e!=0)Restored=false;}}}catch(Exception e){restoreCause=e;Restored=false;StopAfterRestoreFailure();}
                 cad.LastContextRestoration=Restored?"restored":"unknown";
                 if(Study!=null&&original!=null||!Restored)cad.LastOperationRestoration=Restored?"restored":"unknown";
                 if(!Restored)throw new CadFault("RESTORATION_FAILED","无法确认完整状态已恢复。",new{maximum_transform_delta=RestoreDelta,state_difference=ownedSnapshot==null?null:ownedSnapshot.Diagnostics,cause=restoreCause==null?null:restoreCause.ToString(),cause_details=restoreCause==null?null:FailureEvidence(restoreCause)});
@@ -117,12 +136,20 @@ public partial class Cad {
         }
     }
     static string[] Names(IMotionStudyManager mgr) { return (mgr.GetMotionStudyNames() as object[]??new object[0]).Cast<string>().ToArray(); }
+    static IComponent2[] ComponentInventory(IModelDoc2 d,Dictionary<string,object> profile=null) {
+        int reads=0,contexts=0;
+        var result=ComponentInventoryRead.Read<IComponent2>(()=>{reads++;return (object[])((IAssemblyDoc)d).GetComponents(false);},
+            ()=>{contexts++;return d.GetPathName()+"\n"+d.ConfigurationManager.ActiveConfiguration.Name;});
+        if(reads>1)Log("COMPONENT_INVENTORY_READ_REACQUIRED "+Json.Serialize(new{read_attempts=reads,component_count=result.Length,document_context_verified=true,partial_inventory_returned=false,native_write_replayed=false}));
+        if(profile!=null){profile["inventory_read_attempts"]=reads;profile["inventory_context_observations"]=contexts;profile["inventory_explicit_COM_calls"]=reads+4*contexts;}
+        return result;
+    }
     static Dictionary<string,double[]> Transforms(IModelDoc2 d) { return ReadTransforms(d,null); }
     static Dictionary<string,double[]> ReadTransforms(IModelDoc2 d,Dictionary<string,object> profile) {
-        var timer=System.Diagnostics.Stopwatch.StartNew();var components=((object[])((IAssemblyDoc)d).GetComponents(false)).Cast<IComponent2>().ToArray();long inventory=timer.ElapsedTicks,flags=0,names=0,transforms=0,arrays=0;int reads=0;
+        var timer=System.Diagnostics.Stopwatch.StartNew();var components=ComponentInventory(d,profile);long inventory=timer.ElapsedTicks,flags=0,names=0,transforms=0,arrays=0;int reads=0;
         var result=new Dictionary<string,double[]>();foreach(var c in components){long start=timer.ElapsedTicks;bool suppressed=c.IsSuppressed();flags+=timer.ElapsedTicks-start;if(suppressed)continue;
             start=timer.ElapsedTicks;string name=c.Name2;names+=timer.ElapsedTicks-start;start=timer.ElapsedTicks;var transform=c.GetTotalTransform(false);transforms+=timer.ElapsedTicks-start;start=timer.ElapsedTicks;var values=(double[])transform.ArrayData;arrays+=timer.ElapsedTicks-start;result.Add(name,values);reads++;}
-        if(profile!=null){double ms=1000.0/System.Diagnostics.Stopwatch.Frequency;profile["inventory_ms"]=inventory*ms;profile["suppression_ms"]=flags*ms;profile["names_ms"]=names*ms;profile["get_total_transform_ms"]=transforms*ms;profile["array_data_ms"]=arrays*ms;profile["total_ms"]=timer.Elapsed.TotalMilliseconds;profile["observed_component_count"]=components.Length;profile["pose_count"]=reads;profile["instrumented_COM_calls"]=1+components.Length+3*reads;profile["COM_count_scope"]="explicit_method_calls_in_reader_not_internal_RPC_or_solver";}
+        if(profile!=null){double ms=1000.0/System.Diagnostics.Stopwatch.Frequency;profile["inventory_ms"]=inventory*ms;profile["suppression_ms"]=flags*ms;profile["names_ms"]=names*ms;profile["get_total_transform_ms"]=transforms*ms;profile["array_data_ms"]=arrays*ms;profile["total_ms"]=timer.Elapsed.TotalMilliseconds;profile["observed_component_count"]=components.Length;profile["pose_count"]=reads;profile["instrumented_COM_calls"]=Convert.ToInt32(profile["inventory_explicit_COM_calls"])+components.Length+3*reads;profile["COM_count_scope"]="explicit_method_calls_in_reader_including_inventory_context_not_internal_RPC_or_solver";}
         return result;
     }
     string Fingerprint(IModelDoc2 doc,string knownPath=null) {

@@ -1,5 +1,18 @@
 """Check entry point classification; native CAD is always an explicit workflow."""
 ENTRIES = {
+    "test_managed_recovery_route": {"mode":"unittest","caller":"test_managed_recovery_route.py","scope":"actual formal SDK routing keeps original-session managed wait; timeout cannot mark recovered or trigger duplicate restore; no CAD"},
+    "test_native_frame_capture": {"mode":"unittest","caller":"test_native_frame_capture.py","scope":"compiled time-selection/read-batch boundaries, per-frame restoration and no retry after communication failure; no CAD"},
+    "NativeFrameCaptureTests": {"mode":"manual_offline","scope":"compiled by test_native_frame_capture against actual frame and batch controls; no CAD"},
+    "test_deferred_native_command": {"mode":"unittest","caller":"test_deferred_native_command.py","scope":"compiled explicit owned-model command flag recovery, document guards, and abandonment without native retry"},
+    "DeferredNativeCommandStateTests": {"mode":"manual_offline","scope":"compiled by test_deferred_native_command using actual production command controls; no CAD"},
+    "test_native_restoration_gate": {"mode":"unittest","caller":"test_native_restoration_gate.py","scope":"compile production unknown-state deferral and nested batch abandonment; callbacks cannot issue native recovery"},
+    "NativeRestorationGateTests": {"mode":"manual_offline","scope":"compiled by test_native_restoration_gate against actual production gate and batch class"},
+    "test_component_inventory_read": {"mode":"unittest","caller":"test_component_inventory_read.py","scope":"compile actual bounded complete component reads, exact context and count guards; no native failure retry"},
+    "ComponentInventoryReadTests": {"mode":"manual_offline","scope":"compiled by test_component_inventory_read using actual production collection reader"},
+    "test_stationary_preservation": {"mode":"unittest","caller":"test_stationary_preservation.py","scope":"compile actual stationary native-observation eligibility; no CAD or grounding certification"},
+    "StationaryPreservationTests": {"mode":"manual_offline","scope":"compiled by test_stationary_preservation with actual production admission policy"},
+    "test_connection_signature_diff": {"mode":"unittest","caller":"test_connection_signature_diff.py","scope":"compiled exact signature difference diagnostics, no CAD and no admission bypass"},
+    "ConnectionSignatureDiffTests": {"mode":"manual_offline","scope":"compiled by test_connection_signature_diff against production diagnostic helper"},
     "test_group_review": {"mode":"unittest","caller":"test_group_review.py","scope":"named mechanical seeds, ambiguous paths, no hidden locking or CAD dispatch"},
     "test_assembly_assessment": {"mode":"unittest","caller":"test_assembly_assessment.py","scope":"first-pass full component accounting and bounded proposed goals, no CAD"},
     "test_dead_native_close": {"mode":"unittest","caller":"test_dead_native_close.py","scope":"retained exited CAD and completed response retirement; no CAD or termination"},

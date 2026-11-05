@@ -33,6 +33,68 @@ def survey(teeth=(20,40)):
 
 
 class RecommendationTests(unittest.TestCase):
+    def grounded_intent(self):
+        s=survey();body=s['components'][0]
+        for f in body['cylinders']:f['cylinder_radius_m']=.004
+        cap=copy.deepcopy(body);cap.update(component_id='cap',instance='bearing cover',fixed_component=False,
+            cylinders=[cylinder('cap',0)],design_key='cap',constraint_state={'native_value':3,'fully_constrained':True})
+        s['components'].append(cap);s['design_evidence']['cap']={'properties':[],'patterns':[],'features':[],'issues':[]}
+        groups={'stationary':['body','cap'],'input':['input_shaft','input_gear','input_key'],
+            'output':['output_shaft','output_gear','output_key']}
+        return s,groups
+
+    def test_floating_coaxial_support_is_distinct_from_existing_fixed_ground(self):
+        s,g=self.grounded_intent()
+        p=eg.recommend(s,stationary_hints=['frame','bearing cover'],intent_groups=g)['proposals'][0]
+        self.assertEqual(p['supports']['input']['component_id'],'cap')
+        self.assertEqual(p['roles']['body'],'body')
+        self.assertEqual(p['supports']['input']['reason'],'declared_stationary_coaxial_reference_requires_motion_verification')
+        self.assertFalse(p['ground_reference_evidence']['new_fixing_action_required'])
+        self.assertTrue(p['ground_reference_evidence']['motion_verification_required'])
+        self.assertFalse(p['write_dispatched']);self.assertFalse(s['components'][-1]['fixed_component'])
+
+    def test_ground_does_not_need_to_supply_coaxial_cylinders(self):
+        s,g=self.grounded_intent()
+        cap2=copy.deepcopy(s['components'][-1]);cap2.update(component_id='cap2',instance='output cover',cylinders=[cylinder('cap2',.045)])
+        s['components'].append(cap2);g['stationary'].append('cap2');s['components'][0]['cylinders']=[]
+        p=eg.recommend(s,stationary_hints=['frame','bearing cover','output cover'],intent_groups=g)['proposals'][0]
+        self.assertEqual(p['roles']['body'],'body')
+        self.assertEqual([p['supports'][side]['component_id'] for side in ('input','output')],['cap','cap2'])
+
+    def test_explicit_fixed_ground_hint_does_not_filter_coaxial_support(self):
+        s,g=self.grounded_intent()
+        p=eg.recommend(s,reference_hint='frame',stationary_hints=['frame','bearing cover'],intent_groups=g)['proposals'][0]
+        self.assertEqual(p['roles']['body'],'body');self.assertEqual(p['supports']['input']['component_id'],'cap')
+
+    def test_ground_never_uses_fixed_moving_member_or_fully_constrained_floating_cap(self):
+        s,g=self.grounded_intent();s['components'][0]['fixed_component']=False
+        with self.assertRaises(core.StopBatch) as error:
+            eg.fixed_stationary_reference(s['components'],g['stationary'],set(g['input']+g['output']),{'input':{'component_id':'cap'},'output':{'component_id':'cap'}})
+        self.assertEqual(error.exception.diagnostics['reason'],'no_existing_fixed_stationary_ground')
+        self.assertFalse(error.exception.diagnostics['write_dispatched'])
+
+    def test_nonfixed_or_ambiguous_explicit_ground_is_not_silently_replaced(self):
+        s,g=self.grounded_intent();extra=copy.deepcopy(s['components'][0]);extra.update(component_id='body2',instance='frame second')
+        s['components'].append(extra);g['stationary'].append('body2');supports={side:{'component_id':'cap'} for side in ('input','output')}
+        for hint in ('bearing cover','frame'):
+            with self.subTest(hint=hint),self.assertRaises(core.StopBatch) as error:
+                eg.fixed_stationary_reference(s['components'],g['stationary'],set(g['input']+g['output']),supports,hint)
+            self.assertEqual(error.exception.code,'EXTERNAL_GEAR_SELECTION_REQUIRED')
+            self.assertEqual(error.exception.diagnostics['reason'],'requested_ground_not_unique_existing_fixed_stationary_component')
+
+    def test_multiple_existing_fixed_grounds_select_deterministically_without_fixing_others(self):
+        s,g=self.grounded_intent();extra=copy.deepcopy(s['components'][0]);extra.update(component_id='body2',instance='another frame')
+        s['components'].append(extra);g['stationary'].append('body2');supports={side:{'component_id':'cap'} for side in ('input','output')}
+        a=eg.fixed_stationary_reference(s['components'],g['stationary'],set(g['input']+g['output']),supports)
+        b=eg.fixed_stationary_reference(list(reversed(s['components'])),g['stationary'],set(g['input']+g['output']),supports)
+        self.assertEqual(a,b);self.assertEqual(a[0],'body2');self.assertEqual(a[1]['equivalent_fixed_candidates'],2)
+        self.assertTrue(a[1]['other_members_stationarity_not_inferred']);self.assertFalse(a[1]['new_fixing_action_required'])
+
+    def test_legacy_recommendation_keeps_existing_support_reference(self):
+        p=eg.recommend(survey())['proposals'][0]
+        self.assertEqual(p['roles']['body'],p['supports']['input']['component_id'])
+        self.assertIsNone(p['ground_reference_evidence'])
+
     def test_arbitrary_names_and_component_count_with_design_ratio_and_auto_keys(self):
         value=eg.recommend(survey());self.assertEqual(len(value['proposals']),1)
         p=value['proposals'][0];self.assertEqual(p['roles']['input_shaft'],'input_shaft')

@@ -128,16 +128,34 @@ class FeedbackTests(unittest.TestCase):
         e=TaskEngine(self.root,self.root/'work',self.root/'runtime');self.addCleanup(e.shutdown)
         tid='a'*32;folder=e.work/('task-'+tid);folder.mkdir()
         t={'task_id':tid,'directory':str(folder),'source':'fixture','phase':'failed','busy':False,'closed':False,
-           'server_instance_id':e.server_instance_id,'error':{'code':'CAD_TIMEOUT','native_unknown':True}}
+           'server_instance_id':e.server_instance_id,'error':{'code':'CAD_TIMEOUT','native_unknown':True,'diagnostics':{'request_id':'b'*32}}}
         e.tasks[tid]=t;e.active=tid
-        proof={'native_state_known':True,'response_ok':True,'whole_task_verified':False}
-        s=SimpleNamespace(pending_native_response={'request_id':'b'*32},model='model',late_response_reconciled=proof,require_live_idle=lambda:{'journal_idle':True})
+        proof={'request_id':'b'*32,'operation':'run_user_study','model_id':'model','native_state_known':True,'response_ok':True,'whole_task_verified':False,'same_retained_handles':True,'additional_native_dispatches':0}
+        s=SimpleNamespace(pending_native_response={'request_id':'b'*32,'operation':'run_user_study','model_id':'model'},model='model',unknown=False,late_response_reconciled=proof,require_live_idle=lambda:{'journal_idle':True})
         e.sessions[tid]=s
-        with patch('sw_mcp.conversation.managed_wait.reconcile',side_effect=lambda s:setattr(s,'pending_native_response',None)):
+        def reconcile(session):session.pending_native_response=None;return {'id':'b'*32,'ok':True,'result':{'restoration_status':'restored'}}
+        with patch('sw_mcp.conversation.managed_wait.reconcile',side_effect=reconcile):
             out=e.get(tid)
         self.assertEqual(out['phase'],'incomplete_after_late_response');self.assertNotIn('error',out)
         self.assertEqual(out['original_failure']['code'],'CAD_TIMEOUT');self.assertEqual(out['next_action']['tool'],'finish_mechanism_task')
         self.assertEqual(out['connection_status'],'attached');self.assertNotIn('verification',out)
+
+    def test_previous_successful_receipt_cannot_admit_current_pending_timeout(self):
+        from types import SimpleNamespace
+        e=TaskEngine(self.root,self.root/'work',self.root/'runtime');self.addCleanup(e.shutdown)
+        tid='a'*32;folder=e.work/('task-'+tid);folder.mkdir()
+        t={'task_id':tid,'directory':str(folder),'source':'fixture','phase':'failed','busy':False,'closed':False,
+           'server_instance_id':e.server_instance_id,'error':{'code':'CAD_TIMEOUT','native_unknown':True,'diagnostics':{'request_id':'c'*32}}}
+        e.tasks[tid]=t;e.active=tid
+        proof={'request_id':'b'*32,'operation':'run_user_study','model_id':'model','native_state_known':True,'response_ok':True,
+            'whole_task_verified':False,'same_retained_handles':True,'additional_native_dispatches':0}
+        s=SimpleNamespace(pending_native_response={'request_id':'c'*32,'operation':'run_user_study','model_id':'model'},model='model',unknown=True,
+            late_response_reconciled=proof,require_live_idle=lambda:{'journal_idle':False})
+        e.sessions[tid]=s
+        with patch('sw_mcp.conversation.managed_wait.reconcile',return_value=None):out=e.get(tid)
+        self.assertEqual(out['phase'],'failed');self.assertEqual(out['error']['diagnostics']['request_id'],'c'*32)
+        self.assertNotIn('late_native_outcome',out);self.assertNotIn('original_failure',out)
+        self.assertEqual(s.pending_native_response['request_id'],'c'*32);self.assertTrue(s.unknown)
 
 
 if __name__=='__main__':unittest.main()

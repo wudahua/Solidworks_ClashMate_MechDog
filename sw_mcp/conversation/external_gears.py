@@ -127,6 +127,28 @@ def recommend(survey,moving_hint='',reference_hint='',role_hints=None,stationary
     return {'proposals':proposals,'requires_selection':len(proposals)!=1,'issues':issues,
             'scope':SCOPE,'automatic_selection':'unique_evidence_supported_pair_only','write_dispatched':False}
 
+def fixed_stationary_reference(components,stationary,moving,supports,reference_hint=''):
+    """A measurement ground is distinct from the nearest coaxial support.
+
+    All candidates are already fixed in this top-level assembly context. Their
+    choice does not infer another component's purpose or add a fixing action.
+    """
+    candidates=[c for c in components if c.get('fixed_component') is True and c['component_id'] in stationary and c['component_id'] not in moving]
+    if reference_hint:
+        candidates=[c for c in candidates if reference_hint.casefold() in c['instance'].casefold()]
+        if len(candidates)!=1:
+            raise core.StopBatch('EXTERNAL_GEAR_SELECTION_REQUIRED','接地参考须匹配已确认静止组中的已有固定件；同轴支承可另选，不自动固定或替换用户指定参考。',
+                {'reason':'requested_ground_not_unique_existing_fixed_stationary_component','hint':reference_hint,
+                 'choices':[{'instance':c['instance'],'component_id':c['component_id']} for c in components if c.get('fixed_component') is True and c['component_id'] in stationary and c['component_id'] not in moving],'write_dispatched':False})
+    if not candidates:raise core.StopBatch('EXTERNAL_GEAR_SELECTION_REQUIRED','已声明静止组缺少可核对的已有固定接地参考，未用浮动支承代替或自动固定。',{'reason':'no_existing_fixed_stationary_ground','write_dispatched':False})
+    preferred=[supports[side]['component_id'] for side in ('input','output')]
+    candidates.sort(key=lambda c:(preferred.index(c['component_id']) if c['component_id'] in preferred else 2,c['instance'].casefold(),c['component_id']))
+    selected=candidates[0]
+    return selected['component_id'],{'selection':'existing_native_fixed_member_of_declared_stationary_group','instance':selected['instance'],
+        'fixed_component_observed':True,'support_and_ground_selected_separately':True,'equivalent_fixed_candidates':len(candidates),
+        'other_members_stationarity_not_inferred':True,'new_fixing_action_required':False,'motion_verification_required':True}
+
+
 def pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints=None,stationary_hints=None,intent_groups=None):
     role_hints=role_hints or {}
     stationary=[]
@@ -162,12 +184,13 @@ def pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints=N
         reasons[side]={'shaft_name':shaft['instance'],'gear_name':gear['instance'],'shaft_evidence':'gear_own_axis_no_separate_shaft_found' if shaft['component_id']==gear['component_id'] else 'coaxial_native_cylinders_and_name_or_slender_shape'}
         fixed=[]
         for c in components:
+            if intent_groups and c['component_id'] not in intent_groups['stationary']:continue
             if not c['fixed_component'] and c['component_id'] not in stationary or c['component_id'] in gears or c['component_id']==shaft['component_id']:continue
             aligned=matches_axis(c,axis['axis'],axis['point'])
             if not aligned:continue
             face=min(aligned['faces'],key=lambda f:abs(f['cylinder_radius_m']-axes[side]['cylinder_radius_m']))
             score=abs(face['cylinder_radius_m']-axes[side]['cylinder_radius_m'])
-            if reference_hint and reference_hint.casefold() not in c['instance'].casefold():continue
+            if reference_hint and not intent_groups and reference_hint.casefold() not in c['instance'].casefold():continue
             fixed.append((score,c,face))
         fixed.sort(key=lambda row:(row[0],row[1]['instance']))
         if not fixed:
@@ -181,7 +204,7 @@ def pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints=N
                         'candidates':[{'instance':c['instance'],'constraint_state':c.get('constraint_state')} for c in possible],'automatic_fix':False}})
             raise core.StopBatch('EXTERNAL_GEAR_SELECTION_REQUIRED','缺少可核验的同轴支承几何参考。',{'side':side})
         _,support,face=fixed[0];supports[side]={'component_id':support['component_id'],'instance':support['instance'],'axis':face,
-            'reason':'fixed_native_coaxial_reference_not_contact_validation'}
+            'reason':'fixed_native_coaxial_reference_not_contact_validation' if support['fixed_component'] else 'declared_stationary_coaxial_reference_requires_motion_verification'}
         # Keys are recommended by name + proximity. Unknown small components are
         # not silently locked into a rotor merely because they are nearby.
         for c in components:
@@ -213,13 +236,16 @@ def pair_recommendation(survey,a,b,aa,ba,reference_hint,moving_hint,role_hints=N
         a,b=b,a
         for data in (groups,axes,supports,reasons,shaft_ids):data['input'],data['output']=data['output'],data['input']
     reference=supports['input']['component_id']
+    ground_evidence=None
+    if intent_groups:
+        reference,ground_evidence=fixed_stationary_reference(components,intent_groups['stationary'],moving,supports,reference_hint)
     ratio=ratio_recommendation(a,b,survey['design_evidence'],survey['mates'],groups)
     if ratio['numerator']:ratio['expected_output_over_input']=-ratio['numerator']/ratio['denominator']
     return {'scope':SCOPE,'model_id':survey['model_id'],'reference_state_signature':survey['reference_state_signature'],
             'stationary_components':stationary,'stationary_scope':[{'component_id':c['component_id'],'instance':c['instance'],'currently_fixed':c['fixed_component']} for c in components if c['component_id'] in stationary],
             'roles':{'input_shaft':shaft_ids['input'],'input_gear':a['component_id'],'output_shaft':shaft_ids['output'],
                      'output_gear':b['component_id'],'body':reference},'groups':groups,'shaft_axes':axes,'supports':supports,
-            'gear_ratio':ratio,'recommendation_evidence':reasons,'moving_components':[
+            'gear_ratio':ratio,'recommendation_evidence':reasons,'ground_reference_evidence':ground_evidence,'moving_components':[
                 {'component_id':c['component_id'],'instance':c['instance'],'currently_fixed':c['fixed_component']} for c in components if c['component_id'] in moving],
             'external_gear_hypothesis_requires_confirmation':True,'write_dispatched':False}
 

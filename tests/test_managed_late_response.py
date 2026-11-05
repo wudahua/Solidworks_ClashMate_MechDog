@@ -112,5 +112,33 @@ for line in sys.stdin:
         self.assertTrue(self.observations[-1]['original_request_wait']['same_original_request'])
         self.assertFalse(self.observations[-1]['heartbeat_proves_native_progress'])
 
+    def test_new_pending_call_clears_previous_receipt_before_waiting(self):
+        self.s.late_response_reconciled={'request_id':'previous','native_state_known':True}
+        thread,result=self.start();self.pending()
+        self.assertIsNone(self.s.late_response_reconciled)
+        (self.folder/'release').touch();thread.join(5)
+        self.assertNotIn('error',result);self.assertEqual(len((self.folder/'dispatches.jsonl').read_text().splitlines()),1)
+        self.assertEqual(self.s.late_response_reconciled['model_id'],self.s.model)
+
+    def test_completion_must_bind_current_error_request_model_and_original_handles(self):
+        from types import SimpleNamespace
+        pending={'request_id':'b'*32,'operation':'run_user_study','model_id':'model'}
+        proof={**pending,'native_state_known':True,'same_retained_handles':True,'additional_native_dispatches':0}
+        response={'id':'b'*32,'ok':True};error={'diagnostics':{'request_id':'b'*32}}
+        session=SimpleNamespace(model='model',unknown=False,pending_native_response=None,late_response_reconciled=proof)
+        self.assertIs(managed_wait.matched_completion(session,pending,response,error),proof)
+        cases=[('response_missing',None,proof,error,False,None),('response_id',{'id':'c'*32},proof,error,False,None),
+            ('proof_id',response,{**proof,'request_id':'c'*32},error,False,None),
+            ('error_id',response,proof,{'diagnostics':{'request_id':'c'*32}},False,None),
+            ('model',response,{**proof,'model_id':'other'},error,False,None),
+            ('operation',response,{**proof,'operation':'inspect_model'},error,False,None),
+            ('handles',response,{**proof,'same_retained_handles':False},error,False,None),
+            ('replay',response,{**proof,'additional_native_dispatches':1},error,False,None),
+            ('unknown',response,proof,error,True,None),('still_pending',response,proof,error,False,pending)]
+        for label,r,p,e,unknown,left in cases:
+            with self.subTest(label=label):
+                session.late_response_reconciled=p;session.unknown=unknown;session.pending_native_response=left
+                self.assertIsNone(managed_wait.matched_completion(session,pending,r,e))
+
 
 if __name__=='__main__':unittest.main()
