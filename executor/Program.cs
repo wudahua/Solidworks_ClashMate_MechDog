@@ -51,6 +51,10 @@ class Program {
     [STAThread] static int Main(string[] args) {
         Console.OutputEncoding=new UTF8Encoding(false);
         Console.InputEncoding=new UTF8Encoding(false);
+        // Process creation/CLR readiness only: no CAD, native mutex or journal.
+        if(args.Length==1 && args[0]=="--startup-self-test") {
+            Console.WriteLine("{\"startup_self_test\":true,\"COM_called\":false,\"mutex_acquired\":false}");return 0;
+        }
         if(args.Length==2 && args[0]=="--isolated-probe")return Cad.IsolatedProbeWorker(args[1]);
         Mutex gate=null; bool ownsGate=false;
         try {

@@ -8,14 +8,15 @@ from pathlib import Path
 from verify_release import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.3-alpha.45"
+VERSION = "0.4.3-alpha.46"
 
 
 def build(candidate=False):
     # Keep the installed/CI regression suite identical to the development suite.
-    sources = [ROOT/name for name in ("README.md", "CONTRACT.md", "发布说明_v0.4.3-alpha.45.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
+    sources = [ROOT/name for name in ("README.md", "CONTRACT.md", "发布说明_v0.4.3-alpha.46.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
     sources += [ROOT/'tests/test_managed_late_response.py',ROOT/'tests/test_managed_feedback.py',ROOT/'tests/test_upgrade_host_runtime.py',ROOT/'tests/test_connection_recommendations.py']
     sources += [ROOT/'tests/test_current_solve_results.py',ROOT/'tests/CurrentSolveResultsTests.cs']
+    sources += [ROOT/'tests/test_executor_startup.py',ROOT/'tests/StartupEmptyControlTests.cs']
     sources += [ROOT/'tests/test_coupled_connections.py',ROOT/'tests/test_assembly_assessment.py',ROOT/'tests/test_partial_connection_goals.py',ROOT/'tests/test_dead_native_close.py',ROOT/'tests/test_group_review.py',ROOT/'tests/test_scoped_patterns.py']
     sources += [ROOT/'tests/test_mate_snapshot.py',ROOT/'tests/MateSnapshotReadTests.cs']
     sources += [ROOT/'tests/test_connection_signature_diff.py',ROOT/'tests/ConnectionSignatureDiffTests.cs']

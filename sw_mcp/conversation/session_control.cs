@@ -23,6 +23,13 @@ public partial class Cad {
             if(docs.Length!=0)throw new Exception("OWNED_INSTANCE_NOT_EMPTY");
             return new{ready=true,pid=expectedPid,document_count=0};
         }
+        if(action=="exit_empty") {
+            if(docs.Length!=0)throw new Exception("OWNED_INSTANCE_NOT_EMPTY_REFUSE_EXIT");
+            global::AcceptanceControl.Stage("before_ExitApp",new{pid=expectedPid,document_count=0,empty_only=true});
+            Sw.ExitApp();
+            global::AcceptanceControl.Stage("after_ExitApp_returned",new{native_exit_code_not_observed_by_helper=true});
+            return new{exit_requested=true,pid=expectedPid,empty_only=true,documents_closed=0};
+        }
         if(action!="exit")throw new Exception("UNKNOWN_CONTROL_ACTION");
         string prefix=Path.GetFullPath(Root).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;
         if(inventory.Any(d=>String.IsNullOrEmpty(d.path)||!Path.GetFullPath(d.path).StartsWith(prefix,StringComparison.OrdinalIgnoreCase)))

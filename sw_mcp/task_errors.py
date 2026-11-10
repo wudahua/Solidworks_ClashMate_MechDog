@@ -17,6 +17,11 @@ CONFIRMATION_CODES = frozenset({
 # Each entry is (options_status, instruction, codes). A tool is a diagnostic
 # route, never evidence that its arguments require user input.
 GROUPS = (
+    ('startup_process_review_required_no_write_retry',
+     'AI读取进程创建阶段、原生错误与构建回执；只在未导入模型且保留的资源可安全核对时结束原任务，不重放写入、不清除未知状态或结束其他实例。',
+     {'EXECUTOR_MISSING','EXECUTOR_SPAWN_DENIED','EXECUTOR_SPAWN_FAILED',
+      'SOLIDWORKS_MISSING','SOLIDWORKS_SPAWN_DENIED','SOLIDWORKS_SPAWN_FAILED',
+      'EXECUTOR_SELF_TEST_FAILED','EXECUTOR_SELF_TEST_PENDING','EXECUTOR_CACHE_INVALID'}),
     ('explicit_human_confirmation_required',
      '向用户解释具体方案、机械范围与恢复或保留方式，取得明确授权；不得自行把确认字段改为true，不自动重试写入。',
      CONFIRMATION_CODES),
@@ -135,9 +140,18 @@ def task_failure(code, message, diagnostics=None, *, task_id='', asynchronous=Fa
     if host:
         known_refusal = not asynchronous and (diag.get('launch_attempted') is False or code in {'HOST_TASK_COLLISION', 'HOST_PRINCIPAL_UNVERIFIABLE'})
     diag.update(cad_dispatched=False if known_refusal else None, job_created=False if known_refusal else None)
+    startup_failure = (code in {'EXECUTOR_MISSING','EXECUTOR_SPAWN_DENIED','EXECUTOR_SPAWN_FAILED',
+                               'SOLIDWORKS_MISSING','SOLIDWORKS_SPAWN_DENIED','SOLIDWORKS_SPAWN_FAILED'}
+                       and diag.get('startup_finish_eligible') is True
+                       and diag.get('model_import_dispatched') is False and diag.get('process_created') is False)
+    if startup_failure and diag.get('CAD_started') is False:
+        diag.update(cad_dispatched=False,job_created=False)
+        known_refusal=True
     value = operational_error(code, message, 'unknown', diag, job_created=diag['job_created'])
     if known_refusal:
         value['assertion'] = 'not_applicable'
+    if startup_failure:
+        value['restoration_status']='not_required'
     action = value['next_action']
     if host:
         status, instruction = next((s, i) for s, i, _ in GROUPS if s.startswith('host_infrastructure_'))
@@ -197,4 +211,7 @@ def task_failure(code, message, diagnostics=None, *, task_id='', asynchronous=Fa
             '再重新核对归档条件。其他客户端占用或状态未知时保留现场，不结束不明进程。')
         action['conditional_actions'] = [{'tool':'finish_motion_session','arguments':{},'automatic_retry':False,
             'when':'same_service_legacy_executor_only_and_no_active_managed_task_and_no_running_jobs_and_recovery_confirmed_idle'}]
+    if startup_failure and task_id:
+        action.update(tool='finish_mechanism_task',arguments={'task_id':task_id},
+            instruction='已记录进程创建失败且模型尚未导入。AI结束原任务：未启动CAD时仅关闭任务记录；已启动时只核对并正常退出本次空实例，任何文档或待决调用都会阻断。保留失败，不恢复不存在的检查点；结束后可开始新任务。')
     return value

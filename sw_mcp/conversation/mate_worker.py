@@ -19,26 +19,15 @@ def stage(runtime):
     core.write(runtime/'candidate-provenance.json',manifest)
 
 def compile_runtime(runtime,install,folder):
-    redist=install/'api/redist';binpath=runtime/'executor/bin';binpath.mkdir(exist_ok=True)
-    names=['SolidWorks.Interop.sldworks.dll','SolidWorks.Interop.swconst.dll','SolidWorks.Interop.swmotionstudy.dll']
-    for name in names:shutil.copyfile(redist/name,binpath/name)
-    csc=Path(os.environ['WINDIR'])/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
-    common=[str(csc),'/nologo','/platform:x64','/reference:System.Web.Extensions.dll','/reference:System.Windows.Forms.dll','/reference:Microsoft.CSharp.dll']+['/reference:'+str(redist/n) for n in names]
-    sources=sorted((runtime/'executor').glob('*.cs'))
-    # Keep the test/control helper outside production executor sources, with exact copied bytes.
-    helper=runtime/'test_host/AcceptanceControl.cs';helper.parent.mkdir(exist_ok=True);shutil.copyfile(KIT/'session_control.cs',helper)
-    core.write(folder/'control-helper-provenance.json',{'sha256':core.digest(helper),'source_sha256':core.digest(KIT/'session_control.cs'),'bytes_changed':False})
-    for main,extra,target in [('Program',[],binpath/'SwExecutor.exe'),('AcceptanceControl',[helper],binpath/'AcceptanceControl.exe')]:
-        run=subprocess.run(common+['/main:'+main,'/out:'+str(target)]+[str(p) for p in sources+extra],capture_output=True,creationflags=subprocess.CREATE_NO_WINDOW)
-        (folder/(main+'.compile.log')).write_bytes(run.stdout+run.stderr)
-        if run.returncode:raise core.StopBatch('COMPILATION_FAILED','本机编译失败，诊断已保存。')
-    core.write(folder/'compiled-sources.json',{p.name:core.digest(p) for p in sources})
+    from .executor_build import compile_cached
+    return compile_cached(runtime,install,folder,KIT/'session_control.cs')
 
 class Session:
     def __init__(self,project,folder,runtime_base):
         self.project=project;self.folder=folder;self.runtime=runtime_base/uuid.uuid4().hex[:6]
         self.proc=None;self.bridge=None;self.model=None;self.checkpoint=None;self.recommendation=None;self.plan=None
         self.import_restored=False;self.motion=None;self.applied_plan=None;self.unknown=False;self.committed=False;self.ended=False;self.serial=0;self.cleanup_warning=None
+        self.import_dispatched=False;self.startup_failure=None
         folder.mkdir(parents=True,exist_ok=False);self.state('ready','等待选择装配体。')
     def state(self,status,message,**kw):
         data={'status':status,'message':message,'runtime':str(self.runtime),'owned_pid':self.proc.pid if self.proc else None,
@@ -62,18 +51,32 @@ class Session:
         path=core.no_links(path)
         if not path.is_file() or path.suffix.lower()!='.sldasm':raise core.StopBatch('INVALID_ASSEMBLY_PATH')
         startup_gate.require_idle(self.folder)
-        self.state('preparing','自动核对候选源码、定位 SolidWorks 并编译本机执行器…')
+        self.state('preparing','自动核对源码与构建依赖，复用已校验缓存或构建本机执行器…')
         core.runtime_path_budget(self.runtime);stage(self.runtime)
         install=Path(sw_install.resolve(self.project)['resolved_directory']);compile_runtime(self.runtime,install,self.folder)
         def retain(proc):self.proc=proc;self.state('starting','正在启动本次专用 SolidWorks 实例…')
         try:self.proc=core.launch(self.runtime,install,self.folder,on_started=retain)
-        except Exception:self.unknown=self.proc is not None;raise
+        except Exception as error:
+            self.unknown=self.proc is not None or getattr(error,'code','')=='EXECUTOR_SELF_TEST_PENDING'
+            diagnostics=getattr(error,'diagnostics',None) or {}
+            # This proof is produced at the actual pre-import boundary, never
+            # inferred from null cad_dispatched/model_id in a historic record.
+            if getattr(error,'code','') in {'EXECUTOR_MISSING','EXECUTOR_SPAWN_DENIED','EXECUTOR_SPAWN_FAILED',
+                                          'SOLIDWORKS_MISSING','SOLIDWORKS_SPAWN_DENIED','SOLIDWORKS_SPAWN_FAILED'} and diagnostics.get('process_created') is False:
+                self.startup_failure={**diagnostics,'model_import_dispatched':False,
+                    'CAD_started':self.proc is not None,'startup_finish_eligible':True}
+                error.diagnostics=self.startup_failure
+                core.write(self.folder/'导入前启动失败.json',self.startup_failure)
+            self.state('startup_failed','启动未完成，已保存创建阶段证据；尚未导入模型。',
+                       startup_failure=self.startup_failure,error_code=getattr(error,'code',type(error).__name__))
+            raise
         from sw_mcp.bridge import Bridge
         self.bridge=Bridge(self.runtime)
         self.bridge._selected_startup_pid=str(self.proc.pid)
         self.state('importing','正在创建并核验隔离副本，原文件不写入…')
         kind=getattr(self,'task_kind',None)
         named_import=kind in {'external_gear_pair','assembly_constraints'}
+        self.import_dispatched=True
         imported=self.call('_import_constraint_assembly' if kind=='assembly_constraints' else '_import_gear_assembly' if named_import else 'import_assembly',path=str(path),materialize_virtual_components=materialize,**({'import_id':uuid.uuid4().hex} if named_import else {}))
         self.model=imported['model_id'];self.checkpoint=imported['checkpoint']['checkpoint_id'];self.import_preflight=imported.get('preflight');core.write(self.folder/'导入.json',imported)
         return self.rescan(hint)
@@ -136,6 +139,31 @@ class Session:
             'finish_mode':'restored_then_closed' if self.import_restored else 'kept_committed_copy' if self.committed else 'closed_without_verified_import_restore',
             'model_id':self.model,'checkpoint_id':self.checkpoint,'runtime':str(self.runtime),'cleanup_warning':self.cleanup_warning}
         core.write(self.folder/'会话收尾.json',receipt)
+        return receipt
+    def can_finish_startup(self):
+        return (bool(self.startup_failure) and self.startup_failure.get('startup_finish_eligible') is True
+                and self.startup_failure.get('model_import_dispatched') is False
+                and not self.import_dispatched and self.model is None and self.bridge is None
+                and not self.committed and not self.ended)
+    def finish_startup(self):
+        if not self.can_finish_startup():raise core.StopBatch('NATIVE_STATE_UNKNOWN','启动失败边界缺少证据，未关闭CAD。')
+        # Only retained owned Popen; empty-only native control refuses *any*
+        # opened document, even a file underneath this runtime directory.
+        if self.proc:
+            try:core.close_owned(None,self.proc,self.runtime,self.folder,empty_only=True)
+            except core.StopBatch as error:
+                known=core.read(self.folder/'exit.json') if (self.folder/'exit.json').exists() else {}
+                if error.code=='OWNED_CAD_EXIT_NONZERO' and known.get('native_process_exited') is True:
+                    self.cleanup_warning=known
+                else:
+                    self.startup_failure['startup_finish_eligible']=False
+                    self.unknown=True;raise
+        self.unknown=False;self.ended=True
+        receipt={'ended':True,'startup_failure_archived':True,'model_import_dispatched':False,
+                 'restoration_status':'not_required','force_kill':False,'model_id':None,
+                 'cleanup_warning':self.cleanup_warning,'native_motion_passed':False}
+        core.write(self.folder/'会话收尾.json',receipt)
+        self.state('closed_startup_failed','未导入模型的启动失败已安全收尾，原失败记录保留。')
         return receipt
     def execute(self,action,data):
         if self.ended:raise core.StopBatch('MATE_SESSION_ENDED')
