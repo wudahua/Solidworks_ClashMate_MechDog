@@ -611,6 +611,20 @@ class TaskEngine:
             return self.close_orphan(t,close_unrestored)
         if not t.get('busy') and completed_close.has_receipt(t):return self.archive_completed_close(t,close_unrestored)
         session=self.sessions.get(task_id)
+        if session and getattr(session,'can_finish_startup',lambda:False)():
+            def close_startup():
+                backup=Path(t['directory'])/'启动失败原任务状态.json'
+                if not backup.exists():core.write(backup,t)
+                receipt=session.finish_startup()
+                native=core.read(session.folder/'exit.json') if (session.folder/'exit.json').exists() else None
+                self._settle_closed(t,{'session':receipt,'restoration':{'restoration_status':'not_required',
+                    'reason':'proven_no_model_import_dispatched'},'native_exit':native,
+                    'cleanup_status':'warning_nonzero_native_exit' if native and native.get('normal_zero_exit') is not True else 'pass' if native else 'not_started',
+                    'startup_failure_archived':True,'previous_task_passed':False},self._source_review(t,session))
+                if t['finish']['source_files_unchanged']:
+                    t.update(phase='closed_startup_failed',task_outcome='failed_before_import')
+                    self.save(t)
+            return self._submit(t,'finishing_failed_startup',close_startup)
         if session and getattr(session,'proc',None) and session.proc.poll() is not None:
             from . import dead_native_close
             proof=dead_native_close.review(t,session)

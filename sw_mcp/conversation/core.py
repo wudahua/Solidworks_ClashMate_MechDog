@@ -42,9 +42,9 @@ from pathlib import Path
 
 KIT = Path(__file__).resolve().parent
 
-VERSION = '0.4.3-alpha.45'
+VERSION = '0.4.3-alpha.46'
 
-KIT_VERSION = 'formal-dialogue-0.4.3-alpha.45'
+KIT_VERSION = 'formal-dialogue-0.4.3-alpha.46'
 
 ALLOWED = {'get_environment','get_recovery_state','import_assembly','inspect_model',
            'list_motion_studies','preflight_motion','list_drive_candidates','create_motion_study',
@@ -171,11 +171,12 @@ def control(root,pid,action,folder,timeout=30):
     return read(path)
 
 def launch(root,install,folder,on_started=None):
+    from . import startup_process
     startup_gate.require_idle(folder)
+    startup_process.self_test(root,folder)
     launch_utc=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())
     with (folder/'sw-native.stdout.log').open('wb') as out,(folder/'sw-native.stderr.log').open('wb') as err:
-        proc=subprocess.Popen([str(install/'SLDWORKS.exe')],stdout=out,stderr=err,creationflags=subprocess.CREATE_NO_WINDOW)
-    if on_started:on_started(proc)
+        proc=startup_process.spawn([str(install/'SLDWORKS.exe')],folder,'solidworks',on_created=on_started,stdout=out,stderr=err,creationflags=subprocess.CREATE_NO_WINDOW)
     write(folder/'owned-instance.json',{'pid':proc.pid,'started_by_suite':True,'root':str(root),'no_user_pid_accepted':True,
         'executable':str(install/'SLDWORKS.exe'),'launch_observed_at_utc':launch_utc,
         'owner_identity':'Popen_retained_process_handle_not_PID_lookup'})
@@ -186,9 +187,10 @@ def launch(root,install,folder,on_started=None):
         if proc.poll() is not None:raise StopBatch('OWNED_SOLIDWORKS_EXITED',str(proc.returncode))
         attempt+=1
         out=(folder/f'connection-{attempt}.stdout').open('wb');err=(folder/f'connection-{attempt}.stderr').open('wb')
-        check=subprocess.Popen([str(root/'executor/bin/SwExecutor.exe'),'check-connection'],env=env,stdout=out,stderr=err,creationflags=subprocess.CREATE_NO_WINDOW)
-        try:check.wait(timeout=60)
-        except subprocess.TimeoutExpired:raise StopBatch('CONNECTION_PENDING_NO_TERMINATION',str(check.pid))
+        try:
+            check=startup_process.spawn([str(root/'executor/bin/SwExecutor.exe'),'check-connection'],folder,'connection-check',env=env,stdout=out,stderr=err,creationflags=subprocess.CREATE_NO_WINDOW)
+            try:check.wait(timeout=60)
+            except subprocess.TimeoutExpired:raise StopBatch('CONNECTION_PENDING_NO_TERMINATION',str(check.pid))
         finally:out.close();err.close()
         hello=json.loads((folder/f'connection-{attempt}.stdout').read_bytes())
         startup_gate.connection_refusal(hello,folder,attempt,proc.pid)
@@ -205,7 +207,7 @@ def restored_ok(value):
             and type(value.get('maximum_transform_delta')) in (int,float)
             and math.isfinite(value['maximum_transform_delta']) and value['maximum_transform_delta']<=1e-7)
 
-def close_owned(wire,proc,root,folder):
+def close_owned(wire,proc,root,folder,empty_only=False):
     def event(stage,**evidence):
         with (folder/'exit-host.stages.jsonl').open('a',encoding='utf-8') as f:
             f.write(json.dumps({'stage':stage,'observed_at_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),
@@ -214,14 +216,15 @@ def close_owned(wire,proc,root,folder):
     if wire is not None and (wire.unknown or not wire.close()):raise StopBatch('MCP_EXIT_UNCONFIRMED_NO_CAD_EXIT')
     event('after_mcp_close',mcp_exit_code=wire.process.returncode if wire is not None else None)
     event('before_exit_control')
-    control(root,proc.pid,'exit',folder,45)
-    event('after_exit_control',helper_exit_code=read(folder/'exit-control-exit.json')['helper_exit_code'])
+    action='exit_empty' if empty_only else 'exit'
+    control(root,proc.pid,action,folder,45)
+    event('after_exit_control',helper_exit_code=read(folder/(action+'-control-exit.json'))['helper_exit_code'])
     event('before_native_wait',maximum_wait_s=45)
     try:proc.wait(timeout=45)
     except subprocess.TimeoutExpired:raise StopBatch('OWNED_CAD_EXIT_PENDING_NO_TERMINATION',str(proc.pid))
     event('after_native_wait',native_exit_code=proc.returncode)
     write(folder/'exit.json',{'owned_pid':proc.pid,'exit_code':proc.returncode,'normal_zero_exit':proc.returncode==0,
         'native_process_exited':True,'exit_code_process':'owned_SLDWORKS_not_control_helper',
-        'helper_exit_code':read(folder/'exit-control-exit.json')['helper_exit_code'],'force_kill':False})
+        'helper_exit_code':read(folder/(action+'-control-exit.json'))['helper_exit_code'],'force_kill':False,'empty_only':empty_only})
     if proc.returncode!=0:raise StopBatch('OWNED_CAD_EXIT_NONZERO',str(proc.returncode))
 

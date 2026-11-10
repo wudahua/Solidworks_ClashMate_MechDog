@@ -1,5 +1,15 @@
 # AI 客户端与开发者契约
 
+## 启动缓存与导入前失败收尾
+
+`startup_process_review_required_no_write_retry` 区分本机子进程创建问题与已派发的CAD请求。错误码包括 EXECUTOR_MISSING、EXECUTOR_SPAWN_DENIED、EXECUTOR_SPAWN_FAILED，及对应 SOLIDWORKS 前缀；原始 Win32 错误和每次创建结果落盘。仅 CreateProcess 明确失败时最多退避重试3次（1/2/4秒）；已经创建的进程、COM调用、超时或配合写入不走此重试。
+
+每个隔离运行目录保持独立日志和模型；只复用经源码、控制辅助源码、编译器、框架支持文件、Interop及编译选项哈希绑定的二进制缓存。缓存和复制后的产物逐字节校验；失效或损坏保留旧产物并重新编译。启动CAD前的 --startup-self-test 不访问COM、互斥体或模型。
+
+自检子进程等待超时仍受未知状态保护；不能仅凭尚未启动CAD就声称全部资源已结束。该异常分支不重试进程或自动结束任务。
+
+只在当前活会话记录了明确的进程创建失败、尚未派发导入、没有模型/Bridge/配合成果时，finish_mechanism_task允许专门收尾。未启动CAD时仅关闭记录；已启动时只使用保留的本次进程句柄与明确PID，控制器要求实例完全无文档才正常退出，不关闭任何已打开文档。控制失败、等待超时或出现文档即保留未知状态并禁用再次尝试。收尾保留原失败，restoration_status=not_required仅表示不存在已导入模型；不是恢复成功或运动通过。历史null字段、PID消失、TTL、崩溃锁均不能代替该证据，不增加无条件门禁复位工具。
+
 ## alpha.43 普通局部组的完整阵列种子链
 
 assembly_constraints普通rigid_groups新增有界准入，不增工具或参数。局部组仍最多32成员，展开最多8连接目标，机械归属须明确；AI可从group_seeds返回的已观察种子归属假设组合完整局部组，不能由几何接近或固定标志推断用途。
