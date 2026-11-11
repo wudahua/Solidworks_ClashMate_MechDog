@@ -79,6 +79,8 @@ public partial class Cad {
             var doc=scope.Doc;Fingerprint(doc,model.Path);object signatureTiming,signatureBefore;string signature=MateSignature(model,doc,out signatureTiming,out signatureBefore);var cs=UserComponents(doc);
             if(cs.Length>128)throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","基础连接调查限128个完整解析组件节点，包含子装配与内部零件。");
             var rows=new List<object>();var skipped=new List<object>();var templates=new Dictionary<string,List<CompletionPlaneTemplate>>();
+            var analyticSnapshot=new AssemblyGeometrySnapshot();
+            var analyticPoses=new Dictionary<string,double[]>();
             var hierarchy=ConnectionHierarchyForModel(model,doc);
             var faceCache=new Dictionary<string,IFace2[]>();var faceStatus=new Dictionary<string,string>();
             Func<IComponent2,IFace2[]> materialFaces=partComponent=>{string key=GTComponentId(doc,partComponent);IFace2[] cached;if(faceCache.TryGetValue(key,out cached))return cached;string observed;cached=ComponentFaces(partComponent,out observed);faceCache[key]=cached;faceStatus[key]=observed;return cached;};
@@ -93,6 +95,20 @@ public partial class Cad {
                 string status="verified_rigid_descendant_material_references";var faces=assemblyNode?cs.Where(leaf=>hierarchy[GTComponentId(doc,leaf)].DocumentType==1&&ConnectionReferenceOwnerAllowed(doc,leaf,c)).SelectMany(materialFaces).ToArray():materialFaces(c);
                 if(!assemblyNode)status=faceStatus[GTComponentId(doc,c)];var cylinders=faces.Where(f=>((ISurface)f.GetSurface()).IsCylinder()).OrderByDescending(f=>f.GetArea()).ToArray();
                 var planes=faces.Where(f=>((ISurface)f.GetSurface()).IsPlane()).OrderByDescending(f=>f.GetArea()).ToArray();
+                string analyticId=GTComponentId(doc,c),analyticInstance=c.Name2;
+                // The ordinary planner keeps its existing reference limits.
+                // This sidecar observes every analytic face within a separate
+                // explicit budget, without GetPersistReference3 or entity IDs.
+                foreach(var item in cylinders.Select((f,i)=>new{face=f,index=i,cylinder=true}).Concat(planes.Select((f,i)=>new{face=f,index=i,cylinder=false}))) {
+                    if(!analyticSnapshot.HasCapacity){analyticSnapshot.Skip(1);continue;}
+                    var physical=assemblyNode?((IEntity)item.face).GetComponent() as IComponent2:c;
+                    if(!ConnectionReferenceOwnerAllowed(doc,physical,c))throw new CadFault("CONNECTION_REFERENCE_INVALID","几何观察的材料组件归属未认证。");
+                    string ownerInstance=assemblyNode?physical.Name2:analyticInstance;double[] pose;
+                    if(!analyticPoses.TryGetValue(ownerInstance,out pose)){pose=(double[])physical.GetTotalTransform(false).ArrayData;analyticPoses[ownerInstance]=pose;}
+                    var surface=(ISurface)item.face.GetSurface();
+                    analyticSnapshot.Add(analyticId,analyticInstance,ownerInstance,item.cylinder,item.index,
+                        (double[])(item.cylinder?surface.CylinderParams:surface.PlaneParams),pose,item.face.GetArea());
+                }
                 Func<IFace2,string,object> shape=(f,kind)=>{var physical=assemblyNode?((IEntity)f).GetComponent() as IComponent2:c;if(!ConnectionReferenceOwnerAllowed(doc,physical,c))throw new CadFault("CONNECTION_REFERENCE_INVALID","子装配材料参考的原生归属未通过。");var row=MateGeometry(doc,f,physical);row["logical_rigid_body_component_id"]=GTComponentId(doc,c);row["reference_owner_component_id"]=GTComponentId(doc,physical);row["reference_owner_instance"]=physical.Name2;row["native_reference"]=GTReference(doc,f);row["reference_kind"]=kind;row["area_m2"]=f.GetArea();return row;};
                 rows.Add(WithConnectionHierarchy(new{component_id=GTComponentId(doc,c),instance=c.Name2,fixed_component=c.IsFixed(),constraint_state=ComponentConstraintObservation(c),
                     transform=(double[])c.GetTotalTransform(false).ArrayData,box=c.GetBox(false,false),
@@ -112,7 +128,16 @@ public partial class Cad {
                     changed_fields=changes,before=signatureBefore,after=signatureAfter,write_dispatched=false,automatic_retry=false});
             }
             SaveUserModel(model);
+            string observation=Path.Combine(model.Directory,"observations","assembly-geometry-"+Guid.NewGuid().ToString("N")+".json");
+            AtomicJson(observation,new{model_id=id,reference_state_signature=signature,rows=analyticSnapshot.Rows,
+                analytic_geometry_complete=skipped.Count==0&&analyticSnapshot.Complete,omitted_faces=analyticSnapshot.Omitted,
+                invalid_faces=analyticSnapshot.Invalid,maximum_rows=AssemblyGeometrySnapshot.MaximumRows,
+                scope="analytic_cylindrical_and_planar_faces_in_loaded_supported_owned_components_not_all_BRep_or_write_references",
+                native_write_references_expanded=false,write_dispatched=false});
             return new{model_id=id,reference_state_signature=signature,components=rows,mates=mates,structural_relations=structure,
+                geometry_snapshot=new{path=observation,sha256=FileHash(observation).Replace("-","").ToLowerInvariant(),
+                    row_count=analyticSnapshot.Rows.Count,analytic_geometry_complete=skipped.Count==0&&analyticSnapshot.Complete,
+                    native_write_references_expanded=false},
                 studies=studies,nonlinear_constraints=nonlinear,skipped=skipped,inventory_complete=skipped.Count==0,write_dispatched=false,
                 native_motion_study_solved=false,geometry_budget=new{cylinders_per_component=24,planes_per_component=16},
                 recommendation_scope="basic_joint_goal_planning_not_global_DOF_or_design_intent",source_files_unchanged=UserSourcesUnchanged(model)};
