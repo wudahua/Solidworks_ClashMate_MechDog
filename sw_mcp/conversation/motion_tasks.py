@@ -418,7 +418,21 @@ class MotionTaskEngine(TaskEngine):
                     'instruction':'报告原生验证与曲线；恢复初始检查点并核对退出后再开始下一轮。'})
         return self._submit(t,'running',operation)
 
-    def get(self,task_id='',draft_cursor='',structure_cursor=''):
+    def get(self,task_id='',draft_cursor='',structure_cursor='',snapshot_cursor='',summary_only=False):
+        if snapshot_cursor or summary_only:
+            if draft_cursor or structure_cursor or (snapshot_cursor and summary_only) or not re.fullmatch('[a-f0-9]{32}',task_id):
+                raise core.StopBatch('CONNECTION_INTENT_INVALID','装配摘要/快照需要task_id，且不混用其他分页或摘要参数。')
+            with self.lock:
+                if task_id not in self.tasks:raise core.StopBatch('TASK_NOT_IN_CURRENT_SERVER')
+                t=self.tasks[task_id]
+                if t.get('task_kind')!='assembly_constraints':raise core.StopBatch('CONNECTION_INTENT_INVALID','装配快照/摘要仅用于assembly_constraints，其他任务使用原get。')
+                from . import assembly_snapshot
+                if snapshot_cursor:return assembly_snapshot.page(t,snapshot_cursor,task_id in self.sessions and t.get('server_instance_id')==self.server_instance_id)
+                result=assembly_snapshot.summary(t)
+                if task_id not in self.sessions and not t.get('closed'):
+                    result['task_owner_available']=False
+                    result['next_action']={'tool':'get_mechanism_task','arguments':{'task_id':task_id},'instruction':'缺少原活会话，读取完整任务核对归属和恢复；不按保存摘要执行。'}
+                return __import__('copy').deepcopy(result)
         if structure_cursor:
             if draft_cursor or not re.fullmatch('[a-f0-9]{32}',task_id):raise core.StopBatch('CONNECTION_INTENT_INVALID','结构分页需要有效task_id，且不混用草案游标。')
             if task_id not in self.tasks:raise core.StopBatch('TASK_NOT_IN_CURRENT_SERVER')

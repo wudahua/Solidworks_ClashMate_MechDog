@@ -51,7 +51,21 @@ def _guide_hints(a,b,rows,origin,scale):
     return hints
 
 
-def draft(survey,review=None,cursor='',binding=''):
+def prepare_context(survey,review,binding=''):
+    """One immutable discovery call only; no persistent or post-write reuse."""
+    snapshot=hashlib.sha256((binding+'\n'+json.dumps(survey,sort_keys=True,separators=(',',':'),allow_nan=False)).encode()).hexdigest()
+    cs=survey['components'];by_id={c['component_id']:c for c in cs};hierarchy=assembly_hierarchy.analyze(cs)
+    result={'snapshot_id':snapshot,'hierarchy':hierarchy,'by_id':by_id}
+    if not hierarchy['supported_for_connection_writes']:return result
+    pairs,omitted,origin,scale=joints.observed_rows(survey);graph=constraint_graph.model(survey)
+    eligible=[key for key in itertools.combinations(sorted(by_id),2)
+              if all(hierarchy['parents'][x] is None for x in key) and not all(by_id[x].get('fixed_component') for x in key)]
+    eligible.sort(key=lambda key:(3 if graph.rank(*key)==6 else 0 if key in pairs and len(joints.ac.basis(pairs[key]['rows']))<5 else 1 if key in pairs else 2,key))
+    result.update(pairs=pairs,origin=origin,scale=scale,graph=graph,eligible=eligible)
+    return result
+
+
+def draft(survey,review=None,cursor='',binding='',context=None):
     review=review or joints.review(survey)
     result={'schema_version':1,'status':'review_required','candidates':[],
             'write_dispatched':False,'confirmation_token_created':False,'mechanical_intent_proven':False,
@@ -69,15 +83,12 @@ def draft(survey,review=None,cursor='',binding=''):
         match=re.fullmatch(r'([a-f0-9]{64}):([0-9]{1,5})',cursor)
         if not match or match[1]!=snapshot:raise ValueError('draft_cursor_snapshot_or_scope_mismatch')
         offset=int(match[2])
-    cs=survey['components'];by_id={c['component_id']:c for c in cs}
-    hierarchy=assembly_hierarchy.analyze(cs)
+    context=prepare_context(survey,review,binding) if context is None else context
+    if context.get('snapshot_id')!=snapshot:raise ValueError('draft_context_snapshot_or_scope_mismatch')
+    by_id=context['by_id'];hierarchy=context['hierarchy']
     if not hierarchy['supported_for_connection_writes']:
         result['reason']='flexible_subassembly_scope_unsupported';result['native_hierarchy']=hierarchy;return result
-    pairs,omitted,origin,scale=joints.observed_rows(survey)
-    graph=constraint_graph.model(survey)
-    eligible=[key for key in itertools.combinations(sorted(by_id),2)
-              if all(hierarchy['parents'][x] is None for x in key) and not all(by_id[x].get('fixed_component') for x in key)]
-    eligible.sort(key=lambda key:(3 if graph.rank(*key)==6 else 0 if key in pairs and len(joints.ac.basis(pairs[key]['rows']))<5 else 1 if key in pairs else 2,key))
+    pairs,origin,scale,graph,eligible=(context[k] for k in ('pairs','origin','scale','graph','eligible'))
     if offset>=len(eligible) and cursor:raise ValueError('draft_cursor_outside_pair_scope')
     candidates=[];end=offset
     for key in eligible[offset:offset+MAX_PAIRS]:

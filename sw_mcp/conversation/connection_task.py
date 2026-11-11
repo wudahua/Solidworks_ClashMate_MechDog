@@ -31,11 +31,14 @@ def discover(s):
     core.write(s.folder/'通用配合原生调查.json',survey)
     review=joints.review(survey);core.write(s.folder/'通用配合体检.json',review)
     core.write(s.folder/'整装配约束图.json',review.get('assembly_constraint_graph'))
-    draft=recommendations.draft(survey,review,binding=str(s.folder.parent.absolute()));s.connection_draft=draft
+    binding=str(s.folder.parent.absolute())
+    context=recommendations.prepare_context(survey,review,binding) if review.get('complete') and not review.get('mate_health_issues') else None
+    draft=recommendations.draft(survey,review,binding=binding,context=context);s.connection_draft=draft
     core.write(s.folder/'装配连接自动草案.json',draft)
     overview=assembly_overview.recommend(survey,review);core.write(s.folder/'整装配组件推荐与遗漏检查.json',overview)
     from .. import assembly_assessment
-    assessment=assembly_assessment.build(survey,review,overview,draft,binding=str(s.folder.parent.absolute()))
+    assessment=assembly_assessment.build(survey,review,overview,draft,binding=binding,draft_context=context)
+    s.connection_candidates=(context or {}).get('captured_candidates',draft.get('candidates',[]))
     s.assembly_assessment=assessment;core.write(s.folder/'首轮装配处理结论.json',assessment)
     from ..connection_layers import catalog
     layers=catalog(s.call('_survey_connection_layers',model_id=s.model))
@@ -63,6 +66,8 @@ def publish_review(engine,t,value):
     if value.get('constraint_structure'):
         from .constraint_inventory import publish
         publish(engine,t,value)
+    from . import assembly_snapshot
+    assembly_snapshot.publish_prepare(t,s)
 
 
 def resolve(s,intents,maximum=8):
@@ -275,6 +280,8 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
             next_action={'tool':'execute_mechanism_task','arguments':{'task_id':t['task_id']},
                 'instruction':('本方案仅验证已有丝杆联动：新增0项，不解除固定；保留全约束原生观测。正反向各创建临时线性马达，0.1mm/s、1秒、30fps，逐帧核对丝杆关系、限位和接地参考并恢复移除；不添加临时距离配合。' if any(g.get('coupled_verification_only') for g in proposal['goals']) else '允许方向可使用临时距离或角度约束驱动，逐次恢复成果检查点移除。')+'解释连接目标、自动采用轴线、逐项新增配合、保留的旧约束及未知项、仅副本初态准备和有界试验范围。禁止方向用装配移动求解。取得当前具体方案授权后一次执行。未证明全行程、受力或接触；默认恢复原导入状态。'})
         if t.get('automatic_mechanical_goal_proposal'):t['next_action']['instruction']='这些连接用途由AI提出，尚未证明设计意图。先向用户集中确认各运动组应保留的运动及具体改动，再执行。'+t['next_action']['instruction']
+        from . import assembly_snapshot
+        assembly_snapshot.publish_plan(t,s)
     return engine._submit(t,'planning',operation)
 
 

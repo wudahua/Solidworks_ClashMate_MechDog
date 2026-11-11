@@ -114,7 +114,7 @@ def readonly(survey,review):
             'mechanical_intent_inferred':False,'native_motion_verified':False,'confirmation_token_created':False}
 
 
-def build(survey,review,overview,draft,binding=''):
+def build(survey,review,overview,draft,binding='',draft_context=None):
     cs=survey.get('components',[]);by={c['component_id']:c for c in cs};by_name={c['instance']:c for c in cs}
     if review.get('write_scope_allowed') is False:return readonly(survey,review)
     if review.get('mate_health_issues'):
@@ -137,7 +137,9 @@ def build(survey,review,overview,draft,binding=''):
         if cursor in seen:raise ValueError('first_pass_draft_cursor_cycle')
         seen.add(cursor)
         if len(pages)==MAX_DRAFT_PAGES:break
-        page=drafts.draft(survey,review,cursor=cursor,binding=binding)
+        if draft_context is None:draft_context=drafts.prepare_context(survey,review,binding)
+        page=drafts.draft(survey,review,cursor=cursor,binding=binding,context=draft_context)
+    if draft_context is not None:draft_context['captured_candidates']=candidates
     search_complete=bool(pages and pages[-1].get('next_cursor') is None)
     result['candidate_search']={'pages_read':len(pages),'page_budget':MAX_DRAFT_PAGES,'remaining_cursor':pages[-1].get('next_cursor') if pages else None,
         'all_pair_ranges_read':search_complete,'complete_geometric_uniqueness_proven':False,'candidate_count':len(candidates)}
