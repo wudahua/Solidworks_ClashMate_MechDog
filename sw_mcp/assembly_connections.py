@@ -185,7 +185,9 @@ def rotary_trial_driver(candidates, axis, component_a, component_b):
         'temporary_only':True,'removed_by_verified_result_checkpoint_after_each_trial':True}
 
 
-def plan(survey, intents,whole_assembly=False):
+def plan(survey, intents,whole_assembly=False,driven_loop=None):
+    if driven_loop is not None and (not isinstance(driven_loop,dict) or set(driven_loop)!={'primary','outputs'} or not whole_assembly):
+        raise ValueError('driven_loop_requires_explicit_whole_assembly_profile')
     limit=128 if whole_assembly else 8
     if not isinstance(intents,list) or not 1<=len(intents)<=limit: raise ValueError('connection_goal_budget_exceeded' if whole_assembly else 'one_to_8_connection_goals_required')
     cs=survey['components']; by_id={c['component_id']:c for c in cs};indices={c['component_id']:i for i,c in enumerate(cs)}
@@ -283,13 +285,24 @@ def plan(survey, intents,whole_assembly=False):
         if coupled is not None:goals[-1].update(coupled_verification_only=True,coupling_evidence=coupled,supported_target_fulfilment_certified=False)
     if actions and any(g.get('coupled_verification_only') for g in goals):raise ValueError('coupled_verification_cannot_mix_supplements')
     planned=constraint_graph.Graph(survey);planned.matrix.pivots=matrix.pivots.copy()
-    for goal in goals:
+    for goal in goals if driven_loop is None else []:
         if goal['kind']=='rigid':continue
         effective=planned.relative(goal['component_a'],goal['component_b'])
         target=target_rows(goal['kind'],goal['axis_global'],goal['reference_point_global_m'],origin,scale)
         if len(ac.basis(target+effective['rows']))>len(ac.basis(target)):
             raise ValueError('proposed_group_constraints_conflict_with_declared_motion')
+    loop_review=None;construction_review=None
+    if driven_loop is not None:
+        from . import mechanism_loop
+        loop_review=mechanism_loop.review(survey,goals,matrix,driven_loop['primary'],driven_loop['outputs'])
+        actions,matrix,construction_review=mechanism_loop.prune_actions(survey,actions)
+        loop_review=mechanism_loop.review(survey,goals,matrix,driven_loop['primary'],driven_loop['outputs'])
+        for i,g in enumerate(goals):
+            g['independent_actuation_required']=False
+            g['declared_closed_loop_coupled']=i in loop_review['coupled_goal_indices']
+            g['added_action_count']=sum({g['component_a'],g['component_b']}=={a['component_a'],a['component_b']} for a in actions)
     return {'status':'unsupported_references' if any(g['remaining_supported_constraints'] and not g['preserved_native_full_constraint_observation'] for g in goals) else 'plan_ready',
+        'driven_loop_review':loop_review,'construction_review':construction_review,
         'goals':goals,'actions':actions,'omitted_native_feature_ids':omitted,'requires_explicit_confirmation':True,
         'existing_mates_deleted':[],'existing_mates_suppressed':[],'fixed_state_changes':[],
         'global_DOF':None,'native_compatibility_verified':False,'motion_verified':False,'write_dispatched':False}

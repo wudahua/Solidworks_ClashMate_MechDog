@@ -12,6 +12,12 @@ def proposal(count=9):
     return {'goals':goals,'actions':actions,'fixed_state_changes':[],'group_bindings':[]}
 
 class BatchTests(unittest.TestCase):
+    def test_initial_translation_is_exactly_frozen_once_in_first_payload(self):
+        p=proposal();p['initial_translation']={'entries':[{'component_id':'moving','after':[0.,0.,1e-7]}]}
+        t=batches.prepare(p);first=json.loads(t['payloads'][0]);second=json.loads(t['payloads'][1])
+        self.assertEqual(first['initial_translation'],p['initial_translation']);self.assertNotIn('initial_translation',second)
+        p['initial_translation']['entries'][0]['after'][2]=.003
+        self.assertNotEqual(json.loads(t['payloads'][0])['initial_translation'],p['initial_translation'])
     def test_nine_goals_are_two_complete_batches_not_a_raised_native_limit(self):
         p=proposal();before=copy.deepcopy(p);t=batches.prepare(p)
         self.assertEqual([b['goals'] for b in t['batches']],[8,1]);self.assertEqual(sum(b['added_mates'] for b in t['batches']),9)

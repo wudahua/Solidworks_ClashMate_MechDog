@@ -16,8 +16,18 @@ def choose(goal,faces):
     if not choices:raise core.StopBatch('MOTION_POSE_EVIDENCE_UNAVAILABLE','已有联动找不到与确认直线方向平行的原生驱动面；未试用其他方向。')
     choices.sort(key=lambda f:(-f.get('area_m2',0),f['entity_id']))
     face=choices[0]
+    # Surface parameter normals do not include topological face orientation.
+    # Bind direction before solving; never learn/change it from a failed solve.
+    sense=face.get('face_in_surface_sense');normal=face.get('face_normal_global')
+    if type(sense) is not bool or normal is None:
+        raise core.StopBatch('MOTION_POSE_EVIDENCE_UNAVAILABLE','缺少原生平面朝向，未猜测马达方向或求解。')
+    normal=a.unit(normal);surface=a.unit(face['axis_global'])
+    if a.dot(normal,surface)*(-1 if sense else 1)<1-1e-10:
+        raise core.StopBatch('MOTION_POSE_EVIDENCE_UNAVAILABLE','面朝向与原生曲面法向不一致，未创建马达。')
     return {'drive':face,'reference_component_id':goal['component_b'],
-            'positive_trial_reverse':a.dot(a.unit(face['axis_global']),axis)<0,
+            'positive_trial_reverse':a.dot(normal,axis)<0,
+            'positive_trial_axis_global':axis,'native_face_normal_global':normal,
+            'direction_binding':'native_topological_face_normal_before_solve',
             'duration_s':1,'output_fps':30,'speed_mm_s':trials.TRANSLATION_STEP_M*1000,
             'translation_step_m':trials.TRANSLATION_STEP_M,'temporary_study_restored_after_each_direction':True,
             'temporary_distance_or_angle_mate_added':False,'scope':'existing_linkage_bounded_motion_not_full_travel'}

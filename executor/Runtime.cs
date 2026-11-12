@@ -367,10 +367,11 @@ public partial class Cad {
             case "_verify_connection_layer": return VerifyConnectionLayer((string)p["model_id"],p.ContainsKey("rebuild_root")&&Convert.ToBoolean(p["rebuild_root"]));
             case "_survey_assembly_connections": return SurveyAssemblyConnections((string)p["model_id"]);
             case "_connection_reference_state": return ConnectionReferenceState((string)p["model_id"],p.ContainsKey("verification_details")&&Convert.ToBoolean(p["verification_details"]));
+            case "_prepare_owned_snapshot_restore": return PrepareOwnedSnapshotRestore((string)p["model_id"]);
             case "_test_connection_parameter_readers": return CompareConnectionParameterReaders((string)p["model_id"]);
             case "_preview_assembly_connections": return PreviewAssemblyConnections((string)p["model_id"],(string)p["proposal_json"]);
-            case "_apply_assembly_connections": return ApplyAssemblyConnections((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));
-            case "_test_connection_rollback": return ApplyAssemblyConnections((string)p["plan_id"],true,true);
+            case "_apply_assembly_connections": return ApplyAssemblyConnections((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]),false,p.ContainsKey("alignment_confirmed")&&Convert.ToBoolean(p["alignment_confirmed"]));
+            case "_test_connection_rollback": return ApplyAssemblyConnections((string)p["plan_id"],true,true,p.ContainsKey("alignment_confirmed")&&Convert.ToBoolean(p["alignment_confirmed"]));
             case "_test_connection_suppression": return TestConnectionSuppression((string)p["model_id"],Convert.ToInt32(p["native_feature_id"]));
             case "_test_connection_deletion": return TestConnectionDeletion((string)p["model_id"],Convert.ToInt32(p["native_feature_id"]));
             case "_probe_assembly_connection_pose": return ProbeAssemblyConnectionPose((string)p["model_id"],(string)p["component_id"],(string)p["target_json"],(string)p["checkpoint_id"],(string)p["probe_id"],p.ContainsKey("goal_index")?Convert.ToInt32(p["goal_index"]):-1,p.ContainsKey("allowed_trial")&&Convert.ToBoolean(p["allowed_trial"]));

@@ -1,5 +1,10 @@
 """Check entry point classification; native CAD is always an explicit workflow."""
 ENTRIES = {
+  "test_initial_translation": {"mode":"unittest","caller":"test_initial_translation.py","scope":"zero-mate bounded translation prediction and strict native readback; no CAD"},
+  "test_initial_translation_native_guard": {"mode":"unittest","caller":"test_initial_translation_native_guard.py","scope":"compiled actual C# initial-placement admission and readback; no CAD"},
+  "InitialTranslationGuardFixture": {"mode":"manual_offline","scope":"compiled by test_initial_translation_native_guard against production guard; no CAD"},
+  "test_mechanism_loop": {"mode":"unittest","caller":"test_mechanism_loop.py","scope":"complete target/action span, free primary input and coupled-joint review; no CAD"},
+  "test_driven_loop_motion": {"mode":"unittest","caller":"test_driven_loop_motion.py","scope":"complete primary-driven samples, all joints, outputs and static bodies; no CAD"},
     "test_managed_recovery_route": {"mode":"unittest","caller":"test_managed_recovery_route.py","scope":"actual formal SDK routing keeps original-session managed wait; timeout cannot mark recovered or trigger duplicate restore; no CAD"},
     "test_native_frame_capture": {"mode":"unittest","caller":"test_native_frame_capture.py","scope":"compiled time-selection/read-batch boundaries, per-frame restoration and no retry after communication failure; no CAD"},
     "NativeFrameCaptureTests": {"mode":"manual_offline","scope":"compiled by test_native_frame_capture against actual frame and batch controls; no CAD"},

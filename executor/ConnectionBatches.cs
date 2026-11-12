@@ -44,7 +44,8 @@ public partial class Cad {
         scope.Manifest=string.Join(":",hashes.Cast<string>());
         ValidateConnectionBatch(modelId,scope);
         data=Json.Deserialize<Dictionary<string,object>>((string)outer["batch_payload_json"]);
-        if(data.Count!=4||data.Keys.Any(k=>!new[]{"actions","goals","fixed_state_changes","group_bindings"}.Contains(k)))throw new CadFault("CONNECTION_REFERENCE_INVALID","批次载荷字段不符。");
+        bool initialization=data.ContainsKey("initial_translation");
+        if(data.Count!=(initialization?5:4)||initialization&&scope.Index!=0||data.Keys.Any(k=>!new[]{"actions","goals","fixed_state_changes","group_bindings","initial_translation"}.Contains(k)))throw new CadFault("CONNECTION_REFERENCE_INVALID","批次载荷字段不符。");
         data["reference_state_signature"]=outer["reference_state_signature"];
         return scope;
     }
@@ -70,7 +71,7 @@ public partial class Cad {
     void CompleteConnectionBatch(ConnectionPlan plan,IModelDoc2 doc) {
         if(plan.Batch==null){connectionTrialGoals[plan.ModelId]=plan.Goals;return;}
         var p=connectionBatchProgress[plan.ModelId];p.Goals.AddRange(plan.Goals);p.Next++;
-        p.MateIds=EGAllMates(doc).Select(f=>f.GetID()).ToArray();p.Parameters=CompletionOriginalParameters(doc,p.MateIds);p.Fixed=plan.ExpectedFixed;p.InternalWitness=ConnectionInternalAssemblyWitness(GetUserModel(plan.ModelId),doc);
+        p.MateIds=EGAllMates(doc).Select(f=>f.GetID()).ToArray();p.Parameters=CompletionOriginalParameters(doc,p.MateIds);p.Fixed=plan.ExpectedFixed;p.Poses=plan.AlignedPoses??plan.Poses;p.InternalWitness=ConnectionInternalAssemblyWitness(GetUserModel(plan.ModelId),doc);
         if(p.Next==plan.Batch.Count) {
             if(p.Goals.Count!=plan.Batch.GoalCount)throw new CadFault("CONNECTION_CREATE_FAILED","整装配目标数量未闭合，未准入验证。");
             connectionTrialGoals[plan.ModelId]=p.Goals;

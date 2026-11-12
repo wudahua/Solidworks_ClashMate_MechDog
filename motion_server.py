@@ -40,7 +40,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.47", instructions='日常只用AI对话和现有30个MCP工具。先get_mechanism_task找回任务，无任务再prepare；任务期间按next_action读取、规划、确认、执行和finish，收尾后再开始下一轮。装配任务优先get(summary_only=true)读assembly_brief，按snapshot.queries只读已保存组件、几何、候选、目标和集中问题，不让用户逐面选引用或抄ID。分页保留所有集合待办；未完整搜索、几何截断、未知用途与不支持项不能说成配合完善。复用用户已明确用途；需要时一次说明各运动组及必要改动，取得具体方案授权。整机completion_scope=whole_assembly一次确认后内部自动分批；不会批量固定未分配零件。方案复核快照与当前令牌绑定，读取全部非空集合后再解释和确认执行。只读结构仍受原写入门禁，不能把父级刚性当内部完善或擅改柔性。motion支持旋转/直线；external_gear_pair为两平行轴比例联动，不认证齿面接触或受力。小幅配合试验不等于完整Motion。名称/轴线歧义用机械用途澄清，几何排名不证明设计意图。未知、超时或断连只读取原任务和恢复记录，不重放写入、强制清理或重建COM；已明确未导入的创建失败按任务指引安全收尾。默认finish恢复导入检查点；仅用户明确要保留已验证副本时keep_result=true。旧owner丢失须资源身份/退出证据及明确同意才异常归档，不能冒充恢复通过。低层工具需要时仍先import副本，再体检/查询/预演/确认写入；几何续查保留兄弟队列。所有结果区分本机/跨机、快照/当前原生、有限试验/全行程；失败证据保留。')
+mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.48", instructions='日常只用AI对话和现有30个MCP工具。先get_mechanism_task找回任务，无任务再prepare；任务期间按next_action读取、规划、确认、执行和finish，收尾后再开始下一轮。装配任务优先get(summary_only=true)读assembly_brief，按snapshot.queries只读已保存组件、几何、候选、目标和集中问题，不让用户逐面选引用或抄ID。分页保留所有集合待办；未完整搜索、几何截断、未知用途与不支持项不能说成配合完善。复用用户已明确用途；需要时一次说明各运动组及必要改动，取得具体方案授权。整机completion_scope=whole_assembly一次确认后内部自动分批；不会批量固定未分配零件。方案复核快照与当前令牌绑定，读取全部非空集合后再解释和确认执行。只读结构仍受原写入门禁，不能把父级刚性当内部完善或擅改柔性。motion支持旋转/直线；external_gear_pair为两平行轴比例联动，不认证齿面接触或受力。小幅配合试验不等于完整Motion。名称/轴线歧义用机械用途澄清，几何排名不证明设计意图。未知、超时或断连只读取原任务和恢复记录，不重放写入、强制清理或重建COM；已明确未导入的创建失败按任务指引安全收尾。默认finish恢复导入检查点；仅用户明确要保留已验证副本时keep_result=true。旧owner丢失须资源身份/退出证据及明确同意才异常归档，不能冒充恢复通过。低层工具需要时仍先import副本，再体检/查询/预演/确认写入；几何续查保留兄弟队列。所有结果区分本机/跨机、快照/当前原生、有限试验/全行程；失败证据保留。')
 
 _task_engine=None
 _formal_engine=None
@@ -88,12 +88,14 @@ async def get_mechanism_task(task_id:str='',collect_evidence:bool=False,draft_cu
 @mcp.tool()
 async def plan_mechanism_task(task_id:str,candidate_id:str='',moving_component_hint:str='',reference_component_hint:str='',initial_state:Literal['saved','study_zero']='saved',alignment_mode:Literal['strict','small_translation']='strict',
     gear_ratio_numerator:float=0,gear_ratio_denominator:float=0,input_shaft_hint:str='',output_shaft_hint:str='',input_gear_hint:str='',output_gear_hint:str='',stationary_component_hints:list[str]|None=None,assembly_intent:dict[str,list[str]]|None=None,connection_intent:list[ConnectionIntent]|None=Field(default=None,min_length=1,max_length=128),
-    rigid_groups:list[RigidGroupIntent]|None=Field(default=None,min_length=1,max_length=8),release_fixed_components:list[str]|None=Field(default=None,min_length=1,max_length=16),completion_scope:Literal['declared','whole_assembly']='declared',assembly_scope_hint:str='',assembly_sequence:Literal['','start','continue','stop']='',auto_plan:bool=False,group_seeds:dict[str,list[str]]|None=None):
-    '只规划，不执行。按当前任务next_action和推荐填写，机械歧义集中澄清。\n装配auto_plan可合并少量connection_intent；whole_assembly最多128目标/512新增，内部8/64分批。group_seeds只读推荐归组；rigid_groups及解除固定须明确用途，未分配件不默认静止。\n运动、齿轮初态和分层序列按阶段指引；small_translation另需初态调整确认。核对完整目标、逐项改动、组成员和验证范围后才确认执行。几何和局部秩不证明设计意图、全局自由度或运动通过。'
+    rigid_groups:list[RigidGroupIntent]|None=Field(default=None,min_length=1,max_length=8),release_fixed_components:list[str]|None=Field(default=None,min_length=1,max_length=16),completion_scope:Literal['declared','whole_assembly']='declared',assembly_scope_hint:str='',assembly_sequence:Literal['','start','continue','stop']='',auto_plan:bool=False,group_seeds:dict[str,list[str]]|None=None,
+    verification_mode:Literal['independent_joint_trials','driven_loop']='independent_joint_trials',output_component_hints:list[str]|None=Field(default=None,min_length=1,max_length=16),initial_translation_limit_mm:float=Field(default=.001,gt=0,le=.01)):
+    '只规划，不执行。按当前任务next_action和推荐填写，机械歧义集中澄清。\n装配auto_plan可合并少量connection_intent；whole_assembly最多128目标/512新增，内部8/64分批。group_seeds只读推荐归组；rigid_groups及解除固定须明确用途，未分配件不默认静止。\ndriven_loop仅用于完整平坦基础关节机构：moving/reference_component_hint明确主直线输入和接地参考，output_component_hints明确各输出；正反各0.1mm临时Motion检查所有组件和关节，不承诺每个铰接能独立运动。可用small_translation预测零配合模型的无旋转微量初态平移，默认预算0.001mm、最高0.01mm，execute另需alignment_confirmed。\n运动、齿轮初态和分层序列按阶段指引；small_translation另需初态调整确认。核对完整目标、逐项改动、组成员和验证范围后才确认执行。几何和局部秩不证明设计意图、全局自由度或运动通过。'
     return await dialogue_call('plan',task_id,candidate_id,moving_component_hint,reference_component_hint,initial_state,alignment_mode,
                                gear_ratio_numerator,gear_ratio_denominator,input_shaft_hint,output_shaft_hint,input_gear_hint,output_gear_hint,stationary_component_hints,assembly_intent,
                                [r.model_dump() for r in connection_intent] if connection_intent is not None else None,
-                               [r.model_dump() for r in rigid_groups] if rigid_groups is not None else None,release_fixed_components,completion_scope,assembly_scope_hint=assembly_scope_hint,assembly_sequence=assembly_sequence,auto_plan=auto_plan,group_seeds=group_seeds)
+                               [r.model_dump() for r in rigid_groups] if rigid_groups is not None else None,release_fixed_components,completion_scope,assembly_scope_hint=assembly_scope_hint,assembly_sequence=assembly_sequence,auto_plan=auto_plan,group_seeds=group_seeds,
+                               verification_mode=verification_mode,output_component_hints=output_component_hints,initial_translation_limit_mm=initial_translation_limit_mm)
 
 @mcp.tool()
 async def execute_mechanism_task(task_id:str,plan_token:str,confirmed:bool=False,scope_confirmed:bool=False,alignment_confirmed:bool=False):
@@ -102,7 +104,7 @@ async def execute_mechanism_task(task_id:str,plan_token:str,confirmed:bool=False
 
 @mcp.tool()
 async def finish_mechanism_task(task_id:str,close_unrestored:bool=False,keep_result:bool=False):
-    """原CAD已退出且原请求响应、进程创建身份、保留句柄及空闲执行器均核对后，close_unrestored=True可仅发送EOF正常释放本任务执行器并保留副本、按失败归档；不重连COM、不强杀、不声称恢复或任务通过。证据不足则保留现场。默认恢复导入检查点并核对退出；用户明确要求保留成果副本时才keep_result=True，限本次已验证成果，返回装配体路径（含测试算例），源文件不改，不说成已恢复。原owner丢失时close_unrestored=True须明确同意且全部旧owner/CAD/执行器身份、退出及门禁证据通过；只保留现有文件并异常归档，不另存验证成果。旧日志可保留未知/未完成，不能冒充恢复成功。"""
+    """原CAD已退出且原请求响应、进程创建身份、保留句柄及空闲执行器均核对后，close_unrestored=True可仅发送EOF正常释放本任务执行器并保留副本、按失败归档；不重连COM、不强杀、不声称恢复或任务通过。证据不足则保留现场。默认恢复导入检查点并核对退出；用户明确要求保留成果副本时才keep_result=True，限本次已验证成果，返回装配体路径；driven_loop移除临时验证算例，轨迹单独保留，源文件不改，不说成已恢复。原owner丢失时close_unrestored=True须明确同意且全部旧owner/CAD/执行器身份、退出及门禁证据通过；只保留现有文件并异常归档，不另存验证成果。旧日志可保留未知/未完成，不能冒充恢复成功。"""
     return await dialogue_call('finish',task_id,close_unrestored,keep_result)
 
 @mcp.tool()

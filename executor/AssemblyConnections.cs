@@ -13,6 +13,7 @@ public partial class Cad {
         public string Id,ModelId,Signature,OriginalParameters;public int Revision;
         public bool Consumed;public List<Dictionary<string,object>> Actions,Goals,FixedChanges;
         public Dictionary<string,double[]> Poses;public Dictionary<string,bool> Fixed,ExpectedFixed;
+        public InitialTranslationGuard InitialTranslation;public Dictionary<string,double[]> AlignedPoses;public Dictionary<string,string> Names;
         public ConnectionBatchScope Batch;
         public int[] OriginalMateIds;public ConnectionInternalWitness HierarchyWitness;public object SignatureIdentity;
     }
@@ -43,6 +44,33 @@ public partial class Cad {
         connectionModelScopes.Add(m.Id);
         return new{strategy="verified_model_context_saved_pose_only",historical_studies_deleted=false,historical_clocks_unchanged=true,
             saved_poses_and_mate_parameters_unchanged=true,model_context_verified=true,old_study_frame_zero_verified=false};
+    }
+    // Before an intentional file-snapshot close/reopen, leave the Motion tab.
+    // This is context preparation only: no calculation, file restore, or retry.
+    public object PrepareOwnedSnapshotRestore(string id) {
+        var m=GetUserModel(id);
+        using(var scope=new Scope(this,m.Path,null)) {
+            var doc=scope.Doc;Fingerprint(doc,m.Path);
+            var manager=(IMotionStudyManager)doc.Extension.GetMotionStudyManager();
+            foreach(string name in Names(manager))if(((IMotionStudy)manager.GetMotionStudy(name)).IsPlaying)
+                throw new CadFault("CONNECTION_EVIDENCE_FAILED","算例仍在播放，未切换标签或关闭文档。");
+            LastOperationRestoration="pending";
+            try {
+                using(var batch=new NativeCommandBatch(()=>Sw.CommandInProgress,v=>Sw.CommandInProgress=v)) {
+                    try {
+                        var fixedBefore=UserComponents(doc).ToDictionary(c=>c.Name2,c=>c.IsFixed());
+                        var prepared=PrepareConnectionModelScope(m,doc);
+                        var fixedAfter=UserComponents(doc).ToDictionary(c=>c.Name2,c=>c.IsFixed());
+                        if(fixedBefore.Count!=fixedAfter.Count||fixedBefore.Any(v=>!fixedAfter.ContainsKey(v.Key)||fixedAfter[v.Key]!=v.Value))
+                            throw new CadFault("CONNECTION_EVIDENCE_FAILED","模型标签切换后固定状态未保持，未关闭文档。");
+                        batch.Dispose();LastOperationRestoration="restored";
+                        return new{model_id=id,model_context_verified=true,preparation=prepared,fixed_flags_preserved=true,
+                            checkpoint_restored=false,documents_closed=false,calculated=false,native_write_replayed=false,
+                            native_batch=batch.Export(),source_files_unchanged=UserSourcesUnchanged(m),restoration_status="restored"};
+                    } catch(COMException error){batch.Abandon(error);throw;}
+                }
+            } catch {LastOperationRestoration="unknown";throw;}
+        }
     }
     object ConnectionNonlinearObservation(IFeature feature,IMate2 mate) {
         try {
@@ -188,6 +216,15 @@ public partial class Cad {
                     throw new CadFault("CONNECTION_REFERENCE_INVALID","仅允许明确目标或刚性组成员的已固定组件解除固定，未派发修改。");
             }
             var cs=UserComponents(doc);
+            InitialTranslationGuard initialization=null;
+            if(data.ContainsKey("initial_translation")&&data["initial_translation"]!=null) {
+                if(EGAllMates(doc).Length!=0||changes.Count!=0||cs.Any(c=>!ConnectionTopLevel(c)||c.IsPatternInstance())||batchScope!=null&&batchScope.Index!=0)
+                    throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","初态微量平移仅支持零配合、平坦刚性组件的首批，不混用解除固定。");
+                try{initialization=InitialTranslationGuard.Read(Json.Serialize(data["initial_translation"]),
+                    cs.ToDictionary(c=>GTComponentId(doc,c),c=>(double[])c.GetTotalTransform(false).ArrayData),
+                    cs.ToDictionary(c=>GTComponentId(doc,c),c=>c.IsFixed()),cs.ToDictionary(c=>GTComponentId(doc,c),c=>c.Name2));}
+                catch(ArgumentException e){throw new CadFault("CONNECTION_REFERENCE_INVALID","微量初态平移的完整姿态绑定未通过。",new{reason=e.Message,write_dispatched=false});}
+            }
             if(released.Count>0&&!cs.Any(c=>c.IsFixed()&&ConnectionTopLevel(c)&&!released.Contains(GTComponentId(doc,c))))throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","须保留至少一个原有固定参考，未自动选择或固定其他组件。");
             foreach(var action in actions)ValidateConnectionAction(m,doc,action);
             foreach(var goal in goals) {
@@ -202,7 +239,7 @@ public partial class Cad {
             object planSignatureTiming,planSignatureIdentity;string planSignature=MateSignature(m,doc,out planSignatureTiming,out planSignatureIdentity);
             var plan=new ConnectionPlan{Id=Guid.NewGuid().ToString("N"),ModelId=id,Revision=m.Revision,
                 Signature=planSignature,SignatureIdentity=planSignatureIdentity,OriginalParameters=CompletionOriginalParameters(doc,EGAllMates(doc).Select(f=>f.GetID()).ToArray()),OriginalMateIds=EGAllMates(doc).Select(f=>f.GetID()).ToArray(),Actions=actions,Goals=goals,
-                Poses=Transforms(doc),Fixed=cs.ToDictionary(c=>c.Name2,c=>c.IsFixed()),FixedChanges=changes,Batch=batchScope,HierarchyWitness=ConnectionInternalAssemblyWitness(m,doc),
+                Poses=Transforms(doc),Names=cs.ToDictionary(c=>GTComponentId(doc,c),c=>c.Name2),InitialTranslation=initialization,AlignedPoses=initialization==null?null:cs.ToDictionary(c=>c.Name2,c=>initialization.After[GTComponentId(doc,c)]),Fixed=cs.ToDictionary(c=>c.Name2,c=>c.IsFixed()),FixedChanges=changes,Batch=batchScope,HierarchyWitness=ConnectionInternalAssemblyWitness(m,doc),
                 ExpectedFixed=cs.ToDictionary(c=>c.Name2,c=>c.IsFixed()&&!released.Contains(GTComponentId(doc,c)))};connectionPlans[plan.Id]=plan;
             if(cs.Any(c=>!ConnectionRigidTransform((double[])c.GetTotalTransform(false).ArrayData))) {
                 connectionPlans.Remove(plan.Id);throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","有界验证首批要求单位尺度的刚体变换。");
@@ -210,6 +247,7 @@ public partial class Cad {
             var nonzero=StudyStates(doc).Where(v=>Math.Abs(v.time_s)>1e-8).Select(v=>new{name=v.name,time_s=v.time_s}).ToArray();
             return new{plan_id=plan.Id,model_id=id,expected_added_mates=actions.Count,goals=goals,
                 checkpoint_probe_required=true,original_mates_deleted=false,original_mates_suppressed=false,fixed_state_changes=changes,
+                initial_translation=initialization==null?null:new{maximum_translation_m=initialization.Maximum,translation_budget_m=initialization.Budget,rotation_rad=0,requires_separate_confirmation=initialization.RequiresConfirmation,native_pose_verified=false,write_dispatched=false},
                 initial_state_preparation=new{strategy="verified_model_context_saved_pose_only",nonzero_historical_clocks_retained_inactive=nonzero,historical_studies_deleted=false,old_frame_zero_claimed=false,requires_confirmation=true},
                 verification=new{method="native_assembly_solver_bounded_pose_trials_not_Motion_Analysis",translation_step_m=.0001,rotation_step_rad=Math.PI/3600,
                     maximum_any_component_translation_m=.005,maximum_any_component_rotation_rad=Math.PI/180,
@@ -243,9 +281,12 @@ public partial class Cad {
             return feature;
         }finally{doc.ClearSelection2(true);}
     }
-    public object ApplyAssemblyConnections(string planId,bool confirmed,bool testFault=false) {
+    public object ApplyAssemblyConnections(string planId,bool confirmed,bool testFault=false,bool alignmentConfirmed=false) {
         ConnectionPlan p;if(!connectionPlans.TryGetValue(planId,out p))throw new CadFault("CONNECTION_PLAN_STALE","方案不存在。");
         if(!confirmed)throw new CadFault("CONFIRMATION_REQUIRED","须确认基础连接方案和有界运动试验。");
+        bool requiresAlignment=p.InitialTranslation!=null&&p.InitialTranslation.RequiresConfirmation;
+        if(requiresAlignment&&!alignmentConfirmed)throw new CadFault("CONFIRMATION_REQUIRED","须单独确认此方案内有界、无旋转的初态微量平移。");
+        if(!requiresAlignment&&alignmentConfirmed)throw new CadFault("CONNECTION_REFERENCE_INVALID","当前方案没有待授权的初态平移，未忽略额外授权。");
         if(p.Consumed)throw new CadFault("TASK_ALREADY_EXECUTED","方案已消费。");
         if(testFault&&p.Actions.Count==0&&p.FixedChanges.Count==0)throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","回滚夹具必须有待写入动作，不能将无写入当回滚验证。");
         if(testFault&&System.Environment.GetEnvironmentVariable("SW_MCP_FAULT_TESTS")!="1")throw new Exception("FAULT_TEST_DISABLED");
@@ -269,6 +310,20 @@ public partial class Cad {
             using(var scope=new Scope(this,m.Path,null))using(var batch=new NativeCommandBatch(()=>Sw.CommandInProgress,v=>Sw.CommandInProgress=v)) {
                 Progress(activeJobId,"connection_model_context",0,0,null);
                 var doc=scope.Doc;mutating=true;LastOperationRestoration="pending";var prepared=PrepareConnectionModelScope(m,doc);var originalIds=EGAllMates(doc).Select(f=>f.GetID()).ToArray();
+                if(p.InitialTranslation!=null) {
+                    if(originalIds.Length!=0)throw new CadFault("CONNECTION_PLAN_STALE","初态微量平移前出现已有配合。");
+                    foreach(var c in UserComponents(doc)) {
+                        string cid=GTComponentId(doc,c);var expected=p.InitialTranslation.After[cid];
+                        if(p.InitialTranslation.Fixed[cid]||Enumerable.Range(9,3).All(i=>expected[i]==p.InitialTranslation.Before[cid][i]))continue;
+                        var math=(IMathUtility)Sw.GetMathUtility();c.Transform2=(MathTransform)math.CreateTransform(expected);
+                    }
+                    if(!doc.EditRebuild3())throw new CadFault("CONNECTION_CREATE_FAILED","初态微量平移后重建未通过。");RequireMatesHealthy(doc);
+                    var initialized=UserComponents(doc);
+                    try{p.InitialTranslation.RequireAfter(initialized.ToDictionary(c=>GTComponentId(doc,c),c=>(double[])c.GetTotalTransform(false).ArrayData),initialized.ToDictionary(c=>GTComponentId(doc,c),c=>c.IsFixed()));}
+                    catch(ArgumentException e){throw new CadFault("CONNECTION_CREATE_FAILED","初态微量平移的全部组件读回不符。",new{reason=e.Message});}
+                    if(testFault)throw new CadFault("CONNECTION_CREATE_FAILED","受控验收故障：初态微量平移后回滚。");
+                }
+                var preservedPoses=p.AlignedPoses??p.Poses;
                 foreach(var change in p.FixedChanges) {
                     Progress(activeJobId,"connection_release_declared_fixed",0,p.FixedChanges.Count,null);
                     var c=ResolveUserComponent(m,doc,(string)change["component_id"]);doc.ClearSelection2(true);
@@ -291,14 +346,26 @@ public partial class Cad {
                 var evidence=new List<object>();int index=0;
                 foreach(var action in p.Actions) {
                     Progress(activeJobId,"basic_connection_completion",index++,p.Actions.Count,null);
-                    action["model_id"]=m.Id;var added=CreateConnectionMate(m,doc,action);CheckMate(added,"basic_connection_supplement");
+                    action["model_id"]=m.Id;IFeature added;
+                    try{added=CreateConnectionMate(m,doc,action);}
+                    catch(CadFault error) {
+                        // Use only already-bound memory. Never query CAD again to
+                        // decorate a failed native request or replace its real code.
+                        var details=error.Diagnostics==null?new Dictionary<string,object>():Json.Deserialize<Dictionary<string,object>>(Json.Serialize(error.Diagnostics));
+                        details["failed_action_index"]=index-1;details["completed_actions_in_batch"]=evidence.Count;
+                        details["component_a"]=(string)action["component_a"];details["component_b"]=(string)action["component_b"];
+                        details["instance_a"]=p.Names[(string)action["component_a"]];details["instance_b"]=p.Names[(string)action["component_b"]];
+                        details["kind"]=(string)action["kind"];details["extra_native_queries_for_diagnostics"]=0;
+                        throw new CadFault(error.Code,error.Message,details);
+                    }
+                    CheckMate(added,"basic_connection_supplement");
                     if(!doc.EditRebuild3())throw new CadFault("CONNECTION_CREATE_FAILED","新增约束后重建失败。");RequireMatesHealthy(doc);
-                    evidence.Add(VerifyCompletionPose(doc,p.Poses,added,action));
+                    evidence.Add(VerifyCompletionPose(doc,preservedPoses,added,action));
                     if(testFault)throw new CadFault("CONNECTION_CREATE_FAILED","受控验收故障：验证完整回退。");
                 }
                 if(CompletionOriginalParameters(doc,originalIds)!=p.OriginalParameters||EGAllMates(doc).Length!=originalIds.Length+p.Actions.Count)
                     throw new CadFault("CONNECTION_CREATE_FAILED","原配合或新增数量发生非预期变化。");
-                var actual=Transforms(doc);if(!p.Poses.All(v=>actual.ContainsKey(v.Key)&&PoseValidation.Matches(v.Value,actual[v.Key])))throw new CadFault("CONNECTION_CREATE_FAILED","基础连接补齐改变初态。");
+                var actual=Transforms(doc);if(!preservedPoses.All(v=>actual.ContainsKey(v.Key)&&PoseValidation.Matches(v.Value,actual[v.Key])))throw new CadFault("CONNECTION_CREATE_FAILED","基础连接补齐改变初态。");
                 if(UserComponents(doc).Any(c=>c.IsFixed()!=p.ExpectedFixed[c.Name2]))throw new CadFault("CONNECTION_CREATE_FAILED","补齐固定状态超出明确方案。");
                 if(!ConnectionInternalWitnessMatches(p.HierarchyWitness,ConnectionInternalAssemblyWitness(m,doc)))throw new CadFault("CONNECTION_CREATE_FAILED","补齐改变子装配内部配合、局部姿态、固定或配置，未保留。");
                 Progress(activeJobId,"connection_save_verified_result",0,0,null);
@@ -307,6 +374,7 @@ public partial class Cad {
                 return new{model_id=m.Id,plan_id=planId,checkpoint_id=cp,checkpoint_probe=probe,initial_state_preparation=prepared,
                     batch_transaction=p.Batch==null?null:new{transaction_id=p.Batch.Id,batch_index=p.Batch.Index,batch_count=p.Batch.Count,payload_sha256=p.Batch.Manifest.Split(':')[p.Batch.Index],all_batches_completed=p.Batch.Index+1==p.Batch.Count},
                     added_mates=p.Actions.Count,fixed_state_changes=p.FixedChanges,fixed_state_changes_verified=true,goals=p.Goals,evidence=evidence,native_health_verified=true,motion_verified=false,
+                    initial_translation_verified=p.InitialTranslation!=null,initial_translation_maximum_m=p.InitialTranslation==null?0:p.InitialTranslation.Maximum,
                     source_files_unchanged=true,restoration_status="restored"};
             }
         }catch(Exception error) {

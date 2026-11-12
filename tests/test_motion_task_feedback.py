@@ -78,7 +78,8 @@ class MotionFailureTests(unittest.TestCase):
             def discover(s,path):
                 s.runtime=s.folder/'runtime';s.motion_signature='same'
                 s.initial_inspection={'components':[{'component_id':'moving','transform':[1,0,0,0,1,0,0,0,1,0,0,0]}]}
-                s.motion_candidates=[{'drive':{'component_id':'moving','entity_id':'face'},'reference':{'component_id':'ground'},
+                s.motion_candidates=[{'drive':{'component_id':'moving','entity_id':'face','kind':'planar_normal',
+                    'axis_global':[1,0,0],'face_in_surface_sense':False,'face_normal_global':[1,0,0]},'reference':{'component_id':'ground'},
                     'component_name':'slider','reference_name':'rail','axis_global':[1,0,0],'axis_point_global_m':[0,0,0],'reason':'fixture'}]
                 return {'motion_candidates':s.motion_candidates,'scope':'fixture','studies':[]}
             def call(s,operation,**args):
@@ -98,6 +99,17 @@ class MotionFailureTests(unittest.TestCase):
             tid=engine.prepare(str(source),motion='linear',speed=1,duration_s=2)['task_id']
         self.assertEqual(wait(tid)['phase'],'proposal_ready');engine.plan(tid);planned=wait(tid)
         return p,engine,tid,planned,wait
+
+    def test_missing_linear_face_sense_stops_before_drive_or_solve(self):
+        p,e,tid,plan,wait=self.fixture({})
+        session=e.sessions[tid];session.motion_candidates[0]['drive'].pop('face_in_surface_sense')
+        with patch.object(session,'call',wraps=session.call) as calls:
+            e.execute(tid,plan['plan_token'],True,True);state=wait(tid)
+        self.assertEqual(state['phase'],'failed')
+        self.assertEqual(state['error']['code'],'MOTION_POSE_EVIDENCE_UNAVAILABLE')
+        operations=[c.args[0] for c in calls.call_args_list]
+        self.assertNotIn('create_motion_study',operations);self.assertNotIn('verify_motion_preservation',operations)
+        e.finish(tid);self.assertTrue(wait(tid)['closed'])
 
     def test_native_incomplete_error_survives_missing_pose_file_and_no_export_or_reexecute(self):
         answer={'run_id':'a'*32,'assertion':'inconclusive','error_code':'MOTION_RESULTS_INCOMPLETE',
