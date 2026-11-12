@@ -126,6 +126,27 @@ def pose_snapshot(components):
     return {c['component_id']:c['transform'][:12] for c in components}
 
 
+def motion_direction_binding(drive,settings):
+    reverse=settings['reverse_direction'];sign=-1 if reverse else 1
+    result={'requested_reverse_direction':reverse,'native_reverse_direction':reverse,
+        'expected_sign_about_selected_native_axis':sign,'measurement_axis_global':drive.get('axis_global'),
+        'conversion':'unchanged_rotary_axis'}
+    if settings['motion']!='linear':return result
+    # verify_motion_preservation reports signed travel about the analytic
+    # surface axis. The motor follows the topological face normal instead.
+    from .coupled_motion import choose
+    binding=choose({'component_a':drive['component_id'],'component_b':'direction-only',
+                    'axis_global':drive['axis_global']},[drive])
+    result.update(native_reverse_direction=reverse != binding['positive_trial_reverse'],
+        native_face_normal_global=binding['native_face_normal_global'],
+        conversion='selected_analytic_axis_to_oriented_native_face_before_solve')
+    return result
+
+
+def expected_direction_sign(drive,settings):
+    return motion_direction_binding(drive,settings)['expected_sign_about_selected_native_axis']
+
+
 def require_same_poses(expected,actual,stage):
     if expected.keys()!=actual.keys():raise core.StopBatch('INITIAL_POSE_COMPONENT_SCOPE_CHANGED',stage)
     translation=rotation=0
@@ -153,6 +174,14 @@ def frame_zero(path):
 
 class MotionSession(ConversationSession):
     task_kind='concentric'
+    def restore(self):
+        if self.task_kind=='motion' and getattr(self,'temporary_motion_created',False):
+            if self.unknown:raise core.StopBatch('NATIVE_STATE_UNKNOWN')
+            prepared=self.call('_prepare_owned_snapshot_restore',model_id=self.model)
+            core.write(self.folder/'运动恢复准备.json',prepared)
+            if prepared.get('model_context_verified') is not True or prepared.get('source_files_unchanged') is not True:
+                self.unknown=True;raise core.StopBatch('RESTORE_NOT_VERIFIED')
+        return super().restore()
     def rescan(self,hint=''):
         if self.task_kind=='assembly_constraints':
             from .connection_task import discover
@@ -191,6 +220,9 @@ class MotionSession(ConversationSession):
                     'component_name':component['instance'],'reference_name':references[0]['instance'],
                     'axis_global':face['axis_global'],'axis_point_global_m':face['reference_point_global_m'],
                     'reason':'已核对浮动目标、参考件及原生几何；参考件未固定不代表不能相对测量，方向分组不证明机构运动相容。'})
+                if self.motion_parameters['motion']=='linear' and 'face_normal_global' in face:
+                    rows[-1].update(motor_direction_axis_global=face['axis_global'],native_face_normal_global=face['face_normal_global'],
+                        motor_direction_axis_source='managed_selected_axis_converted_to_native_face_sense_before_solve')
         if not rows:raise core.StopBatch('NO_MOTION_DRIVE_CANDIDATE','未找到受支持的原生驱动面；不自动解除固定或补配合。')
         if self.motion_parameters['motion']=='linear':
             from .axis_guidance import annotate_linear_axes
@@ -260,7 +292,7 @@ class MotionTaskEngine(TaskEngine):
         rows=value['motion_candidates'];s=self.sessions[t['task_id']]
         t.update(model_id=s.model,phase='proposal_ready',proposals=[{'candidate_id':'candidate-'+str(i+1),
             **{k:r[k] for k in ['component_name','reference_name','axis_global','axis_point_global_m','reason']},
-            **{k:r[k] for k in ('axis_evidence','recommended_from_native_mate_axis') if k in r}}
+            **{k:r[k] for k in ('axis_evidence','recommended_from_native_mate_axis','motor_direction_axis_global','motor_direction_axis_source','native_face_normal_global') if k in r}}
             for i,r in enumerate(rows)],requires_selection=len(rows)!=1,scope_geometry_complete=True,
             geometry_scope=value['scope'],studies=value['studies'],
             next_action={'tool':'plan_mechanism_task','arguments':{'task_id':t['task_id']},
@@ -274,20 +306,22 @@ class MotionTaskEngine(TaskEngine):
         t.pop('component_selection',None)
 
     def plan(self,task_id,candidate_id='',moving_component_hint='',reference_component_hint='',initial_state='saved',alignment_mode='strict',
-             gear_ratio_numerator=0,gear_ratio_denominator=0,input_shaft_hint='',output_shaft_hint='',input_gear_hint='',output_gear_hint='',stationary_component_hints=None,assembly_intent=None,connection_intent=None,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint='',assembly_sequence='',auto_plan=False,group_seeds=None):
+             gear_ratio_numerator=0,gear_ratio_denominator=0,input_shaft_hint='',output_shaft_hint='',input_gear_hint='',output_gear_hint='',stationary_component_hints=None,assembly_intent=None,connection_intent=None,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint='',assembly_sequence='',auto_plan=False,group_seeds=None,
+             verification_mode='independent_joint_trials',output_component_hints=None,initial_translation_limit_mm=.001):
         t=self.tasks[task_id]
         if type(auto_plan) is not bool:raise core.StopBatch('CONNECTION_INTENT_INVALID','auto_plan须为布尔值。')
         if t.get('task_kind')=='assembly_constraints':
-            if candidate_id or moving_component_hint or reference_component_hint or initial_state!='saved' or alignment_mode!='strict' or assembly_intent is not None or stationary_component_hints is not None or gear_ratio_numerator or gear_ratio_denominator or input_shaft_hint or output_shaft_hint or input_gear_hint or output_gear_hint:
+            if candidate_id or (verification_mode!='driven_loop' and (moving_component_hint or reference_component_hint or alignment_mode!='strict')) or initial_state!='saved' or assembly_intent is not None or stationary_component_hints is not None or gear_ratio_numerator or gear_ratio_denominator or input_shaft_hint or output_shaft_hint or input_gear_hint or output_gear_hint:
                 raise core.StopBatch('CONNECTION_INTENT_INVALID','通用连接目标使用connection_intent，不混用齿轮分组、运动初态或圆边对齐参数。')
             if assembly_sequence:
-                if connection_intent is not None or rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared' or assembly_scope_hint or auto_plan or group_seeds is not None:
+                if connection_intent is not None or rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared' or assembly_scope_hint or auto_plan or group_seeds is not None or verification_mode!='independent_joint_trials' or output_component_hints is not None or initial_translation_limit_mm!=.001:
                     raise core.StopBatch('CONNECTION_INTENT_INVALID','分层序列操作不混用单层目标或范围，未忽略任何参数。')
                 from .assembly_sequence import dispatch
                 return dispatch(self,t,assembly_sequence)
             from .connection_task import propose
-            return propose(self,t,connection_intent,rigid_groups,release_fixed_components,completion_scope,assembly_scope_hint,auto_plan,group_seeds=group_seeds)
-        if connection_intent is not None or rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared' or assembly_scope_hint or assembly_sequence or auto_plan or group_seeds is not None:raise core.StopBatch('CONNECTION_INTENT_INVALID','通用连接及completion_scope参数仅用于assembly_constraints，不静默忽略。')
+            return propose(self,t,connection_intent,rigid_groups,release_fixed_components,completion_scope,assembly_scope_hint,auto_plan,group_seeds=group_seeds,
+                verification_mode=verification_mode,moving_hint=moving_component_hint,reference_hint=reference_component_hint,output_hints=output_component_hints,alignment_mode=alignment_mode,initial_translation_limit_mm=initial_translation_limit_mm)
+        if connection_intent is not None or rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared' or assembly_scope_hint or assembly_sequence or auto_plan or group_seeds is not None or verification_mode!='independent_joint_trials' or output_component_hints is not None or initial_translation_limit_mm!=.001:raise core.StopBatch('CONNECTION_INTENT_INVALID','通用连接及completion_scope参数仅用于assembly_constraints，不静默忽略。')
         if t.get('task_kind')=='external_gear_pair':
             from .external_gear_task import propose
             return propose(self,t,candidate_id,initial_state,alignment_mode,moving_component_hint,reference_component_hint,
@@ -324,6 +358,7 @@ class MotionTaskEngine(TaskEngine):
                 raise core.StopBatch('MOTION_PROPOSAL_STALE')
             t.update(phase='awaiting_confirmation',selected_index=found[0],plan_token=uuid.uuid4().hex,
                 proposal={**t['proposals'][found[0]],**t['motion_parameters'],
+                    'direction_binding':motion_direction_binding(s.motion_candidates[found[0]]['drive'],t['motion_parameters']),
                     'initial_state':initial_state,'reset_studies_before_drive':[r['name'] for r in nonzero] if initial_state=='study_zero' else [],
                     'scope':'selected_motion_only_not_all_DOF','finish_policy':'restore_import_checkpoint_then_close_owned_CAD',
                     'original_files_modified':False},
@@ -363,15 +398,20 @@ class MotionTaskEngine(TaskEngine):
                     raise core.StopBatch('MOTION_AXIS_CHANGED_AFTER_RESET','归零后原轴线改变，未创建驱动；先恢复并按正确初态重新规划。')
                 drive=matches[0]
             initial=pose_snapshot(s.call('inspect_model',model_id=s.model,detail_level='components')['components'])
+            binding=motion_direction_binding(drive,p);expected_sign=binding['expected_sign_about_selected_native_axis']
+            if binding['native_reverse_direction']!=t['proposal']['direction_binding']['native_reverse_direction']:
+                raise core.StopBatch('MOTION_AXIS_CHANGED_AFTER_RESET','原生面朝向与已确认方向绑定不符，未创建马达。')
+            core.write(s.folder/'运动方向绑定.json',binding)
             gates=[]
             if t['proposal']['initial_state']=='saved':
                 gates.append(require_same_poses(pose_snapshot(s.initial_inspection['components']),initial,'before_create_saved_import_pose'))
             core.write(s.folder/'机械起点门禁.json',gates)
             s.state('creating_drive','正在副本创建已确认的驱动，并核对创建前后机械起点…')
             created=s.call('create_motion_study',model_id=s.model,study=study,component_id=drive['component_id'],
-                entity_id=drive['entity_id'],motor_type=p['motion'],speed=p['speed'],reverse_direction=p['reverse_direction'],
+                entity_id=drive['entity_id'],motor_type=p['motion'],speed=p['speed'],reverse_direction=binding['native_reverse_direction'],
                 reference_component_id=ref['component_id'],duration_s=p['duration_s'],output_fps=p['output_fps'])
             core.write(s.folder/'驱动创建.json',created)
+            s.temporary_motion_created=True
             gates.append(require_same_poses(initial,pose_snapshot(s.call('inspect_model',model_id=s.model,detail_level='components')['components']),'after_create'))
             core.write(s.folder/'机械起点门禁.json',gates)
             s.state('solving','正在求解并核对实际时间轴、运动方向和全组件首帧…')
@@ -404,12 +444,12 @@ class MotionTaskEngine(TaskEngine):
             curve=artifacts.export_history_curve(run['run_id'],drive['component_id'],quantity,'magnitude',True)
             core.write(s.folder/'运动曲线.json',curve)
             signed=run.get('signed_net_travel')
-            expected_sign=-1 if p['reverse_direction'] else 1
             direction_pass=type(signed) in (int,float) and math.isfinite(signed) and signed*expected_sign>0
             passed=run.get('assertion')=='pass' and run.get('restoration_status')=='restored' and run.get('source_files_unchanged') is True and direction_pass
             t.update(phase='verified' if passed else 'verification_failed',verification={'declared_scope_passed':passed,
                 'run_id':run['run_id'],'native_assertion':run.get('assertion'),'scope':'selected_motion_only_not_all_DOF',
                 'signed_net_travel':signed,'direction_verified_about_selected_native_axis':direction_pass,
+                'expected_sign_about_selected_native_axis':expected_sign,
                 'direction_scope':'native_axis_and_reverse_switch_not_unstated_designer_intent',
                 'curve':curve,'curve_scope':'global_component_origin_magnitude_not_signed_relative_travel',
                 'curve_status':'exported_validated_native_run',

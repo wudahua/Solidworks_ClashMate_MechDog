@@ -31,7 +31,17 @@ public partial class Cad {
         var c=knownComponent??((IEntity)face).GetComponent() as IComponent2;if(c==null)throw new CadFault("MATE_GEOMETRY_OWNER_UNAVAILABLE","无法确认配合面的组件坐标系。");var data=(double[])(cylinder?surface.CylinderParams:surface.PlaneParams);var pose=knownPose??(double[])c.GetTotalTransform(false).ArrayData;
         var axis=ApplyPose(pose,cylinder?data.Skip(3).Take(3).ToArray():data.Take(3).ToArray(),false);double norm=Math.Sqrt(axis.Sum(v=>v*v));if(norm<1e-12)throw new Exception("INVALID_MATE_GEOMETRY");
         string reference=Convert.ToBase64String((byte[])doc.Extension.GetPersistReference3(face));
-        return new Dictionary<string,object>{{"entity_id",StableId("entity_",reference)},{"component_id",knownComponentId??StableId("component_",Convert.ToBase64String((byte[])doc.Extension.GetPersistReference3(c)))},{"instance",knownInstance??c.Name2},{"kind",cylinder?"cylindrical_axis":"planar_normal"},{"axis_global",axis.Select(v=>v/norm).ToArray()},{"reference_point_global_m",ApplyPose(pose,cylinder?data.Take(3).ToArray():data.Skip(3).Take(3).ToArray(),true)},{"area_m2",face.GetArea()},{"cylinder_radius_m",cylinder?(double?)data[6]:null},{"fixed_component",knownFixed??c.IsFixed()},{"requires_user_selection",true}};
+        var result=new Dictionary<string,object>{{"entity_id",StableId("entity_",reference)},{"component_id",knownComponentId??StableId("component_",Convert.ToBase64String((byte[])doc.Extension.GetPersistReference3(c)))},{"instance",knownInstance??c.Name2},{"kind",cylinder?"cylindrical_axis":"planar_normal"},{"axis_global",axis.Select(v=>v/norm).ToArray()},{"reference_point_global_m",ApplyPose(pose,cylinder?data.Take(3).ToArray():data.Skip(3).Take(3).ToArray(),true)},{"area_m2",face.GetArea()},{"cylinder_radius_m",cylinder?(double?)data[6]:null},{"fixed_component",knownFixed??c.IsFixed()},{"requires_user_selection",true}};
+        if(!cylinder)AddPlanarFaceSense(result,face,axis.Select(v=>v/norm).ToArray());
+        return result;
+    }
+    // IFace2.FaceInSurfaceSense is TRUE when face and surface normals oppose.
+    // Keep analytic axis_global unchanged: mate planes are unoriented geometry.
+    static void AddPlanarFaceSense(Dictionary<string,object> row,IFace2 face,double[] surfaceNormal) {
+        bool opposite=face.FaceInSurfaceSense();
+        row["face_in_surface_sense"]=opposite;
+        row["face_normal_global"]=surfaceNormal.Select(v=>opposite?-v:v).ToArray();
+        row["face_normal_source"]="IFace2.FaceInSurfaceSense_and_transformed_ISurface.PlaneParams";
     }
     string MateSignature(UserModel m,IModelDoc2 doc){object timing;return MateSignature(m,doc,out timing);}
     string MateSignature(UserModel m,IModelDoc2 doc,out object timings) {object identity;return MateSignature(m,doc,out timings,out identity);}

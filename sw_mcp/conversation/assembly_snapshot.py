@@ -153,7 +153,7 @@ def publish_plan(task,session):
     def name(v):return names.get(v,v)
     goals=[]
     for i,g in enumerate(p.get('goals',[])):
-        goals.append({'goal_index':i,**{k:g[k] for k in ('kind','axis_global','axis_point_global_m','reference_point_global_m','source','added_action_count','coupled_verification_only') if k in g},
+        goals.append({'goal_index':i,**{k:g[k] for k in ('kind','axis_global','axis_point_global_m','reference_point_global_m','source','added_action_count','coupled_verification_only','declared_closed_loop_coupled','independent_actuation_required') if k in g},
                       'component_a':name(g['component_a']),'component_b':name(g['component_b'])})
     actions=[]
     for i,a in enumerate(p.get('actions',[])):
@@ -170,6 +170,14 @@ def publish_plan(task,session):
     entry=_persist(task,session,'plan',{'goals':goals,'actions':actions,'groups':groups,
                  'fixed_changes':p.get('fixed_state_changes',[])},path)
     task['assembly_plan_review']={'snapshot':entry,'completion_scope':p.get('completion_scope'),
+        'verification_mode':p.get('verification_mode','independent_joint_trials'),
+        'construction_review':({k:p['construction_review'][k] for k in ('new_actions_before','new_actions_after','removed_new_action_indices','native_existing_mates_deleted','selection_basis','native_compatibility_verified')} if p.get('construction_review') else None),
+        'initial_translation':{k:p['initial_translation'][k] for k in ('maximum_translation_m','translation_budget_m','maximum_rotation_rad','moved_components','requires_alignment_confirmation','native_pose_verified')} if p.get('initial_translation') else None,
+        'primary_driven_loop':({'input':name(p['driven_loop_review']['primary']['component_a']),
+            'reference':name(p['driven_loop_review']['primary']['component_b']),
+            'outputs':[name(cid) for cid in p['driven_loop_review']['output_components']],
+            'coupled_goal_indices':p['driven_loop_review']['coupled_goal_indices'],
+            'native_motion_and_all_joint_output_checks_required':True,'independent_actuation_certified':False} if p.get('driven_loop_review') else None),
         'selected_scope':task.get('assembly_brief',{}).get('selected_scope'),
         'expected_added_mates':p.get('expected_added_mates'),'native_batch_count':len(p.get('batches') or [None]),
         'all_or_restore_import_checkpoint':p.get('all_or_restore_import_checkpoint'),

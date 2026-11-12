@@ -103,8 +103,21 @@ class CoupledMotionAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception,'机械起点'):m.audit(grid,p,b,0,coupled,trial)
     def test_native_face_direction_switch_is_explicit(self):
         from sw_mcp.conversation.coupled_motion import choose
-        goal={'component_a':'slider','component_b':'rail','axis_global':[0,0,1]};face={'component_id':'slider','kind':'planar_normal','axis_global':[0,0,-1],'entity_id':'face'}
+        goal={'component_a':'slider','component_b':'rail','axis_global':[0,0,1]};face={'component_id':'slider','kind':'planar_normal','axis_global':[0,0,-1],'entity_id':'face','face_in_surface_sense':False,'face_normal_global':[0,0,-1]}
         r=choose(goal,[face]);self.assertTrue(r['positive_trial_reverse']);self.assertFalse(r['temporary_distance_or_angle_mate_added'])
+    def test_opposite_topological_face_sense_reverses_surface_axis_binding(self):
+        from sw_mcp.conversation.coupled_motion import choose
+        for target in ([0,0,1],[0,0,-1]):
+            face={'component_id':'slider','kind':'planar_normal','axis_global':[0,0,1],'entity_id':'face','face_in_surface_sense':True,'face_normal_global':[0,0,-1]}
+            r=choose({'component_a':'slider','component_b':'rail','axis_global':target},[face])
+            self.assertEqual(r['positive_trial_reverse'],target[2]>0)
+            self.assertEqual(r['native_face_normal_global'],[0,0,-1])
+    def test_missing_or_inconsistent_topological_face_sense_refuses_before_solve(self):
+        from sw_mcp.conversation.coupled_motion import choose
+        goal={'component_a':'slider','component_b':'rail','axis_global':[0,0,1]}
+        face={'component_id':'slider','kind':'planar_normal','axis_global':[0,0,1],'entity_id':'face'}
+        for fields in ({},{'face_in_surface_sense':True,'face_normal_global':[0,0,1]},{'face_in_surface_sense':1,'face_normal_global':[0,0,-1]}):
+            with self.assertRaises(Exception):choose(goal,[{**face,**fields}])
     def test_nonparallel_or_missing_native_face_refuses(self):
         from sw_mcp.conversation.coupled_motion import choose
         with self.assertRaises(Exception):choose({'component_a':'slider','component_b':'rail','axis_global':[0,0,1]},[{'component_id':'slider','kind':'planar_normal','axis_global':[1,0,0],'entity_id':'face'}])

@@ -29,18 +29,15 @@ function Quote-NativeArgument([string]$value) {
     return '"' + [regex]::Replace([regex]::Replace($value, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
 }
 $start.Arguments = (($arguments | ForEach-Object { Quote-NativeArgument $_ }) -join ' ')
-# PS5.1 may return null on the first EnvironmentVariables getter. Inherit a
-# process-scoped value instead, restoring the caller immediately after Start.
-$previousEncoding = [Environment]::GetEnvironmentVariable('PYTHONIOENCODING', 'Process')
+# Set only the child's environment. Mutating the PowerShell process environment
+# around Process.Start can stall a cold nested PS5.1 native pipeline. Invoke the
+# CLR accessor directly: PS5.1's adapted EnvironmentVariables property can yield
+# null on first access. The parent environment is never changed.
 $stage = 'start_python'
-    try {
-        [Environment]::SetEnvironmentVariable('PYTHONIOENCODING', 'utf-8', 'Process')
-        $process = [System.Diagnostics.Process]::Start($start)
-        $pythonStarted = $true
-        $pythonPid = $process.Id
-    } finally {
-        [Environment]::SetEnvironmentVariable('PYTHONIOENCODING', $previousEncoding, 'Process')
-    }
+$start.get_EnvironmentVariables().set_Item('PYTHONIOENCODING', 'utf-8')
+$process = [System.Diagnostics.Process]::Start($start)
+$pythonStarted = $true
+$pythonPid = $process.Id
 $stage = 'capture_upgrade_output'
 $stdoutTask = $process.StandardOutput.ReadToEndAsync()
 $stderrTask = $process.StandardError.ReadToEndAsync()

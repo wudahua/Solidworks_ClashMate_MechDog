@@ -70,18 +70,28 @@ class MotionContractTests(unittest.TestCase):
         self.assertEqual(error.exception.code,'HOST_SOURCE_CHANGED');e.product.bridge._acquire_lease.assert_not_called()
 
     def test_standalone_verification_dispatch_includes_empty_plan_and_reverse_is_checked(self):
+        for sense,reverse,signed in [(False,False,2),(False,True,-2),(True,False,2),(True,True,-2)]:
+            with self.subTest(face_sense=sense,reverse=reverse):self.standalone_direction_case(sense,reverse,signed)
+
+    def standalone_direction_case(self,sense,reverse,signed):
         from test_conversation_tasks import FakeSession
         class MotionFixture(FakeSession):
             def discover(s,path):
                 s.runtime=s.folder/'runtime';s.motion_signature='signature'
                 s.initial_inspection={'components':[{'component_id':'moving','transform':[1,0,0,0,1,0,0,0,1,0,0,0]}]}
-                s.motion_candidates=[{'drive':{'component_id':'moving','entity_id':'face'},'reference':{'component_id':'ground'},
+                s.motion_candidates=[{'drive':{'component_id':'moving','entity_id':'face','kind':'planar_normal','axis_global':[0,0,1],
+                    'face_in_surface_sense':sense,'face_normal_global':[0,0,-1 if sense else 1]},'reference':{'component_id':'ground'},
                     'component_name':'slide','reference_name':'ground','axis_global':[0,0,1],
+                    'motor_direction_axis_global':[0,0,1],
+                    'motor_direction_axis_source':'managed_selected_axis_converted_to_native_face_sense_before_solve',
                     'axis_point_global_m':[0,0,0],'reason':'fixture'}]
                 return {'motion_candidates':s.motion_candidates,'scope':'fixture','studies':[]}
             def call(s,operation,**args):
                 if operation=='_circular_reference_state':return {'signature':'signature'}
                 if operation=='inspect_model':return s.initial_inspection
+                if operation=='create_motion_study':
+                    if args['reverse_direction']!=(sense != reverse):raise AssertionError('managed native reverse conversion was not dispatched')
+                    return {}
                 if operation=='verify_motion_preservation':
                     if 'plan_id' not in args:raise KeyError('Native dispatch requires plan_id even when empty')
                     if args['plan_id']!='':raise AssertionError('standalone validation must not bind a mate plan')
@@ -90,7 +100,7 @@ class MotionContractTests(unittest.TestCase):
                     with file.open('w',newline='',encoding='utf8') as f:
                         writer=csv.writer(f);writer.writerow(['frame','time_s','component_id',*[f'r{i}{j}' for i in range(3) for j in range(3)],'x_m','y_m','z_m'])
                         writer.writerow([0,0,'moving',1,0,0,0,1,0,0,0,1,0,0,0])
-                    return dict(assertion='pass',restoration_status='restored',source_files_unchanged=True,run_id='a'*32,signed_net_travel=-2)
+                    return dict(assertion='pass',restoration_status='restored',source_files_unchanged=True,run_id='a'*32,signed_net_travel=signed)
                 return {}
             def state(s,*a,**kw):pass
         root=Path(__file__).resolve().parents[1]/'runs'/('motion-fixture-'+uuid.uuid4().hex[:8]);root.mkdir(parents=True)
@@ -104,9 +114,12 @@ class MotionContractTests(unittest.TestCase):
             raise AssertionError('fixture timeout')
         try:
             with patch('sw_mcp.conversation.startup_gate.require_idle'):
-                tid=engine.prepare(str(source),motion='linear',speed=1,duration_s=2,reverse_direction=True)['task_id']
-            self.assertEqual(wait(tid)['phase'],'proposal_ready')
+                tid=engine.prepare(str(source),motion='linear',speed=1,duration_s=2,reverse_direction=reverse)['task_id']
+            ready=wait(tid);self.assertEqual(ready['phase'],'proposal_ready')
+            self.assertEqual(ready['proposals'][0]['motor_direction_axis_global'],[0,0,1])
             engine.plan(tid);planned=wait(tid)
+            self.assertEqual(planned['proposal']['motor_direction_axis_global'],[0,0,1])
+            self.assertEqual(planned['proposal']['direction_binding']['native_reverse_direction'],sense != reverse)
             with patch('sw_mcp.artifacts.Artifacts.export_history_curve',return_value={'path':'fixture.csv'}):
                 engine.execute(tid,planned['plan_token'],True,True);result=wait(tid)
             self.assertEqual(result['phase'],'verified',result)
@@ -119,6 +132,24 @@ class MotionContractTests(unittest.TestCase):
         for args in [('linear',True,1,30,False,0),('linear',1,1,30,1,0),('linear',1,6,30,False,0),('rotary',12,.1,30,False,0)]:
             with self.assertRaises((ValueError,core.StopBatch)):parameters(*args)
         self.assertEqual(parameters('linear',1,2,30,True,0)['expected_travel'],2)
+
+    def test_direction_check_binds_face_sense_before_solving_not_observed_result_sign(self):
+        from sw_mcp.conversation.motion_tasks import expected_direction_sign,motion_direction_binding
+        for sense in (False,True):
+            for reverse in (False,True):
+                drive={'component_id':'moving','kind':'planar_normal','axis_global':[0,0,1],
+                    'entity_id':'face','face_in_surface_sense':sense,'face_normal_global':[0,0,-1 if sense else 1]}
+                expected=-1 if reverse else 1
+                self.assertEqual(expected_direction_sign(drive,{'motion':'linear','reverse_direction':reverse}),expected)
+                binding=motion_direction_binding(drive,{'motion':'linear','reverse_direction':reverse})
+                self.assertEqual(binding['native_reverse_direction'],sense != reverse)
+                # Native motor follows the face normal. Conversion must yield
+                # the requested sign about the unchanged analytic axis.
+                actual_sign=(-1 if binding['native_reverse_direction'] else 1)*(-1 if sense else 1)
+                self.assertEqual(actual_sign,expected)
+        with self.assertRaises(core.StopBatch):expected_direction_sign({'component_id':'moving','axis_global':[0,0,1]},
+            {'motion':'linear','reverse_direction':False})
+        self.assertEqual(expected_direction_sign({}, {'motion':'rotary','reverse_direction':True}),-1)
 
     def test_initial_pose_gate_refuses_clock_only_zero_or_missing_components(self):
         a={'slide':[1,0,0,0,1,0,0,0,1,0,0,0]}

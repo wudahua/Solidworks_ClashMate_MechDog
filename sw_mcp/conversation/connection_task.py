@@ -116,13 +116,34 @@ def select_scope(engine,t,row):
     engine.save(t)
 
 
-def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint='',auto_plan=False,group_seeds=None):
+def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint='',auto_plan=False,group_seeds=None,
+            verification_mode='independent_joint_trials',moving_hint='',reference_hint='',output_hints=None,alignment_mode='strict',initial_translation_limit_mm=.001):
+    driven=verification_mode=='driven_loop'
+    if verification_mode not in {'independent_joint_trials','driven_loop'}:raise core.StopBatch('CONNECTION_INTENT_INVALID','未知验证方式。')
+    if driven:
+        if alignment_mode=='strict' and initial_translation_limit_mm!=.001:raise core.StopBatch('CONNECTION_INTENT_INVALID','strict不使用初态平移预算，未静默忽略。')
+        if (completion_scope!='whole_assembly' or auto_plan or group_seeds is not None or assembly_scope_hint or release_fixed_components is not None
+                or not moving_hint or not reference_hint or not isinstance(output_hints,list) or not 1<=len(output_hints)<=16
+                or alignment_mode not in {'strict','small_translation'}):
+            raise core.StopBatch('CONNECTION_INTENT_INVALID','整机闭环须明确主直线输入、接地参考及输出，用完整目标规划；不混用层选择、自动草案或解除固定。')
+    elif moving_hint or reference_hint or output_hints is not None or alignment_mode!='strict' or initial_translation_limit_mm!=.001:
+        raise core.StopBatch('CONNECTION_INTENT_INVALID','主驱动、输出及微量初态调整仅用于显式driven_loop整机验证。')
     if type(auto_plan) is not bool:raise core.StopBatch('CONNECTION_INTENT_INVALID','auto_plan须为布尔值。')
     if completion_scope not in {'declared','whole_assembly'}:raise core.StopBatch('CONNECTION_INTENT_INVALID','completion_scope须为declared或whole_assembly。')
     whole=completion_scope=='whole_assembly'
     engine._require_session(t['task_id'])
     if t['phase'] not in {'constraint_review_ready','awaiting_confirmation'}:raise core.StopBatch('TASK_NOT_READY_FOR_PLAN')
     s=engine.sessions[t['task_id']]
+    loop_profile=None
+    if driven:
+        selected=[]
+        for label,hint in [('primary_input',moving_hint),('grounded_reference',reference_hint)]+[('output',h) for h in output_hints]:
+            if not isinstance(hint,str) or not hint.strip():raise core.StopBatch('CONNECTION_INTENT_INVALID','主驱动和输出必须使用组件名称。')
+            matches=matching_components(s.connection_survey['components'],hint,None)
+            if len(matches)!=1:return {'task_id':t['task_id'],'needs_mechanical_clarification':True,'field':label,'name_hint':hint,
+                'choices':mechanical_choices(s.connection_survey['components'],hint,None),'write_dispatched':False,'confirmation_token_created':False}
+            selected.append(matches[0]['component_id'])
+        loop_profile={'primary':{'component_a':selected[0],'component_b':selected[1],'kind':'prismatic'},'outputs':selected[2:]}
     if group_seeds is not None:
         if intents is not None or rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared' or assembly_scope_hint or auto_plan:
             raise core.StopBatch('CONNECTION_INTENT_INVALID','group_seeds仅只读推荐归属，不混用写入目标、范围选择或自动预演。')
@@ -217,7 +238,13 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
             if not coverage['all_components_have_declared_targets']:
                 return {'task_id':t['task_id'],'status':'assembly_goal_coverage_required','component_coverage':coverage,
                         'write_dispatched':False,'confirmation_token_created':False,'instruction':'整装配方案仍有未声明组件。AI结合用户目标归组或集中澄清，不把未分配件默认静止，也不部分提交。'}
-        proposal=joints.plan(planning_survey,goals,whole_assembly=whole)
+        initialization=None
+        if alignment_mode=='small_translation':
+            from .. import initial_translation
+            planning_survey,initialization=initial_translation.propose(planning_survey,goals,initial_translation_limit_mm)
+            core.write(s.folder/'微量初态平移预测.json',initialization)
+        proposal=joints.plan(planning_survey,goals,whole_assembly=whole,driven_loop=loop_profile)
+        if initialization is not None:proposal['initial_translation']=initialization
         if any(g.get('coupled_verification_only') for g in proposal.get('goals',[])) and (expansion is not None or whole):
             raise ValueError('coupled_verification_cannot_mix_supplements')
         if expansion:
@@ -255,6 +282,10 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
         'instruction':'仅当前已支持几何范围；AI解释缺失参考或轴线歧义，未部分提交配合。'}
     def operation():
         from . import coupled_motion,mate_motion
+        loop=proposal.get('driven_loop_review')
+        if loop:
+            primary=proposal['goals'][loop['primary_goal_index']]
+            primary['driven_loop_driver']=coupled_motion.choose(primary,mate_motion.component_geometry(s,primary['component_a'],'planar_normal'))
         for goal in proposal['goals']:
             if goal.get('coupled_verification_only'):
                 goal['coupled_motion_driver']=coupled_motion.choose(goal,mate_motion.component_geometry(s,goal['component_a'],'planar_normal'))
@@ -269,6 +300,8 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
         t.update(phase='awaiting_confirmation',plan_token=uuid.uuid4().hex,plan_token_revoked=False,proposal={**native,
             'actions':proposal['actions'],'goals':proposal['goals'],'expected_added_mates':len(proposal['actions']),
             'fixed_state_changes':proposal.get('fixed_state_changes',[]),'completion_scope':completion_scope,
+            'verification_mode':verification_mode,'driven_loop_review':proposal.get('driven_loop_review'),'initial_translation':proposal.get('initial_translation'),
+            'construction_review':proposal.get('construction_review'),
             'linear_allowed_trial_strategy':'temporary_native_motion_study_0_1mm_per_s_1s_30fps_then_verified_checkpoint_restore' if any(g.get('coupled_verification_only') for g in proposal['goals']) else native.get('linear_allowed_trial_strategy'),
             'batches':transaction['batches'] if whole else None,'component_coverage':proposal.get('component_coverage'),
             'all_or_restore_import_checkpoint':whole,'omitted_native_feature_ids':proposal['omitted_native_feature_ids'],
@@ -280,6 +313,13 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
             next_action={'tool':'execute_mechanism_task','arguments':{'task_id':t['task_id']},
                 'instruction':('本方案仅验证已有丝杆联动：新增0项，不解除固定；保留全约束原生观测。正反向各创建临时线性马达，0.1mm/s、1秒、30fps，逐帧核对丝杆关系、限位和接地参考并恢复移除；不添加临时距离配合。' if any(g.get('coupled_verification_only') for g in proposal['goals']) else '允许方向可使用临时距离或角度约束驱动，逐次恢复成果检查点移除。')+'解释连接目标、自动采用轴线、逐项新增配合、保留的旧约束及未知项、仅副本初态准备和有界试验范围。禁止方向用装配移动求解。取得当前具体方案授权后一次执行。未证明全行程、受力或接触；默认恢复原导入状态。'})
         if t.get('automatic_mechanical_goal_proposal'):t['next_action']['instruction']='这些连接用途由AI提出，尚未证明设计意图。先向用户集中确认各运动组应保留的运动及具体改动，再执行。'+t['next_action']['instruction']
+        if driven:
+            t['proposal']['verification']={'method':'native_primary_driven_motion_both_signs_all_components_all_declared_joints_and_outputs',
+                'duration_s_per_direction':1,'output_fps':30,'input_translation_m_per_direction':.0001,
+                'independent_joint_actuation_certified':False,'whole_travel_certified':False}
+            t['next_action']['instruction']='解释完整连接及主直线驱动、全部输出；闭环局部铰接不承诺能独立转动。执行后须正反各0.1毫米临时Motion，逐帧核对全部组件、全部关节、接地件静止和各输出确实运动，逐次恢复。未证明全行程或接触受力。'
+            if (proposal.get('initial_translation') or {}).get('requires_alignment_confirmation'):
+                t['next_action']['instruction']+='方案含明确的零配合初态微量平移，无旋转；说明最大预测位移及预算，须另行取得alignment_confirmed授权。默认恢复原导入状态。'
         from . import assembly_snapshot
         assembly_snapshot.publish_plan(t,s)
     return engine._submit(t,'planning',operation)
@@ -290,9 +330,11 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
     require_write_scope(t)
     engine._require_session(t['task_id'])
     if confirmed is not True or scope_confirmed is not True:raise core.StopBatch('CONFIRMATION_REQUIRED','须确认补齐和有限位移验证的具体范围。')
-    if alignment_confirmed is not False:raise core.StopBatch('CONNECTION_INTENT_INVALID','本流程保留初始装配姿态，不含重新对齐授权。')
     task_execution.require_plan_token(t,token)
-    t['execution_consumed']=True;t['confirmation']={'confirmed':True,'scope_confirmed':True};engine.save(t)
+    init=t['proposal'].get('initial_translation') or {};needs_alignment=init.get('requires_alignment_confirmation') is True
+    if needs_alignment and alignment_confirmed is not True:raise core.StopBatch('CONFIRMATION_REQUIRED','须另行确认该冻结方案内有界微量初态平移。',{'separate_alignment_confirmation_required':True,'constraint_write_dispatched':False})
+    if not needs_alignment and alignment_confirmed is not False:raise core.StopBatch('CONNECTION_INTENT_INVALID','当前方案未包含待确认的初态调整。')
+    t['execution_consumed']=True;t['confirmation']={'confirmed':True,'scope_confirmed':True,'alignment_confirmed':alignment_confirmed};engine.save(t)
     def perform():
         s=engine.sessions[t['task_id']];s.import_restored=False
         if t.get('connection_transaction'):
@@ -333,8 +375,12 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
             old_goal={**row,'kind':row['recommended_joint_type'],'reference_point_global_m':row.get('axis_point_global_m')}
             bounds.append(trials.bind(old_goal,poses))
         core.write(s.folder/'已有连接运动保留绑定.json',bounds[declared_count:])
-        audits=[];passed=True
-        for i,goal in enumerate(t['proposal']['goals']):
+        audits=[];passed=True;driven_review=t['proposal'].get('driven_loop_review')
+        if driven_review:
+            from . import driven_loop_motion
+            audits=driven_loop_motion.run(s,t['proposal']['goals'],poses,bounds,driven_review)
+            passed=len(audits)==2 and all(a['passed'] for a in audits)
+        for i,goal in enumerate(t['proposal']['goals'] if not driven_review else []):
             for trial in trials.trials(goal,poses):
                 if not passed:break
                 if i in coupled_bounds and trial['allowed']:
@@ -368,7 +414,9 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
                     layer_audit=s.call('_verify_connection_layer',model_id=s.model)
                     core.write(s.folder/('内部试验总装守卫-'+str(len(audits))+'.json'),layer_audit)
                 core.write(s.folder/'基础运动副有界验证.json',audits);passed=audit['passed']
-        proof={'declared_scope_passed':passed,'method':'native_motion_and_assembly_solver_small_trials' if coupled_bounds else 'native_assembly_solver_small_pose_trials',
+        proof={'declared_scope_passed':passed,'method':'native_primary_driven_closed_loop_small_motion' if driven_review else 'native_motion_and_assembly_solver_small_trials' if coupled_bounds else 'native_assembly_solver_small_pose_trials',
+            'driven_loop_review':driven_review,'initial_translation':t['proposal'].get('initial_translation'),
+            'independent_joint_actuation_certified':False,
             'whole_assembly_declared_targets_passed':passed and t['proposal'].get('completion_scope')=='whole_assembly',
             'component_coverage':t['proposal'].get('component_coverage'),'batch_count':(t.get('connection_transaction') or {}).get('batch_count',1),
             'fixed_state_changes_verified':True,'fixed_state_changes':t['proposal'].get('fixed_state_changes',[]),
@@ -379,7 +427,7 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
             'existing_connection_scope':'supported_native_pair_relations_only_not_unknown_constraints_or_global_DOF',
             'omitted_native_feature_ids':observed['omitted_native_feature_ids'],
             'coupled_verification_only':bool(coupled_bounds),'persistent_mates_added_for_coupled_review':0 if coupled_bounds else None,
-            'completed_trials':len(audits),'trials':audits,'native_motion_study_solved':bool(coupled_bounds),
+            'completed_trials':len(audits),'trials':audits,'native_motion_study_solved':bool(coupled_bounds or driven_review),
             'global_DOF_certified':False,'whole_travel_certified':False,'contact_or_force_validated':False,
             'position_tolerance_m':trials.POSITION_TOLERANCE_M,'angle_tolerance_rad':trials.ANGLE_TOLERANCE_RAD}
         if passed and getattr(s,'selected_assembly_layer',None):
