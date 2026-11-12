@@ -19,7 +19,10 @@ def prepare_limits():
             'whole_assembly_mode':{'maximum_expanded_goals':128,'maximum_total_added_mates':512,'maximum_goals_per_native_batch':8,'maximum_added_mates_per_native_batch':64,'complete_declared_component_coverage_required':True,'failure_restore_import_checkpoint':True},
             'native_motion_study_solved':False,'saved_pose_model_context_only':True,
             'translation_trial_m':.0001,'rotation_trial_deg':.05,'global_DOF_certified':False},
-        'motion':{'maximum_duration_s':5,'minimum_output_fps':5,'maximum_output_fps':120,'maximum_frames':601,**grid},
+        'motion':{'maximum_duration_s':5,'minimum_output_fps':5,'maximum_output_fps':120,'maximum_frames':601,
+            'working_stroke_validation':{'parameter':'plan.validated_assembly_task_id','requires_exact_kept_verified_flat_mechanism':True,
+                'motion':'linear','maximum_input_travel_mm':20,'maximum_component_translation_mm':50,'maximum_component_rotation_deg':15,
+                'design_full_travel_certified':False,'contact_force_certified':False},**grid},
         'concentric':{'motion':'rotary','speed_rpm':12,'duration_s':1,'allowed_output_fps':[30],'maximum_frames':31},
         'gear_transmission':{'motion':'rotary','maximum_speed_rpm':60,'maximum_duration_s':2,
             'allowed_output_fps':[30,60],'maximum_frames':121,'minimum_travel_must_be_zero':True,**grid},
@@ -307,8 +310,10 @@ class MotionTaskEngine(TaskEngine):
 
     def plan(self,task_id,candidate_id='',moving_component_hint='',reference_component_hint='',initial_state='saved',alignment_mode='strict',
              gear_ratio_numerator=0,gear_ratio_denominator=0,input_shaft_hint='',output_shaft_hint='',input_gear_hint='',output_gear_hint='',stationary_component_hints=None,assembly_intent=None,connection_intent=None,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint='',assembly_sequence='',auto_plan=False,group_seeds=None,
-             verification_mode='independent_joint_trials',output_component_hints=None,initial_translation_limit_mm=.001):
+             verification_mode='independent_joint_trials',output_component_hints=None,initial_translation_limit_mm=.001,validated_assembly_task_id=''):
         t=self.tasks[task_id]
+        if validated_assembly_task_id and (t.get('task_kind')!='motion' or initial_state!='saved'):
+            raise core.StopBatch('CONNECTION_INTENT_INVALID','工作行程只能复用已保留整机成果的普通直线motion任务及保存初态，不混用配合写入、齿轮或归零初态。')
         if type(auto_plan) is not bool:raise core.StopBatch('CONNECTION_INTENT_INVALID','auto_plan须为布尔值。')
         if t.get('task_kind')=='assembly_constraints':
             if candidate_id or (verification_mode!='driven_loop' and (moving_component_hint or reference_component_hint or alignment_mode!='strict')) or initial_state!='saved' or assembly_intent is not None or stationary_component_hints is not None or gear_ratio_numerator or gear_ratio_denominator or input_shaft_hint or output_shaft_hint or input_gear_hint or output_gear_hint:
@@ -356,6 +361,10 @@ class MotionTaskEngine(TaskEngine):
             s=self.sessions[task_id]
             if s.call('_circular_reference_state',model_id=s.model)['signature']!=s.motion_signature:
                 raise core.StopBatch('MOTION_PROPOSAL_STALE')
+            mechanism=None
+            if validated_assembly_task_id:
+                from . import working_stroke
+                mechanism=working_stroke.bind(self,t,s,validated_assembly_task_id,s.motion_candidates[found[0]])
             t.update(phase='awaiting_confirmation',selected_index=found[0],plan_token=uuid.uuid4().hex,
                 proposal={**t['proposals'][found[0]],**t['motion_parameters'],
                     'direction_binding':motion_direction_binding(s.motion_candidates[found[0]]['drive'],t['motion_parameters']),
@@ -364,6 +373,9 @@ class MotionTaskEngine(TaskEngine):
                     'original_files_modified':False},
                 next_action={'tool':'execute_mechanism_task','arguments':{'task_id':task_id},
                     'instruction':'解释组件、参考、带符号轴线、反向开关、速度和行程；用户授权后只执行一次。'})
+            if mechanism:
+                t['proposal'].update(working_stroke_validation=mechanism,scope='sampled_declared_mechanism_working_stroke')
+                t['next_action']['instruction']='说明复用的整机成果、全部目标、主输入方向与行程及硬位姿预算；这不是设计全行程或抓取力认证。明确确认后执行，失败不扩大范围或重算。'
         return self._submit(t,'planning',operation)
 
     def execute(self,task_id,plan_token,confirmed=False,scope_confirmed=False,alignment_confirmed=False):
@@ -385,6 +397,10 @@ class MotionTaskEngine(TaskEngine):
         t['execution_consumed']=True;t['confirmation']={'confirmed':True,'scope_confirmed':True,'at':time.time()};self.save(t)
         def operation():
             s=self.sessions[task_id];p=t['motion_parameters'];r=s.motion_candidates[t['selected_index']]
+            mechanism=t['proposal'].get('working_stroke_validation')
+            if mechanism:
+                from . import working_stroke
+                working_stroke.load(s,mechanism)
             if s.call('_circular_reference_state',model_id=s.model)['signature']!=s.motion_signature:
                 raise core.StopBatch('MOTION_PROPOSAL_STALE')
             study='Dialogue_'+uuid.uuid4().hex[:10];drive=r['drive'];ref=r['reference']
@@ -438,6 +454,14 @@ class MotionTaskEngine(TaskEngine):
                     {'run_id':run['run_id'],'pose_path':str(poses),'report_path':run.get('report_path')})
             gates.append(require_same_poses(initial,frame_zero(poses),'actual_solved_frame_zero'))
             core.write(s.folder/'机械起点门禁.json',gates)
+            working_proof=None
+            if mechanism:
+                try:
+                    working_proof=working_stroke.verify(s,mechanism,poses)
+                except core.StopBatch:
+                    t['verification'].update(scope='sampled_declared_mechanism_working_stroke',
+                        curve_status='not_exported_working_stroke_verification_failed')
+                    raise
             from sw_mcp.artifacts import Artifacts
             artifacts=Artifacts(s.runtime)
             quantity='angular_velocity' if p['motion']=='rotary' else 'displacement'
@@ -456,6 +480,9 @@ class MotionTaskEngine(TaskEngine):
                 'screenshot_status':'not_requested_no_extra_solve','whole_mechanism_or_DOF_certified':False},
                 next_action={'tool':'finish_mechanism_task','arguments':{'task_id':task_id},
                     'instruction':'报告原生验证与曲线；恢复初始检查点并核对退出后再开始下一轮。'})
+            if working_proof:
+                t['verification'].update(scope='sampled_declared_mechanism_working_stroke',working_stroke=working_proof,
+                    whole_assembly_declared_targets_passed=passed,whole_travel_certified=False,contact_or_force_validated=False)
         return self._submit(t,'running',operation)
 
     def get(self,task_id='',draft_cursor='',structure_cursor='',snapshot_cursor='',summary_only=False):
