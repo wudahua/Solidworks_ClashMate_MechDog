@@ -5,6 +5,7 @@ using System.Web.Script.Serialization;
 
 public static class NativeFrameCaptureTests {
     public static void Main(string[] args) {
+        Console.OutputEncoding = new System.Text.UTF8Encoding(false);
         string mode=args[0],error=null;bool flag=mode=="foreign_entry";
         int reads=0,writes=0,selections=0,poses=0,notifications=0,observations=0;var events=new List<string>();
         NativeCommandBatch.FailureObserver=(e,p)=>notifications++;

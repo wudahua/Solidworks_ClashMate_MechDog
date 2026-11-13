@@ -4,6 +4,7 @@ using System.Web.Script.Serialization;
 
 public static class DeferredNativeCommandStateTests {
     public static void Main(string[] args) {
+        Console.OutputEncoding = new System.Text.UTF8Encoding(false);
         string mode=args[0],error=null;var state=new DeferredNativeCommandState();
         int reads=0,writes=0,validated=0,notifications=0;bool flag=true,prepared=false;
         if(mode!="empty")state.Remember("model-a",mode=="not_owned");

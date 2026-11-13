@@ -28,13 +28,13 @@ $start.StandardErrorEncoding = New-Object System.Text.UTF8Encoding($false)
 function Quote-NativeArgument([string]$value) {
     return '"' + [regex]::Replace([regex]::Replace($value, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
 }
-$start.Arguments = (($arguments | ForEach-Object { Quote-NativeArgument $_ }) -join ' ')
-# Set only the child's environment. Mutating the PowerShell process environment
-# around Process.Start can stall a cold nested PS5.1 native pipeline. Invoke the
-# CLR accessor directly: PS5.1's adapted EnvironmentVariables property can yield
-# null on first access. The parent environment is never changed.
+# Leave the raw inherited environment untouched: CLR's case-insensitive getter
+# throws when a host supplies both HTTPS_PROXY and https_proxy. Configure Python
+# streams inside the child, after normal sitecustomize/host policy startup. The
+# bootstrap is ASCII and restores script argv/path semantics before run_path.
+$bootstrap = 'import os,sys,runpy;os.environ["PYTHONIOENCODING"]="utf-8";sys.stdout.reconfigure(encoding="utf-8");sys.stderr.reconfigure(encoding="utf-8");p=sys.argv.pop(1);sys.argv[0]=p;sys.path[0]=os.path.dirname(os.path.abspath(p));runpy.run_path(p,run_name="__main__")'
+$start.Arguments = ((@('-c', $bootstrap) + $arguments | ForEach-Object { Quote-NativeArgument $_ }) -join ' ')
 $stage = 'start_python'
-$start.get_EnvironmentVariables().set_Item('PYTHONIOENCODING', 'utf-8')
 $process = [System.Diagnostics.Process]::Start($start)
 $pythonStarted = $true
 $pythonPid = $process.Id

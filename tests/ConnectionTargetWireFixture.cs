@@ -2,6 +2,7 @@ using System;
 using System.Web.Script.Serialization;
 class ConnectionTargetWireFixture {
     static int Main() {
+        Console.OutputEncoding = new System.Text.UTF8Encoding(false);
         string request=Console.In.ReadToEnd();
         var json=new JavaScriptSerializer();
         var target=json.Deserialize<double[]>(request);

@@ -1,5 +1,5 @@
 {
-  "version": "0.4.3-alpha.49",
+  "version": "0.4.3-alpha.50",
   "kind": "source_only",
   "text_line_endings": "LF",
   "includes_user_cad": false,
@@ -8,8 +8,8 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 60418,
-      "sha256": "b36fbdd31a2bb40fdb5ead6207881bd1e54829f0314727fd43c4b5ec583b872f"
+      "bytes": 61710,
+      "sha256": "b1e71fa25e1b3aaf71f7694edb8ccf4e55337a64efe6a61ee43399baa4598441"
     },
     {
       "path": "CONTRACT.md",
@@ -17,9 +17,9 @@
       "sha256": "efe919aaa30aa44b57b05f18847a16fe2ee72ac8c9e86d1dfced7cea858a4c5b"
     },
     {
-      "path": "发布说明_v0.4.3-alpha.49.md",
-      "bytes": 4672,
-      "sha256": "7911582f10c5a928d778c0930e0029685c99f27c8051bd46e001397a31ef5160"
+      "path": "发布说明_v0.4.3-alpha.50.md",
+      "bytes": 4806,
+      "sha256": "1bd3717347bbffb68b83561b0609e466356a414d2c0a86db4e4825f4511a3459"
     },
     {
       "path": "LICENSE",
@@ -53,8 +53,8 @@
     },
     {
       "path": "motion_server.py",
-      "bytes": 47630,
-      "sha256": "5278e3aaaa30d704ff11294931020c2663f547b41f343c19b39c16d57d5abe6c"
+      "bytes": 48288,
+      "sha256": "32487daa9fe30f78373ec423429145afe17aa772f2e0d2f3f96df7c43d7e4c35"
     },
     {
       "path": "mcp-config.example.json",
@@ -73,8 +73,8 @@
     },
     {
       "path": "upgrade.ps1",
-      "bytes": 4658,
-      "sha256": "f8a57d92b9b1376591bfd96c4789651ffd6cf6eebc98716c2916a56b8eb0c57d"
+      "bytes": 4893,
+      "sha256": "f4918177fcb728f00ce916293b607bfdeda3d78dd04c2a45222abc5cb94baf80"
     },
     {
       "path": "初始化环境.ps1",
@@ -118,8 +118,8 @@
     },
     {
       "path": "tests/CurrentSolveResultsTests.cs",
-      "bytes": 3166,
-      "sha256": "15b5109a4a669ac357c6572e7e6528ab21804ef5626aebb6c91bd72b4a887b63"
+      "bytes": 3236,
+      "sha256": "56035349a02f7497f5a0027985802d7ed6b4db455553c96a109453d5d8f49b7f"
     },
     {
       "path": "tests/test_executor_startup.py",
@@ -128,18 +128,18 @@
     },
     {
       "path": "tests/StartupEmptyControlTests.cs",
-      "bytes": 2105,
-      "sha256": "0be0200bdb9157c45a820a3634b79bf48146d0b27c03d3908d2a74e671e65ac5"
+      "bytes": 2175,
+      "sha256": "eb040dcad09353b72ed58f4d276319738877522d8f444e18028b7e10b0e2b281"
     },
     {
       "path": "tests/test_assembly_snapshot.py",
-      "bytes": 18696,
-      "sha256": "e252f3107a6fc9cd98c1a7231e662242cd9c684aeb22c342449a690fc244f530"
+      "bytes": 18715,
+      "sha256": "aab3da59e1b57262ba98116c6bc3913edafa04276996ae893bd8f14f990c4f99"
     },
     {
       "path": "tests/AssemblyGeometrySnapshotTests.cs",
-      "bytes": 1793,
-      "sha256": "5b2ab1c05eacfd0bd23d0f8e7b0e4e0ab9be9e3261c9be05300358c493e22081"
+      "bytes": 1863,
+      "sha256": "4ad859d9f1ca121db9a06602be2728b4ba489762e5af4f70befe98658133d312"
     },
     {
       "path": "tests/test_coupled_connections.py",
@@ -188,8 +188,8 @@
     },
     {
       "path": "tests/ConnectionSignatureDiffTests.cs",
-      "bytes": 246,
-      "sha256": "ac0ae75b405a3a92b792fb4fa14eb9a2527c9f114c0cf6106b353b67633d99d1"
+      "bytes": 316,
+      "sha256": "d5245fcec83e1557b3dc2411f71deed62017612f6a9ee7c27591158e2fa32fe6"
     },
     {
       "path": "tests/test_initial_translation.py",
@@ -203,8 +203,8 @@
     },
     {
       "path": "tests/InitialTranslationGuardFixture.cs",
-      "bytes": 1109,
-      "sha256": "83b02cd9ca7fd70cbad019542fceb0258aa695291cdc2d9fab2f63f7bf2f4141"
+      "bytes": 1179,
+      "sha256": "c3b9df53feec67fdd8fc9267c85c7d369fec6a0953096ba92776961c30ebe3e1"
     },
     {
       "path": "tests/test_mechanism_loop.py",
@@ -222,14 +222,24 @@
       "sha256": "49dbfe436c083d1e0e64ad264a61fbffc25e4d9ce88e1beefd7f403bf79b2f32"
     },
     {
+      "path": "tests/test_feedback_alpha50.py",
+      "bytes": 11216,
+      "sha256": "dd5b86bd3fe1ea2ca6e09b9c78c83d219c3ffad9052bc0ac897c7b216cbb4fd8"
+    },
+    {
+      "path": "tests/RawDuplicateEnvironmentFixture.cs",
+      "bytes": 2508,
+      "sha256": "1ee3ecc459015e4739c40c1c21ad97fb8ba1c0ca87246d1f7c0ec96fc5feeb25"
+    },
+    {
       "path": "tests/test_stationary_preservation.py",
       "bytes": 1471,
       "sha256": "fa6c1eb37b7f869d9fc22829417332690c1613d058dc995ea9b0a5a0e4e7e1d3"
     },
     {
       "path": "tests/StationaryPreservationTests.cs",
-      "bytes": 729,
-      "sha256": "20332b6c3dac472fa6c82100107f8e96e251699d2ce291a5302e6a9e2665a557"
+      "bytes": 799,
+      "sha256": "77dc0a5e3085ddd3f33d7fce9c2cf6caab8a1aa16acf25e15af51fa2c5a5a84b"
     },
     {
       "path": "tests/test_component_inventory_read.py",
@@ -238,8 +248,8 @@
     },
     {
       "path": "tests/ComponentInventoryReadTests.cs",
-      "bytes": 1644,
-      "sha256": "851430c98aaa6524dd46c2a56bc2af36b73261e683be0bd203dbd9016d0012e6"
+      "bytes": 1714,
+      "sha256": "331402e5428d4289727e77b9066a45c7943deca04f027dd4d0e2e4a0dbca5b51"
     },
     {
       "path": "tests/test_motion_reference_read.py",
@@ -884,7 +894,7 @@
     {
       "path": "executor/UserMotion.cs",
       "bytes": 86223,
-      "sha256": "eaec658240d4c080adc9ac121edc87dd3a0ab1f0c77f19f489cb72043721aa0c"
+      "sha256": "0c15e6e2560c7f6a253ec1741b0b918e9954ec15f61d7b038b34704847fa301b"
     },
     {
       "path": "executor/VirtualImport.cs",
@@ -940,6 +950,11 @@
       "path": "sw_mcp/assembly_hierarchy.py",
       "bytes": 4404,
       "sha256": "5c59cff3fd033cca67561a5cfb2349bbf10c22eaf80e0691ed9846d254ff4155"
+    },
+    {
+      "path": "sw_mcp/assembly_intent_guide.py",
+      "bytes": 5053,
+      "sha256": "11b04103a49c605c5d2503d447ad97455eb4fdf2ca58d9e1fdd7470be242d797"
     },
     {
       "path": "sw_mcp/assembly_overview.py",
@@ -1057,6 +1072,11 @@
       "sha256": "20db774af6669f70b0d1d0505b02d19e92df926a1978d6ecbbf3517fd9c0e8b1"
     },
     {
+      "path": "sw_mcp/version.py",
+      "bytes": 108,
+      "sha256": "8832e54a0ea184255ca9407aab3ab63941ca272535a450cc76f5acb1fdc521b5"
+    },
+    {
       "path": "sw_mcp/conversation/__init__.py",
       "bytes": 75,
       "sha256": "c94ce093107dcfc9d19a4c7cc9eb28e19b6553ba571bd38de03ca9398a1b20a7"
@@ -1068,8 +1088,8 @@
     },
     {
       "path": "sw_mcp/conversation/assembly_snapshot.py",
-      "bytes": 19754,
-      "sha256": "b7bfd3923969a721153754636d38f28688eabd9b072122619568b2a7cda27e44"
+      "bytes": 22229,
+      "sha256": "b0fe50fa6ec78fd072ce223bd0227f849164cb99121eae58a110bb890545ab67"
     },
     {
       "path": "sw_mcp/conversation/axis_guidance.py",
@@ -1098,8 +1118,8 @@
     },
     {
       "path": "sw_mcp/conversation/connection_task.py",
-      "bytes": 43306,
-      "sha256": "c692000611bc22b81f44edcc0afb13fa9fc0876476202c84b7e07a60cdcf3805"
+      "bytes": 44261,
+      "sha256": "da4aa8428ccdadb0fcdef325392d2a737e4b7d5765b22a6280d483f33d558d7c"
     },
     {
       "path": "sw_mcp/conversation/constraint_inventory.py",
@@ -1113,8 +1133,8 @@
     },
     {
       "path": "sw_mcp/conversation/core.py",
-      "bytes": 12172,
-      "sha256": "9222d16f74a11266437fb3a90f91f7a25a7d307fd09505c400847f94df66208f"
+      "bytes": 12176,
+      "sha256": "920dbb9b5cd4939f0d88330b4666b00d6ebf47da7ac68733967d7728b188c2cd"
     },
     {
       "path": "sw_mcp/conversation/coupled_motion.py",
@@ -1153,13 +1173,13 @@
     },
     {
       "path": "sw_mcp/conversation/formal_engine.py",
-      "bytes": 13312,
-      "sha256": "245c4cc0e772437afa75a4b66d64e2c70590213ec8a7de8d313f89703a3b4867"
+      "bytes": 13899,
+      "sha256": "2546f14682ac03cb13cf36cc6ad2296d91f19001802ded83f3254df7b7c01148"
     },
     {
       "path": "sw_mcp/conversation/frontend.py",
-      "bytes": 1507,
-      "sha256": "15efe302c5c998c159395b7f7bf8fedb5f75be2f5a8129682168e48195dcc9fc"
+      "bytes": 1521,
+      "sha256": "507f087efd43b43421a7005598c6943e27e6b03ff61b833f32f5a61ee2cf2d29"
     },
     {
       "path": "sw_mcp/conversation/gear_transmission.py",
@@ -1213,13 +1233,13 @@
     },
     {
       "path": "sw_mcp/conversation/motion_tasks.py",
-      "bytes": 47975,
-      "sha256": "2c6be429e1efcbc2d2c8027b6f94570edd389157ae1d07eeda51beadf66ffc83"
+      "bytes": 48953,
+      "sha256": "25913230e421f529c4e12336fd011195af92f5114d1394ceda8f68d67f61249b"
     },
     {
       "path": "sw_mcp/conversation/orphan_close.py",
-      "bytes": 6318,
-      "sha256": "93e3fc35d4fc04c7bd7475c57ce6c1b67f8c783253331a11d842e68b87e6f749"
+      "bytes": 8909,
+      "sha256": "337c0e1521ede92bb04a3c91fa443915aa357849f2cf7e25e36b79de0bb2af1d"
     },
     {
       "path": "sw_mcp/conversation/owner_entry.py",
@@ -1278,8 +1298,8 @@
     },
     {
       "path": "sw_mcp/conversation/task_engine.py",
-      "bytes": 53249,
-      "sha256": "f1f1b7cf2f228b4c7000da48720d022255ec3ae8e908bf809156771d685ed624"
+      "bytes": 53327,
+      "sha256": "3859bbbe0237d18e86e9a297d32c1b7f06136aa18c0ca5f57eda206df4b8bd84"
     },
     {
       "path": "sw_mcp/conversation/task_execution.py",
@@ -1288,13 +1308,13 @@
     },
     {
       "path": "sw_mcp/conversation/task_progress.py",
-      "bytes": 9718,
-      "sha256": "8ec444a0c5673e2728671c934a5a5519439159e39e88e985be0c350d991005f2"
+      "bytes": 9900,
+      "sha256": "14fa07f9f6b1165abf0e86f04b33b5b9d8e582af52b17e5dcd65596657f323a1"
     },
     {
       "path": "sw_mcp/conversation/task_views.py",
-      "bytes": 3557,
-      "sha256": "951608450042e03ebcb41dcde29bd4b932a6dbfe1ea0087907f526020d6dc1e1"
+      "bytes": 4935,
+      "sha256": "39a7bd8da5f9ca107bee71f5ebb29b39aa30f47893856bb0b5b93ba1ed2df20e"
     },
     {
       "path": "sw_mcp/conversation/working_stroke.py",
@@ -1313,8 +1333,8 @@
     },
     {
       "path": "tests/test_conversation_orphan.py",
-      "bytes": 13640,
-      "sha256": "271c53c740955c75b4c6a20882f21b414687e3ff60d6dcbf81ca27a977bbe9a4"
+      "bytes": 19404,
+      "sha256": "ba20cffd82a2dd4477a3ed7b842d23d0720f9eba9d21be8646199174640e1176"
     },
     {
       "path": "tests/test_conversation_motion.py",
@@ -1393,8 +1413,8 @@
     },
     {
       "path": "tests/test_legacy_handoff.py",
-      "bytes": 10412,
-      "sha256": "557eba05e26d227b65cea7062909535eb09053cb56b55a96864f6fe656f3b1b8"
+      "bytes": 10977,
+      "sha256": "f684b47a4bd407c352d69ce2fa3a07aa6da836cebdeb7b237850709309bea698"
     },
     {
       "path": "tests/legacy_handoff_native.py",
@@ -1428,18 +1448,18 @@
     },
     {
       "path": "scripts/build_release.py",
-      "bytes": 12818,
-      "sha256": "6ef515510a27e59393100e5c0201ec6a299569d85e6e0c7636a7a135d7591f90"
+      "bytes": 12921,
+      "sha256": "eac4b45b14cc77f2c02f2cf802ff1523c8c967884c397622f365db6c13488528"
     },
     {
       "path": "scripts/verify_release.py",
-      "bytes": 7988,
-      "sha256": "ab0a1229678b0cf9529ce868555d7ef2b19c6ab45f75dd50aeedb5f60b55015b"
+      "bytes": 8247,
+      "sha256": "29b555bffae5488b9e6de68cf8d13c46621cdb4ae1db34eb695a52937498f1f3"
     },
     {
       "path": "scripts/upgrade.py",
-      "bytes": 34430,
-      "sha256": "94b07ff8e61c8fa2d7dce711a8603a7a8355e7da15b0d3c2ea86b10741fb6ba5"
+      "bytes": 36231,
+      "sha256": "c896bf85ac60c0938a04b1469ac25f48287898169189ec8aad6ec482de689026"
     },
     {
       "path": "scripts/recover.py",
@@ -1563,8 +1583,8 @@
     },
     {
       "path": "tests/SessionConnectionTests.cs",
-      "bytes": 8228,
-      "sha256": "59d238e00eaeac521a998d7749df9eb9e3f96919ef5427d56ef3cf8a86ec27d8"
+      "bytes": 8298,
+      "sha256": "3079e5515c52d71c489c39c253b4b69444fa8a9e362918b5427c6046355aa703"
     },
     {
       "path": "tests/session_connection_checks.py",
@@ -1808,8 +1828,8 @@
     },
     {
       "path": "tests/NativeRestorationGateTests.cs",
-      "bytes": 3003,
-      "sha256": "263283b9ca2daf0587340cd2b7fb087e7501111628230f1dc976cd6f06b45e06"
+      "bytes": 3073,
+      "sha256": "96a33f168f14cc3257739da42b7cde445205ace54d14e1439db05de635f086f1"
     },
     {
       "path": "tests/test_deferred_native_command.py",
@@ -1818,8 +1838,8 @@
     },
     {
       "path": "tests/DeferredNativeCommandStateTests.cs",
-      "bytes": 2456,
-      "sha256": "3bf7a8fc806166eacb8eb3707f524c15a6bdf306667206e0f4f2fcacef8682d4"
+      "bytes": 2526,
+      "sha256": "9bb73934bfaf144dfafc0526572f6079241307abdbb994865066a4ebbad4a52a"
     },
     {
       "path": "tests/test_native_frame_capture.py",
@@ -1828,8 +1848,8 @@
     },
     {
       "path": "tests/NativeFrameCaptureTests.cs",
-      "bytes": 1735,
-      "sha256": "a88eb30aaa1f6f03dd22405da2336bfc6cbacce6d31bf1dadda006925b45820c"
+      "bytes": 1805,
+      "sha256": "eff5e9d7aa0cd7932704492938658b0b96f97b65da7df375a5e5968055bd7c42"
     },
     {
       "path": "tests/test_managed_recovery_route.py",
@@ -1853,8 +1873,8 @@
     },
     {
       "path": "tests/ConnectionTargetWireFixture.cs",
-      "bytes": 415,
-      "sha256": "04d6747bba1a5cfb4a0457a4d80a6c58f867d37fb3ab39b518c60b7bfd89a0e1"
+      "bytes": 485,
+      "sha256": "43fc9c1ba904da06088bea1553e51d9c08e5d21e4de6cf36aa7019e3b830e2e7"
     },
     {
       "path": "tests/test_v042a8.py",

@@ -3,6 +3,7 @@ class AssemblyGeometrySnapshotTests {
     static object Field(object row,string key){return row.GetType().GetProperty(key).GetValue(row,null);}
     static void Equal(double[] a,double[] b){for(int i=0;i<a.Length;i++)if(Math.Abs(a[i]-b[i])>1e-10)throw new Exception("WORLD_COORDINATE_MISMATCH");}
     static int Main(){
+        Console.OutputEncoding = new System.Text.UTF8Encoding(false);
         double[] pose={0,1,0,-1,0,0,0,0,1,10,20,30,1,0,0,0};
         var snapshot=new AssemblyGeometrySnapshot();
         snapshot.Add("c","part","part",true,0,new[]{1.0,2,3,1,0,0,.01},pose,.2);

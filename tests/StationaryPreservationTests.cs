@@ -3,6 +3,7 @@ using System.Linq;
 using System.Web.Script.Serialization;
 class StationaryPreservationTests {
     static void Main() {
+        Console.OutputEncoding = new System.Text.UTF8Encoding(false);
         Func<bool,bool,bool,bool,bool,int,bool,bool> p=StationaryPreservationPolicy.Allowed;
         var r=new[]{p(true,true,false,true,false,3,false),
             p(false,true,false,true,false,3,false),p(true,false,false,true,false,3,false),

@@ -96,6 +96,9 @@ def validate_manifest(manifest,read):
         text=read(name).decode('utf-8-sig');pattern=r'VERSION\s*=\s*"([^"]+)"' if name.endswith('build_release.py') else r'version="([^"]+)"'
         match=re.search(pattern,text)
         if not match or match.group(1)!=manifest['version']:raise ValueError('Release version mismatch: '+name)
+    if 'sw_mcp/version.py' in names:
+        match=re.search(r'VERSION\s*=\s*"([^"]+)"',read('sw_mcp/version.py').decode('utf-8-sig'))
+        if not match or match.group(1)!=manifest['version']:raise ValueError('Release version mismatch: sw_mcp/version.py')
     return names
 
 def verify(root):

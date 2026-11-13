@@ -4,6 +4,7 @@ using System.Web.Script.Serialization;
 class ComponentInventoryReadTests {
     class Item {public int Id;public Item(int id){Id=id;}}
     static void Main(string[] args) {
+        Console.OutputEncoding = new System.Text.UTF8Encoding(false);
         string mode=args[0];int calls=0,pauses=0,contexts=0;var a=new Item(1);var b=new Item(2);var wrong=new object();
         Func<object[]> fetch=()=>{calls++;if(mode=="com_error")throw new COMException("native failure");
             if(mode=="fetch_invalidcast")throw new InvalidCastException("array interface unavailable");

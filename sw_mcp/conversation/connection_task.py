@@ -118,6 +118,11 @@ def select_scope(engine,t,row):
 
 def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint='',auto_plan=False,group_seeds=None,
             verification_mode='independent_joint_trials',moving_hint='',reference_hint='',output_hints=None,alignment_mode='strict',initial_translation_limit_mm=.001):
+    if type(auto_plan) is not bool:raise core.StopBatch('CONNECTION_INTENT_INVALID','auto_plan须为布尔值。')
+    # A complete explicit whole-machine intent uses the ordinary full planner;
+    # auto_plan is not a reason to reject it or force seven public tasks.
+    if auto_plan and completion_scope=='whole_assembly' and intents is not None:
+        auto_plan=False
     driven=verification_mode=='driven_loop'
     if verification_mode not in {'independent_joint_trials','driven_loop'}:raise core.StopBatch('CONNECTION_INTENT_INVALID','未知验证方式。')
     if driven:
@@ -172,8 +177,9 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
         if (t.get('connection_review') or {}).get('write_scope_allowed') is False:
             from .constraint_inventory import require_write_scope
             require_write_scope(t)
-        if rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared' or assembly_scope_hint or t['phase']!='constraint_review_ready':
-            raise core.StopBatch('CONNECTION_INTENT_INVALID','自动预演须从新体检开始；可用connection_intent补充局部用途，不混用分组、解除固定、范围或替换待确认方案。')
+        if rigid_groups is not None or release_fixed_components is not None or assembly_scope_hint or t['phase']!='constraint_review_ready':
+            raise core.StopBatch('CONNECTION_INTENT_INVALID','自动预演须从新体检开始；分组、解除固定或替换方案用普通整机规划。',
+                {'write_dispatched':False,'supported_route':{'completion_scope':'whole_assembly','auto_plan':False}})
         assessment=t.get('assembly_assessment') or {}
         if intents is not None:
             from .. import assembly_assessment
@@ -187,7 +193,11 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
         if not assessment.get('automatic_plan_available'):
             return {'task_id':t['task_id'],'needs_mechanical_clarification':bool(assessment.get('mechanical_question_groups')),
                     'needs_scope_review':bool(assessment.get('proposal_review_issues') or assessment.get('write_scope_blockers')),'assembly_assessment':assessment,
-                    'write_dispatched':False,'confirmation_token_created':False,'instruction':'AI集中解释未覆盖组件及阻断；有明确用途后填写普通连接目标，不反复调用auto_plan。'}
+                    'write_dispatched':False,'confirmation_token_created':False,
+                    'whole_assembly_route':(t.get('assembly_brief',{}).get('intent_guide') or {}).get('whole_assembly_route'),
+                    'candidate_search':assessment.get('candidate_search'),
+                    'next_action':t.get('next_action'),
+                    'instruction':'AI先读几何组和用户既有目标。已知完整用途可直接提交whole_assembly普通目标，候选搜索不完整不等于显式目标不能规划；仍需几何信息时按remaining_cursor续查，不反复auto_plan或让用户逐件填表。'}
         selected=assessment['suggested_plan_arguments'];intents=selected['connection_intent'];completion_scope=selected['completion_scope'];whole=completion_scope=='whole_assembly'
         t['automatic_mechanical_goal_proposal']=True
     elif intents is not None or rigid_groups is not None or release_fixed_components is not None:
@@ -341,7 +351,10 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
             from .connection_batch_task import apply
             applied=apply(engine,t,s)
         else:applied=s.call('_apply_assembly_connections',plan_id=t['proposal']['plan_id'],confirmed=True)
-        core.write(s.folder/'通用连接补齐成果.json',applied);s.committed=True;s.capture_applied_result()
+        core.write(s.folder/'通用连接补齐成果.json',applied);s.committed=True
+        captured=s.capture_applied_result()
+        from .assembly_snapshot import record_native_inventory
+        record_native_inventory(t,s,captured)
         expected_fixed={c['component_id']:c['fixed_component'] for c in s.connection_survey['components']}
         for change in t['proposal'].get('fixed_state_changes',[]):
             if expected_fixed.get(change['component_id']) is not True or change['before'] is not True or change['after'] is not False:

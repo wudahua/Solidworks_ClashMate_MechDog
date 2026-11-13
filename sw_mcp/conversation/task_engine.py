@@ -296,11 +296,12 @@ class TaskEngine:
                     'json_pointer':'/source_workspace_files','scope':'presentation_only_full_inventory_retained_for_integrity_and_evidence'}
             if not t.get('closed') and t.get('server_instance_id')!=self.server_instance_id:
                 review=orphan_close.review(t)
+                can_finish=review['archive_eligible'] or review.get('owned_idle_executor_handoff_may_allow_retirement',False)
                 value.update(busy=False,connection_status='owner_lost_read_only',persisted_phase=t['phase'],
                     task_owner_available=False,orphan_review=review,
-                    next_action={'tool':'finish_mechanism_task' if review['archive_eligible'] else 'get_mechanism_task',
-                        'arguments':{'task_id':task_id,'close_unrestored':True,'keep_result':False} if review['archive_eligible'] else {'task_id':task_id,'collect_evidence':True},
-                        'automatic_retry':False,'requires_explicit_confirmation':review['archive_eligible'],
+                    next_action={'tool':'finish_mechanism_task' if can_finish else 'get_mechanism_task',
+                        'arguments':{'task_id':task_id,'close_unrestored':True,'keep_result':False} if can_finish else {'task_id':task_id,'collect_evidence':True},
+                        'automatic_retry':False,'requires_explicit_confirmation':can_finish,
                         'instruction':'原活会话已丢失；只读核对全部旧资源身份与退出。符合条件且用户明确同意后，以close_unrestored=true、keep_result=false异常归档；保留现有文件不等于另存已验证成果。缺证据时AI自动收集，不查询死亡COM或重放写入。'})
                 if t.get('error'):
                     value['error_context']={'scope':'historical_task_failure','current_get_request_failed':False,

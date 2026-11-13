@@ -163,7 +163,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertLess(len(json.dumps(result,ensure_ascii=False).encode('utf-8')),10000)
         self.assertEqual(result['verification']['completed_trials'],41)
         self.assertEqual(result['finish']['restoration']['restoration_status'],'restored')
-        self.assertEqual(result['next_action']['arguments'],{'task_id':self.task['task_id']});self.assertEqual(self.task,before)
+        self.assertEqual(result['next_action']['arguments'],{'task_id':self.task['task_id'],'full_record':True});self.assertEqual(self.task,before)
     def test_frontend_does_not_route_conflicting_snapshot_options_to_evidence(self):
         from sw_mcp.conversation import frontend
         from sw_mcp.validation import StrictMCPServer

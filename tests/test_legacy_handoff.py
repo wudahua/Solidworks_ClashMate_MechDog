@@ -57,6 +57,15 @@ class HandoffTests(unittest.TestCase):
         self.assertIs(self.engine.product.jobs.bridge,self.engine.product.bridge)
         self.engine.product.mcp.call_tool.assert_awaited_once()
 
+    def test_partial_history_handoff_only_releases_this_retained_idle_executor(self):
+        p=self.child();self.engine.tasks.prior_unfinished=['historic-record']
+        self.assertIsNone(self.engine.handoff_legacy())
+        self.assertIsNone(p.poll())
+        proof=self.engine.handoff_legacy(retire_history=True)
+        self.assertEqual(p.poll(),0);self.assertTrue(proof['confirmed'])
+        self.assertFalse(proof['CAD_exit_requested']);self.assertFalse(proof['force_kill'])
+        self.assertEqual(self.engine.tasks.prior_unfinished,['historic-record'])
+
     def test_exited_retained_Popen_does_not_permanently_block_prepare(self):
         p=self.child();p.stdin.close();p.wait(timeout=10)
         self.assertTrue(self.prepare()['structuredContent']['legacy_session_handoff']['confirmed'])

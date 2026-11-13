@@ -18,7 +18,8 @@ class SessionConnectionTests {
     }
     static void Reject(Action action,string code){try{action();}catch(CadFault e){Check(e.Code==code,code);return;}throw new Exception("Expected "+code);}
     static Dictionary<int,Func<Fake>> Empty(){return new Dictionary<int,Func<Fake>>();}
-    [STAThread] static int Main(string[] args){try{Run(args);return 0;}catch(Exception e){Console.Error.WriteLine(e.ToString());return 1;}}
+    [STAThread] static int Main(string[] args){
+        Console.OutputEncoding = new System.Text.UTF8Encoding(false);try{Run(args);return 0;}catch(Exception e){Console.Error.WriteLine(e.ToString());return 1;}}
     static void Run(string[] args){
 #if !NATIVE_SESSION_TESTS
         if(args.Length!=0)throw new ArgumentException("Native flags require an explicitly compiled native probe");

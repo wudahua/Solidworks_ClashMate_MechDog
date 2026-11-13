@@ -18,7 +18,7 @@ def attach(mcp,root):
     client=OwnerClient(root,work,runtime)
     async def dispatch(name,arguments):
         try:
-            if name=='get_mechanism_task' and arguments.get('collect_evidence') and any(arguments.get(k) for k in ('draft_cursor','structure_cursor','snapshot_cursor','summary_only')):
+            if name=='get_mechanism_task' and arguments.get('collect_evidence') and any(arguments.get(k) for k in ('draft_cursor','structure_cursor','snapshot_cursor','summary_only','full_record')):
                 raise core.StopBatch('CONNECTION_INTENT_INVALID','证据收集不混用摘要或分页，未访问CAD。')
             if name=='get_mechanism_task' and arguments.get('collect_evidence') and not arguments.get('draft_cursor'):
                 return packed({'ok':True,'result':await asyncio.to_thread(client.evidence,arguments.get('task_id',''))})
