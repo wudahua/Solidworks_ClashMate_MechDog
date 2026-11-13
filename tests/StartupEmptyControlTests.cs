@@ -24,6 +24,7 @@ public partial class Cad {
 }
 class StartupEmptyControlTests {
     static int Main(){
+        Console.OutputEncoding = new System.Text.UTF8Encoding(false);
         var empty=new Cad("C:\\owned-runtime");empty.AcceptanceControl("exit_empty",42);
         if(empty.Sw.Exits!=1)throw new Exception("Empty owned instance did not exit");
         var occupied=new Cad("C:\\owned-runtime");occupied.Sw.Documents=new object[]{new Document()};

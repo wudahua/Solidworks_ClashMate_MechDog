@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Web.Script.Serialization;
 class InitialTranslationGuardFixture {
     static int Main() {
+        Console.OutputEncoding = new System.Text.UTF8Encoding(false);
         var json=new JavaScriptSerializer();var input=json.Deserialize<Dictionary<string,object>>(Console.In.ReadToEnd());
         try {
             var poses=json.Deserialize<Dictionary<string,double[]>>(json.Serialize(input["poses"]));

@@ -66,6 +66,13 @@ class FormalEngine:
                 {'tasks':self.tasks.get(),'native_calls':False})
         binding=self.artifact_binding(arguments) if name in offline|{'replay_motion_frame'} else None
         handoff=self.handoff_legacy() if name=='prepare_mechanism_task' else None
+        if name=='finish_mechanism_task' and arguments.get('close_unrestored') is True and not arguments.get('keep_result'):
+            task=self.tasks.tasks.get(arguments.get('task_id'),{})
+            if task and not task.get('closed') and task.get('server_instance_id')!=self.tasks.server_instance_id:
+                from .orphan_close import review
+                proof=review(task)
+                if proof.get('owned_idle_executor_handoff_may_allow_retirement'):
+                    handoff=self.handoff_legacy(retire_history=True)
         if name=='prepare_mechanism_task':
             # Reuse the upgrade/install lease while a managed CAD task owns its native copy.
             self.product.bridge._acquire_lease();self.managed_upgrade_guard=True
@@ -113,14 +120,14 @@ class FormalEngine:
             print('Diagnostic recording failed: '+type(error).__name__,file=sys.stderr,flush=True)
         return result.model_dump(mode='json',by_alias=True)
 
-    def handoff_legacy(self):
+    def handoff_legacy(self,retire_history=False):
         """Retire only this owner's provably idle retained executor, before task creation.
 
         The owner serializes tool handlers; the Bridge lock additionally excludes
         a retained background job. A completed journal alone proves no process
         ownership. No historic journal is deleted or rewritten by this handoff.
         """
-        if self.tasks.active or self.tasks.prior_unfinished:return None
+        if self.tasks.active or (self.tasks.prior_unfinished and not retire_history):return None
         bridge=self.product.bridge
         busy=[j['job_id'] for j in self.product.jobs._jobs.values() if j['status'] in {'queued','running'}]
         state=bridge.recovery_state();facts=bridge.session_admission(state)

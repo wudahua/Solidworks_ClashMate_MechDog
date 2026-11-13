@@ -26,7 +26,9 @@ def current_view(session, value):
         now=time.time();started=active.get('started')
         if not operation:
             if isinstance(value.get('progress'),dict):
-                value['progress']={**value['progress'],'original_request_wait':{},'current_native_call':False}
+                value['progress']={**value['progress'],'last_observed_operation':value['progress'].get('operation'),
+                    'operation':None,'original_request_wait':{},'current_native_call':False,
+                    'observation_scope':'historical_stage_no_current_native_call'}
             return value
         if type(started) not in (int,float) or not math.isfinite(started) or started>now:
             if not pending:return value

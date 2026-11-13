@@ -5,13 +5,41 @@ from . import core, startup_gate
 from .process_identity import same_process
 
 
+def _preimport_partial_start(task, ownership, folder):
+    """Use a real pre-import producer record, never null diagnostics as proof.
+
+    This establishes only a startup boundary. The old CAD/owner must still be
+    proved exited and an unbound executor excluded by the live exclusive gate.
+    """
+    if (task.get('model_id') or ownership.get('model_id') or ownership.get('checkpoint_id')
+            or not ownership.get('CAD') or ownership.get('executor')
+            or ownership.get('native_unknown') is not False or ownership.get('committed') is not False
+            or ownership.get('in_flight') not in (None, {}) or ownership.get('pending_native_response') not in (None, {})):
+        return None
+    path = core.no_links(folder / 'CAD会话状态.json')
+    if not path.is_file():return None
+    state = core.read(path)
+    if (not isinstance(state, dict) or state.get('status') not in {'starting', 'startup_failed'}
+            or state.get('owned_pid') != ownership['CAD']['pid']
+            or state.get('runtime') != ownership.get('runtime')
+            or state.get('model_id') or state.get('checkpoint_id')
+            or state.get('committed') is not False):return None
+    # Any contradictory persisted import/call evidence keeps the task blocked.
+    if (folder / '导入.json').exists() or any((folder / 'calls').glob('*.json')):return None
+    runtime = Path(ownership.get('runtime', ''))
+    if not runtime.is_absolute() or core.no_links(runtime / 'runs/executor-state.json').exists():return None
+    return {'path': str(path), 'sha256': core.digest(path), 'status': state['status'],
+            'scope': 'recorded_preimport_startup_boundary_not_restoration_or_historical_zero_CAD',
+            'unrecorded_executor_requires_available_gate': True}
+
+
 def _review(task):
     """Death of every bound resource supersedes stale *liveness*, not outcome."""
     folder = core.no_links(Path(task['directory']) / 'session')
     ownership_path = core.no_links(folder / '活会话归属.json')
     result = {'archive_eligible': False, 'observed_at': time.time(),
               'required_evidence': ['original_owner_identity_and_exit', 'original_CAD_identity_and_exit',
-                                    'original_executor_identity_and_exit', 'bound_native_journal', 'available_executor_gate'],
+                                    'original_executor_identity_and_exit_or_proven_preimport_boundary', 'bound_native_journal_if_started'],
               'resource_observations': {}, 'blockers': [], 'CAD_calls': 0,
               'processes_terminated': False, 'restoration_verified': False,
               'copy_preserved_without_saving_verified_result': True}
@@ -34,13 +62,11 @@ def _review(task):
     no_native_started = (not task.get('model_id') and not ownership.get('CAD') and not ownership.get('executor')
                          and ownership.get('native_unknown') is False and ownership.get('in_flight') == {}
                          and ownership.get('committed') is False)
-    if not full_native_identity and not no_native_started:
-        return block('ORPHAN_RESOURCE_IDENTITY_MISSING', '原生资源身份不完整；启动中或未知的缺失身份不能按未启动处理。')
-    result['native_resources_started'] = full_native_identity
+    result['native_resources_started'] = bool(ownership.get('CAD') or ownership.get('executor'))
     for role in ('owner', 'CAD', 'executor'):
         identity = ownership.get(role)
         if not identity:
-            continue  # Only the explicitly clean, native-not-started case above.
+            continue
         if (not isinstance(identity, dict) or type(identity.get('pid')) is not int or identity['pid'] <= 0
                 or not isinstance(identity.get('created'), str) or not identity['created'].isdecimal()):
             return block('ORPHAN_RESOURCE_IDENTITY_MISSING', '缺少进程PID或创建身份，不能仅按PID解除保护。', role=role)
@@ -48,6 +74,11 @@ def _review(task):
         result['resource_observations'][role] = {'recorded': identity, 'now': observed}
         if observed['status'] not in {'exited', 'pid_reused'}:
             return block('ORPHAN_RESOURCE_NOT_CONFIRMED_EXITED', '原owner、CAD或执行器仍运行或身份未知；保留记录。', role=role)
+    partial = _preimport_partial_start(task, ownership, folder) if not full_native_identity and not no_native_started else None
+    if not full_native_identity and not no_native_started and not partial:
+        return block('ORPHAN_RESOURCE_IDENTITY_MISSING', '原生资源身份不完整，且缺少绑定的导入前启动证据；不把空值当作未派发。')
+    result['startup_classification'] = 'partial_preimport_start' if partial else 'bound_native_session' if full_native_identity else 'native_not_started'
+    if partial:result['preimport_startup_evidence'] = partial
     if full_native_identity:
         runtime = Path(ownership.get('runtime', ''))
         if not runtime.is_absolute():
@@ -67,8 +98,12 @@ def _review(task):
                                     'historical_snapshot_only': True, 'rewritten': False}
     gate = startup_gate.observe()
     result['executor_gate'] = gate
-    if gate.get('status') != 'available':
-        return block('ORPHAN_EXECUTOR_GATE_NOT_IDLE', '当前执行器门禁不空闲；不结束其他客户端进程。')
+    if (partial or no_native_started) and gate.get('status') != 'available':
+        result['owned_idle_executor_handoff_may_allow_retirement'] = True
+        return block('ORPHAN_EXECUTOR_GATE_NOT_IDLE', '导入前记录没有执行器身份，须排除仍存活的未登记执行器；AI可核对并正常释放本宿主空闲连接，不能结束其他客户端。')
+    # Retirement changes metadata only. A different live executor does not
+    # revive proved-dead bound resources. New CAD admission retains its gate.
+    result['current_executor_gate_is_new_task_admission_not_historical_outcome'] = not bool(partial)
     result.update(archive_eligible=True,
                   native_outcome='unverified_all_bound_resources_ended',
                   historical_pending_request_not_replayed=True,

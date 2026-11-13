@@ -2,7 +2,25 @@
 from . import core
 
 
+def conclusions(value):
+    """Present independent conclusions without upgrading narrow validation."""
+    v=value.get('verification') or {};f=value.get('finish') or {}
+    mechanism=v.get('working_stroke') or v.get('driven_loop_review')
+    declared=v.get('declared_scope_passed')
+    status=lambda passed:'pass' if passed is True else 'fail' if passed is False else 'not_verified'
+    return {'declared_scope_validation':status(declared),
+            'driver_direction_validation':status(v.get('direction_verified_about_selected_native_axis')),
+            'whole_assembly_declared_joints':status(v.get('whole_assembly_declared_targets_passed')),
+            'mechanism_output_validation':status(declared) if mechanism else 'not_verified',
+            'mechanism_output_basis':'declared_primary_input_and_outputs' if mechanism else 'no_complete_output_contract_verified',
+            'restoration_status':f.get('restoration_status') or (f.get('restoration') or {}).get('restoration_status') or 'not_verified',
+            'cleanup_status':f.get('cleanup_status','not_finished'),
+            'whole_travel_certified':False,'global_DOF_certified':False,'contact_or_force_validated':False,
+            'instruction':'驱动移动或轨迹有效不能代替声明输出联动；仅按本次范围和证据报告结论。'}
+
+
 def present(value):
+    value['validation_conclusions']=conclusions(value)
     from .managed_wait import MAX_CALL_WAIT_S
     value['native_wait_policy']={'managed_call_maximum_wait_s':MAX_CALL_WAIT_S,'native_operation_cancelled_on_expiry':False,
         'repeated_dispatch_allowed':False,'heartbeat_is_native_progress_proof':False,'duration_is_estimate':False}

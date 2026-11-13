@@ -271,8 +271,34 @@ def installation_target(target, state):
     return resolved
 
 
+def managed_history_review(target):
+    """Upgrade advisory only: never move records, dispatch CAD or infer exit."""
+    folder=target/'runs/dialogue'
+    result={'scope':'saved_task_inventory_not_native_admission','unfinished_tasks':[],
+            'unreadable_records':[],'scan_complete':True,'records_modified':False,
+            'instruction':'升级不清除旧任务。AI在正式MCP中读取列出的task_id，按资源证据及必要确认收尾；不要搬走任务目录或重放写入。'}
+    if not folder.exists():return result
+    if folder.is_symlink() or getattr(folder,'is_junction',lambda:False)():
+        result.update(scan_complete=False,reason='linked_history_not_read');return result
+    for i,path in enumerate(folder.glob('task-*/任务状态.json')):
+        if i>=256:result.update(scan_complete=False,reason='history_scan_budget');break
+        try:
+            if path.is_symlink() or path.parent.is_symlink() or getattr(path.parent,'is_junction',lambda:False)():raise ValueError('linked_record')
+            if path.stat().st_size>4000000:raise ValueError('record_read_budget')
+            task=json.loads(path.read_text('utf-8-sig'))
+            if task.get('closed') is not True:
+                result['unfinished_tasks'].append({'task_id':task.get('task_id'),'phase':task.get('phase'),
+                    'native_outcome':'not_inferred_from_snapshot',
+                    'next_action':{'tool':'get_mechanism_task','arguments':{'task_id':task.get('task_id')}}})
+        except (OSError,ValueError,TypeError,AttributeError) as error:
+            result['unreadable_records'].append({'path':str(path),'reason':type(error).__name__})
+            result['scan_complete']=False
+    return result
+
+
 def _upgrade(package,target,python,solidworks_dir,dry_run,install,state):
     target=installation_target(target,state)
+    state['managed_task_history_review']=managed_history_review(target)
     if not (target/'motion_server.py').is_file() or not (target/'executor').is_dir():raise UpgradeFailure('UPGRADE_TARGET_NOT_INSTALLATION','所选目录不是可识别的 MCP 安装目录。')
     reject_links(target,target)
     # Check every destination and its ancestors before changing any source file.

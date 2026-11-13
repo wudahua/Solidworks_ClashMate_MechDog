@@ -6,7 +6,7 @@ from . import core
 
 PAGE_BYTES=8000
 PAGE_ROWS=16
-KINDS=('components','candidates','goals','questions','geometry','actions','groups','fixed_changes')
+KINDS=('components','candidates','goals','questions','geometry','actions','groups','fixed_changes','mechanical_groups')
 _READ_CACHE=OrderedDict()
 _READ_LOCK=threading.RLock()
 
@@ -14,6 +14,19 @@ _READ_LOCK=threading.RLock()
 def encoded(value):return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False).encode('utf-8')
 def digest(value):return hashlib.sha256(encoded(value)).hexdigest()
 def page_bytes(value):return len(json.dumps(value,ensure_ascii=False,allow_nan=False).encode('utf-8'))
+
+
+def record_native_inventory(task,session,captured):
+    """Keep actual result rows distinct from old prepare and expected additions."""
+    inspection=getattr(session,'result_inspection',None) or (captured or {}).get('inspection') or {}
+    if 'mates' not in inspection:return
+    import time
+    task['current_assembly_observation']={'mate_count':len(inspection['mates']),
+        'component_count':len(inspection.get('components',[])),'observed_at':time.time(),
+        'observation_stage':'after_apply_before_motion_trials','source':'native_result_checkpoint_inspection',
+        'mate_count_scope':'returned_native_full_inspection_rows','model_id':session.model,
+        'checkpoint_id':(captured or {}).get('checkpoint_id'),
+        'historical_after_finish':False,'live_query_performed_by_get':False}
 
 
 def _page_offsets(rows):
@@ -120,8 +133,11 @@ def publish_prepare(task,session):
         for pair in q.get('pairs',[]):questions.append({'reason':q['reason'],'pair':pair,'design_intent_proven':False})
     for row in assessment.get('proposal_review_issues',[]):questions.append({'technical_blocker':row})
     goals=assessment.get('proposed_connection_intent',[])
-    entry=_persist(task,session,'prepare',{'components':components,'candidates':candidates,'goals':goals,
-                   'questions':questions,'geometry':geometry},source,additional)
+    from ..assembly_intent_guide import build as intent_guide
+    guide=intent_guide(survey,analytic) if not readonly else None
+    collections={'components':components,'candidates':candidates,'goals':goals,'questions':questions,'geometry':geometry}
+    if guide:collections['mechanical_groups']=guide['groups']
+    entry=_persist(task,session,'prepare',collections,source,additional)
     search=assessment.get('candidate_search') or {}
     task['assembly_brief']={'schema_version':1,'observation_stage':'prepare_snapshot_before_native_preview',
         'component_count':len(components),'mate_count':len(survey.get('mates',[])),
@@ -146,6 +162,13 @@ def publish_prepare(task,session):
         'automatic_plan_available':assessment.get('automatic_plan_available') is True,
         'snapshot':entry,'mechanical_intent_proven':False,'motion_verified':False,
         'instruction':'AI先读取goals与questions，复用已明确用途集中澄清；需要时读取候选/组件/几何快照，不逐面访问CAD。快照不证明设计意图、缺项或当前状态。所有未知项及搜索截断仍保留阻断。实际plan须当前原生预演，具体方案确认后一次执行全部内部批次。'}
+    if guide:
+        task['assembly_brief']['intent_guide']={k:v for k,v in guide.items() if k!='groups'}
+        if guide['zero_mate_assembly']:
+            group_query=next((q for q in entry['queries'] if ':mechanical_groups:' in q['arguments']['snapshot_cursor']),None)
+            if group_query:
+                task['next_action']={'tool':group_query['tool'],'arguments':group_query['arguments'],
+                    'instruction':'零配合没有既有约束路径；AI先读取几何同轴组，复用用户已说明的运动目标，按组集中澄清，再用whole_assembly一次预演、一次确认、内部自动分批。不让用户逐件填实体，不把同轴误当刚性。'}
 
 
 def publish_plan(task,session):
@@ -208,6 +231,7 @@ def page(task,cursor,owner_available=False):
             'rows':rows[offset:end],'range_start':offset,'range_end_exclusive':end,'total_count':len(rows),
             'next_cursor':sid+':'+kind+':'+str(end) if end<len(rows) else None,
             'collection_suffix_complete':end==len(rows),'all_collections_read':False,
+            'read_tracking':'not_tracked_stateless_page','all_collections_read_is_completion_claim':False,
             'other_collection_counts':entry['counts'],'native_calls':False,'write_dispatched':False,
             'observation_scope':snap['scope'],'plan_current':owner_available and snap['stage']=='plan' and task.get('phase')=='awaiting_confirmation' and task.get('plan_token')==entry.get('plan_token') and not task.get('execution_consumed') and not task.get('plan_token_revoked')},
             'instruction':'只读已保存快照；累计前页并保留其他集合待办。末页不表示所有集合读完、原生状态当前有效或已获得执行授权。'}
@@ -218,9 +242,12 @@ def page(task,cursor,owner_available=False):
 
 
 def summary(task):
+    from .task_views import conclusions
     keys=('task_id','phase','busy','closed','task_kind','server_instance_id','model_id','error','previous_failure',
-          'next_action','progress','native_stage','plan_token','plan_token_revoked','assembly_brief','assembly_plan_review')
+          'next_action','progress','native_stage','plan_token','plan_token_revoked','assembly_brief','assembly_plan_review',
+          'connection_status','task_owner_available','current_assembly_observation','validation_conclusions','orphan_review')
     result={k:task[k] for k in keys if k in task}
+    result['validation_conclusions']=conclusions(task)
     for key in ('error','previous_failure'):
         if isinstance(result.get(key),dict):
             result[key]={k:result[key][k] for k in ('code','message','assertion','restoration_status','native_unknown','retry_write_allowed') if k in result[key]}
@@ -234,12 +261,16 @@ def summary(task):
         result['finish']['restoration']={k:restored.get(k) for k in ('restoration_status','source_files_unchanged','maximum_transform_delta')}
     result.update(summary_only=True,native_calls=False,
         observation_scope='saved_task_state_and_frozen_evidence_not_live_native_admission',
-        full_record_query={'tool':'get_mechanism_task','arguments':{'task_id':task['task_id']}})
+        full_record_query={'tool':'get_mechanism_task','arguments':{'task_id':task['task_id'],'full_record':True}})
+    if task.get('assembly_brief'):
+        result['assembly_brief_context']='historical_prepare_observation_not_current_mate_count'
+    if task.get('closed') and result.get('current_assembly_observation'):
+        result['current_assembly_observation']={**result['current_assembly_observation'],'historical_after_finish':True}
     if task.get('assembly_plan_review') and task.get('phase')=='awaiting_confirmation':
         result['assembly_brief_context']='historical_prepare_observation; current_concrete_goals_are_in_assembly_plan_review'
         result['next_action']={'tool':'get_mechanism_task','arguments':task['assembly_plan_review']['snapshot']['queries'][0]['arguments'],
               'instruction':'先累计方案复核的所有非空集合、解释完整改动并取得具体授权，再使用本任务令牌执行；摘要不代替方案复核或确认。'}
-    if task.get('error') or task.get('busy'):
-        result['next_action']={'tool':'get_mechanism_task','arguments':{'task_id':task['task_id']},
+    if (task.get('error') or task.get('busy')) and task.get('connection_status')!='owner_lost_read_only':
+        result['next_action']={'tool':'get_mechanism_task','arguments':{'task_id':task['task_id'],'full_record':True},
             'instruction':'运行或失败摘要仅来自保存记录；读取完整任务核对原请求、进度和恢复结论，不据摘要重复执行或关闭。'}
     return result

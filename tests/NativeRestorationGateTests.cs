@@ -4,6 +4,7 @@ using System.Web.Script.Serialization;
 
 public static class NativeRestorationGateTests {
     public static void Main(string[] args) {
+        Console.OutputEncoding = new System.Text.UTF8Encoding(false);
         string mode=args[0];var gate=new NativeRestorationGate();int calls=0;bool nativeFlag=false;int reads=0,writes=0;
         Exception failure=mode=="com"?new COMException("controlled",unchecked((int)0x80010100)):
             mode=="nested_com"?new InvalidOperationException("wrapper",new COMException("controlled")):

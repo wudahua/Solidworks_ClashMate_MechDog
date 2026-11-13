@@ -40,7 +40,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.49", instructions='日常只用AI对话和现有30个MCP工具。先get_mechanism_task找回任务，无任务再prepare；任务期间按next_action读取、规划、确认、执行和finish，收尾后再开始下一轮。装配任务优先get(summary_only=true)读assembly_brief，按snapshot.queries只读已保存组件、几何、候选、目标和集中问题，不让用户逐面选引用或抄ID。分页保留所有集合待办；未完整搜索、几何截断、未知用途与不支持项不能说成配合完善。复用用户已明确用途；需要时一次说明各运动组及必要改动，取得具体方案授权。整机completion_scope=whole_assembly一次确认后内部自动分批；不会批量固定未分配零件。方案复核快照与当前令牌绑定，读取全部非空集合后再解释和确认执行。只读结构仍受原写入门禁，不能把父级刚性当内部完善或擅改柔性。motion支持旋转/直线；external_gear_pair为两平行轴比例联动，不认证齿面接触或受力。小幅配合试验不等于完整Motion。名称/轴线歧义用机械用途澄清，几何排名不证明设计意图。未知、超时或断连只读取原任务和恢复记录，不重放写入、强制清理或重建COM；已明确未导入的创建失败按任务指引安全收尾。默认finish恢复导入检查点；仅用户明确要保留已验证副本时keep_result=true。旧owner丢失须资源身份/退出证据及明确同意才异常归档，不能冒充恢复通过。低层工具需要时仍先import副本，再体检/查询/预演/确认写入；几何续查保留兄弟队列。所有结果区分本机/跨机、快照/当前原生、有限试验/全行程；失败证据保留。')
+mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.50", instructions='日常只用AI对话和现有30个MCP工具。先get_mechanism_task找回任务，无任务再prepare；任务期间按next_action读取、规划、确认、执行和finish，收尾后再开始下一轮。装配任务默认get读紧凑当前状态及assembly_brief，full_record=true读原文；summary_only=true仅保存摘要、不协调原请求。按snapshot.queries只读已保存组件、几何、候选、目标和集中问题，不让用户逐面选引用或抄ID。分页保留所有集合待办；未完整搜索、几何截断、未知用途与不支持项不能说成配合完善。复用用户已明确用途；需要时一次说明各运动组及必要改动，取得具体方案授权。零配合先读mechanical_groups几何建议，按组复用或澄清用途；同轴不证明刚性。已明确完整连接、主直线输入和输出的闭环优先评估driven_loop，不把独立逐关节试验当唯一整机路线。整机completion_scope=whole_assembly一次确认后内部自动分批；不会批量固定未分配零件。方案复核快照与当前令牌绑定，读取全部非空集合后再解释和确认执行。只读结构仍受原写入门禁，不能把父级刚性当内部完善或擅改柔性。motion支持旋转/直线；external_gear_pair为两平行轴比例联动，不认证齿面接触或受力。小幅配合试验不等于完整Motion。名称/轴线歧义用机械用途澄清，几何排名不证明设计意图。未知、超时或断连只读取原任务和恢复记录，不重放写入、强制清理或重建COM；已明确未导入的创建失败按任务指引安全收尾。默认finish恢复导入检查点；仅用户明确要保留已验证副本时keep_result=true。旧owner丢失须资源身份/退出证据及明确同意才异常归档，不能冒充恢复通过。低层工具需要时仍先import副本，再体检/查询/预演/确认写入；几何续查保留兄弟队列。所有结果区分本机/跨机、快照/当前原生、有限试验/全行程；失败证据保留。')
 
 _task_engine=None
 _formal_engine=None
@@ -64,8 +64,10 @@ async def prepare_mechanism_task(assembly_path:str,moving_component_hint:str='',
                                speed,duration_s,output_fps,reverse_direction,minimum_travel)
 
 @mcp.tool()
-async def get_mechanism_task(task_id:str='',collect_evidence:bool=False,draft_cursor:str='',structure_cursor:str='',snapshot_cursor:str='',summary_only:bool=False):
-    '不传ID查找任务。装配任务优先summary_only=true读摘要；snapshot_cursor读已保存的组件、候选、几何、机械问题或具体方案分页，不访问CAD。累计各集合全部页，不把末页当作整体完成。其他任务和原请求恢复核对用默认完整get。draft_cursor/structure_cursor保留原续查；所有分页互斥。collect_evidence=true独立打包已有证据，不重复求解。'
+async def get_mechanism_task(task_id:str='',collect_evidence:bool=False,draft_cursor:str='',structure_cursor:str='',snapshot_cursor:str='',summary_only:bool=False,full_record:bool=False):
+    '不传ID查找任务。装配任务默认协调原请求后返回紧凑当前状态；full_record=true读取完整记录。summary_only=true仅读保存摘要，不协调恢复。snapshot_cursor读保存的组件、候选、几何、问题或具体方案分页；累计各集合全部页，末页不代表整体完成。其他任务保留原查询。collect_evidence=true打包已有证据，不重复求解；分页、摘要、完整记录选择互斥。'
+    if full_record and (collect_evidence or draft_cursor or structure_cursor or snapshot_cursor or summary_only):
+        return packed({'ok':False,'error':task_failure('CONNECTION_INTENT_INVALID','full_record不能混用摘要、证据收集或分页。')},True)
     if snapshot_cursor or summary_only:
         if collect_evidence or draft_cursor or structure_cursor or (snapshot_cursor and summary_only) or not task_id:
             return packed({'ok':False,'error':task_failure('CONNECTION_INTENT_INVALID','装配摘要/快照需要task_id且不能混用证据收集或其他分页。')},True)
@@ -83,7 +85,7 @@ async def get_mechanism_task(task_id:str='',collect_evidence:bool=False,draft_cu
         except Exception as error:
             if not hasattr(error,'code'):raise
             return packed({'ok':False,'error':task_failure(error.code,str(error),getattr(error,'diagnostics',None))},True)
-    return await dialogue_call('get',task_id)
+    return await dialogue_call('get',task_id,compact=not full_record)
 
 @mcp.tool()
 async def plan_mechanism_task(task_id:str,candidate_id:str='',moving_component_hint:str='',reference_component_hint:str='',initial_state:Literal['saved','study_zero']='saved',alignment_mode:Literal['strict','small_translation']='strict',

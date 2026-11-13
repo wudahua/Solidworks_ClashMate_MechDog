@@ -485,7 +485,7 @@ class MotionTaskEngine(TaskEngine):
                     whole_assembly_declared_targets_passed=passed,whole_travel_certified=False,contact_or_force_validated=False)
         return self._submit(t,'running',operation)
 
-    def get(self,task_id='',draft_cursor='',structure_cursor='',snapshot_cursor='',summary_only=False):
+    def get(self,task_id='',draft_cursor='',structure_cursor='',snapshot_cursor='',summary_only=False,compact=False):
         if snapshot_cursor or summary_only:
             if draft_cursor or structure_cursor or (snapshot_cursor and summary_only) or not re.fullmatch('[a-f0-9]{32}',task_id):
                 raise core.StopBatch('CONNECTION_INTENT_INVALID','装配摘要/快照需要task_id，且不混用其他分页或摘要参数。')
@@ -496,6 +496,9 @@ class MotionTaskEngine(TaskEngine):
                 from . import assembly_snapshot
                 if snapshot_cursor:return assembly_snapshot.page(t,snapshot_cursor,task_id in self.sessions and t.get('server_instance_id')==self.server_instance_id)
                 result=assembly_snapshot.summary(t)
+                if task_id in self.sessions:
+                    from . import task_progress
+                    result=task_progress.current_view(self.sessions[task_id],result)
                 if task_id not in self.sessions and not t.get('closed'):
                     result['task_owner_available']=False
                     result['next_action']={'tool':'get_mechanism_task','arguments':{'task_id':task_id},'instruction':'缺少原活会话，读取完整任务核对归属和恢复；不按保存摘要执行。'}
@@ -518,6 +521,16 @@ class MotionTaskEngine(TaskEngine):
                 if sid and sid not in seen:
                     seen.add(sid);values.append(assembly_sequence.view(self,t))
             value['assembly_sequences']=values
+        if compact and task_id and not draft_cursor and self.tasks[task_id].get('task_kind')=='assembly_constraints':
+            from . import assembly_snapshot
+            # Run the normal get above first: late original replies and close
+            # receipts must settle before projecting a compact observation.
+            result=assembly_snapshot.summary(value)
+            result.update(summary_only=False,original_request_coordination_performed=True)
+            if value.get('busy'):
+                result['next_action']={'tool':'get_mechanism_task','arguments':{'task_id':task_id},
+                    'automatic_retry':False,'instruction':'继续观察同一原请求；默认查询会协调迟到响应并返回紧凑状态，不重复执行。'}
+            return result
         return value
 
     def _settle_closed(self,t,finish,integrity):

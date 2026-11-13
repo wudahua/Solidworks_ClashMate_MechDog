@@ -185,6 +185,14 @@ class OrphanCloseTests(unittest.TestCase):
         self.assertTrue(self.other.finish(self.tid,True)['closed'])
         self.assertFalse(self.other.get(self.tid)['finish']['native_exit']['native_started'])
 
+    def test_no_native_record_does_not_bypass_unbound_executor_gate(self):
+        t=self.other.tasks[self.tid];t['model_id']=None;self.other.save(t)
+        self.ownership.update(model_id=None,CAD=None,executor=None)
+        core.write(self.folder/'活会话归属.json',self.ownership)
+        with patch('sw_mcp.conversation.startup_gate.observe',return_value={'status':'occupied'}):
+            with self.assertRaises(core.StopBatch) as error:self.other.finish(self.tid,True)
+        self.assertEqual(error.exception.code,'ORPHAN_EXECUTOR_GATE_NOT_IDLE');self.assertFalse(t['closed'])
+
     def test_unknown_bootstrap_missing_native_identity_stays_blocked(self):
         t=self.other.tasks[self.tid];t['model_id']=None;self.other.save(t)
         self.ownership.update(model_id=None,CAD=None,executor=None,native_unknown=True,in_flight={'operation':'boot'})
@@ -195,8 +203,85 @@ class OrphanCloseTests(unittest.TestCase):
 
     def test_pid_reuse_does_not_unlock_foreign_executor(self):
         with patch('sw_mcp.conversation.orphan_close.same_process',return_value={'status':'pid_reused'}),patch('sw_mcp.conversation.startup_gate.observe',return_value={'status':'occupied'}):
-            with self.assertRaises(core.StopBatch) as e:self.other.finish(self.tid,True)
-        self.assertEqual(e.exception.code,'ORPHAN_EXECUTOR_GATE_NOT_IDLE')
+            value=self.other.finish(self.tid,True)
+        self.assertTrue(value['closed'])
+        proof=core.read(Path(self.other.tasks[self.tid]['directory'])/'异常收尾核对.json')
+        self.assertFalse(proof['processes_terminated']);self.assertFalse(proof['restoration_verified'])
+        self.assertEqual(proof['executor_gate']['status'],'occupied')
+
+    def partial_start(self):
+        t=self.other.tasks[self.tid];t['model_id']=None;self.other.save(t)
+        self.ownership.update(model_id=None,executor=None,in_flight=None,pending_native_response={})
+        core.write(self.folder/'活会话归属.json',self.ownership)
+        self.journal.unlink()
+        core.write(self.folder/'CAD会话状态.json',{'status':'starting','owned_pid':101,'runtime':str(self.runtime),
+            'model_id':None,'checkpoint_id':None,'committed':False})
+        return t
+
+    def test_partial_preimport_start_closes_only_with_bound_producer_record_and_idle_gate(self):
+        self.partial_start()
+        before=core.digest(self.folder/'活会话归属.json')
+        result=self.other.finish(self.tid,True)
+        self.assertTrue(result['closed']);self.assertFalse(result['result']['previous_task_passed'])
+        self.assertIsNone(result['result']['restoration'])
+        self.assertEqual(before,core.digest(self.folder/'活会话归属.json'))
+        self.assertFalse(self.other.prior_unfinished)
+
+    def test_partial_start_nulls_alone_do_not_prove_archive_eligibility(self):
+        t=self.partial_start();(self.folder/'CAD会话状态.json').unlink()
+        with self.assertRaises(core.StopBatch) as error:self.other.finish(self.tid,True)
+        self.assertEqual(error.exception.code,'ORPHAN_RESOURCE_IDENTITY_MISSING');self.assertFalse(t['closed'])
+
+    def test_partial_start_contradictory_import_or_live_known_identity_blocks(self):
+        t=self.partial_start();core.write(self.folder/'导入.json',{'model_id':'old-model'})
+        with self.assertRaises(core.StopBatch):self.other.finish(self.tid,True)
+        self.assertFalse(t['closed'])
+        (self.folder/'导入.json').unlink()
+        with patch('sw_mcp.conversation.orphan_close.same_process',return_value={'status':'same'}):
+            with self.assertRaises(core.StopBatch) as error:self.other.finish(self.tid,True)
+        self.assertEqual(error.exception.code,'ORPHAN_RESOURCE_NOT_CONFIRMED_EXITED')
+
+    def test_partial_unbound_executor_still_requires_gate_no_archive_or_CAD_call(self):
+        self.partial_start()
+        with patch('sw_mcp.conversation.startup_gate.observe',return_value={'status':'occupied'}):
+            state=self.other.get(self.tid)
+            self.assertFalse(state['orphan_review']['archive_eligible'])
+            self.assertEqual(state['next_action']['tool'],'finish_mechanism_task')
+            self.assertTrue(state['next_action']['requires_explicit_confirmation'])
+            with self.assertRaises(core.StopBatch) as error:self.other.finish(self.tid,True)
+        self.assertEqual(error.exception.code,'ORPHAN_EXECUTOR_GATE_NOT_IDLE')
+
+    def test_formal_finish_archives_partial_history_after_verified_own_idle_EOF(self):
+        import subprocess,sys
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        from sw_mcp.bridge import Bridge
+        from sw_mcp.validation import packed
+        from sw_mcp.conversation.formal_engine import FormalEngine
+        self.partial_start()
+        current=self.root/'current-install';current.mkdir()
+        bridge=Bridge(current)
+        child=subprocess.Popen([sys.executable,'-c','import sys;sys.stdin.buffer.read()'],stdin=subprocess.PIPE,stdout=subprocess.PIPE)
+        self.addCleanup(child.stdout.close)
+        def clean_child():
+            if not child.stdin.closed:child.stdin.close()
+            child.wait(timeout=10)
+        self.addCleanup(clean_child);self.addCleanup(bridge.close)
+        bridge._process=child;bridge._startup.set_result({'protocol_version':1,'ready':True,'process_id':999})
+        bridge._ever_dispatched=True;bridge._acquire_lease()
+        bridge._journal({'status':'idle','owner_id':bridge._owner_id,'executor_pid':child.pid,'solidworks_pid':999})
+        async def call(name,args):
+            self.assertEqual(name,'finish_mechanism_task')
+            return packed({'ok':True,'result':self.other.finish(args['task_id'],args['close_unrestored'])})
+        engine=FormalEngine.__new__(FormalEngine);engine.tasks=self.other;engine.managed_upgrade_guard=False
+        engine.product=SimpleNamespace(ROOT=current,bridge=bridge,jobs=SimpleNamespace(_jobs={},bridge=bridge),
+            artifacts=object(),mcp=SimpleNamespace(call_tool=AsyncMock(side_effect=call)))
+        self.addCleanup(lambda:engine.product.bridge.close())
+        with patch('sw_mcp.conversation.startup_gate.observe',side_effect=lambda:{'status':'occupied' if child.poll() is None else 'available'}):
+            value=engine.tool('finish_mechanism_task',{'task_id':self.tid,'close_unrestored':True,'keep_result':False})['structuredContent']
+        self.assertTrue(value['result']['closed']);self.assertFalse(self.other.prior_unfinished)
+        self.assertEqual(child.poll(),0);self.assertFalse(value['legacy_session_handoff']['CAD_exit_requested'])
+        self.assertFalse(value['legacy_session_handoff']['force_kill'])
 
 
 if __name__=='__main__':unittest.main(verbosity=2)

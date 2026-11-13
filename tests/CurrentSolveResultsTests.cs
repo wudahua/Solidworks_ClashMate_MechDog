@@ -28,7 +28,8 @@ class LifetimeStudy:SolidWorks.Interop.swmotionstudy.IMotionStudy {
  public int StudyType{get{return 4;}}public bool IsActive{get{return true;}}public bool IsPlaying{get{return false;}}
 }
 class CurrentSolveResultsTests {
- public static void Main(string[] args){var study=new LifetimeStudy{Mode=args[0]};string error=null;bool before=false,after=false;
+ public static void Main(string[] args){
+        Console.OutputEncoding = new System.Text.UTF8Encoding(false);var study=new LifetimeStudy{Mode=args[0]};string error=null;bool before=false,after=false;
   if(study.Mode=="stale")study.Old.Stale=true;if(study.Mode=="result_com")study.Old.Disconnected=true;
   try{var cad=new Cad();cad.Observe(study,"after_calculate");before=true;if(study.Mode=="replace_after_sampling"){study.Old.Disconnected=true;cad.Observe(study,"after_sampling");after=true;}}
   catch(Exception e){error=e is CadFault?((CadFault)e).Code:e.GetType().Name;}
