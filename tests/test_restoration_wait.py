@@ -27,9 +27,12 @@ for line in sys.stdin:
  with (root/'dispatches.jsonl').open('a') as stream:stream.write(json.dumps(r)+'\\n')
  progress=root/'runs/progress';progress.mkdir(parents=True,exist_ok=True)
  job=p['job_id'];stamp=time.time()-c.get('age_s',0)
- (progress/(job+'.json')).write_text(json.dumps({'job_id':job,'run_id':c.get('progress_run_id',job),'stage':c.get('stage','restore_solve_scope'),'updated_at':stamp}))
  if c.get('tamper_mapping'):
   (root/'runs/jobs'/(job+'.request.json')).write_text(json.dumps({'job_id':job,'request_id':'0'*32,'operation':r['op']}))
+ # Publish progress only after the negative mapping fixture is committed.
+ # Otherwise a slow filesystem permits a valid mapping + fresh progress at
+ # the parent deadline, which correctly admits the restoration wait.
+ (progress/(job+'.json')).write_text(json.dumps({'job_id':job,'run_id':c.get('progress_run_id',job),'stage':c.get('stage','restore_solve_scope'),'updated_at':stamp}))
  if c.get('hold'):
   end=time.monotonic()+15
   while not (root/'release').exists():
@@ -90,17 +93,23 @@ for line in sys.stdin:
         audit=json.loads(next((self.root/'runs/request-waits').glob('*.json')).read_text())
         self.assertEqual(audit['status'],'original_terminal_response_received')
 
-    def test_unbound_stale_or_calculating_progress_cannot_extend_wait(self):
-        for config in ({'stage':'native_calculate'},{'progress_run_id':'c'*32},{'age_s':10},{'tamper_mapping':True}):
-            with self.subTest(config=config):
-                with self.assertRaises(CadError) as caught:self.call(config)
-                self.assertEqual(caught.exception.code,'CAD_TIMEOUT')
-                self.assertIsNone(caught.exception.diagnostics['restoration_wait'])
-                self.assertEqual(caught.exception.diagnostics['wait_budget_s'],.25)
-                self.assertFalse((self.root/'runs/request-waits').exists())
-                end=time.monotonic()+5
-                while self.bridge.cad_operation_state!='available' and time.monotonic()<end:time.sleep(.01)
-                self.assertEqual(self.bridge.cad_operation_state,'available')
+    def assert_unbound_progress_refused(self,config):
+        # Each negative case owns a fresh transport/job identity and a gated
+        # child. Reusing a completed fake job ID obscures the dispatch binding.
+        with self.assertRaises(CadError) as caught:self.call({**config,'hold':True})
+        self.assertEqual(caught.exception.code,'CAD_TIMEOUT')
+        self.assertIsNone(caught.exception.diagnostics['restoration_wait'])
+        self.assertEqual(caught.exception.diagnostics['wait_budget_s'],.25)
+        self.assertFalse((self.root/'runs/request-waits').exists())
+        (self.root/'release').touch()
+        end=time.monotonic()+5
+        while self.bridge.cad_operation_state!='available' and time.monotonic()<end:time.sleep(.01)
+        self.assertEqual(self.bridge.cad_operation_state,'available')
+
+    def test_calculating_progress_cannot_extend_wait(self):self.assert_unbound_progress_refused({'stage':'native_calculate'})
+    def test_wrong_run_progress_cannot_extend_wait(self):self.assert_unbound_progress_refused({'progress_run_id':'c'*32})
+    def test_stale_progress_cannot_extend_wait(self):self.assert_unbound_progress_refused({'age_s':10})
+    def test_unbound_mapping_cannot_extend_wait(self):self.assert_unbound_progress_refused({'tamper_mapping':True})
 
     def test_default_budget_stays_600_plus_at_most_60_for_restoration(self):
         self.assertEqual(Bridge.RESTORATION_WAIT_S,60)

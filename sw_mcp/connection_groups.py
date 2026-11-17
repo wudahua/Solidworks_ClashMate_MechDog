@@ -79,7 +79,12 @@ def expand(survey,intents,groups=None,release_names=None,whole_assembly=False):
         if cid in patterns:raise GroupIntentError('pattern_member_fixed_release_unsupported',instance=by[cid]['instance'])
     if released and not any(c.get('fixed_component') is True and hierarchy['parents'][c['component_id']] is None and c['component_id'] not in released for c in cs):
         raise GroupIntentError('fixed_release_requires_an_existing_fixed_reference_to_remain')
-    moving={g['component_a'] for g in intents if g['kind']!='rigid'}
+    def moving_endpoint(goal):
+        a,b=goal['component_a'],goal['component_b']
+        if b in released and a not in released:return b
+        if a in released:return a
+        return b if by[a].get('fixed_component') is True and by[b].get('fixed_component') is False else a
+    moving={moving_endpoint(g) for g in intents if g['kind']!='rigid'}
     memberships={};normalized=[];group_names=set();pattern_reviews=[]
     for raw in groups or []:
         if not isinstance(raw,dict) or set(raw)-{'name','members','anchor'}:raise GroupIntentError('invalid_rigid_group_fields')
@@ -122,6 +127,11 @@ def expand(survey,intents,groups=None,release_names=None,whole_assembly=False):
         if c['component_id'] in released:
             c['fixed_component']=False;c['constraint_state']={'status':'pending_explicit_fixed_release_native_readback','fully_constrained':None,'remaining_DOF':None}
     graph=constraint_graph.model(virtual);bindings=[];active=list(copy.deepcopy(intents));skipped=[];references=[]
+    virtual_by={c['component_id']:c for c in virtual['components']}
+    for goal in active:
+        a,b=goal['component_a'],goal['component_b']
+        if virtual_by[a].get('fixed_component') and not virtual_by[b].get('fixed_component'):
+            goal['component_a'],goal['component_b']=b,a
     seen={frozenset((g['component_a'],g['component_b'])):g['kind'] for g in active}
     for group in normalized:
         anchor=group['anchor'];connected={anchor};members=group['members']

@@ -88,6 +88,7 @@ def measure(bound,poses):
     kind=bound['kind']
     passed=(g.norm(d)<=POSITION_TOLERANCE_M and angle<=ANGLE_TOLERANCE_RAD if kind=='rigid' else
             g.norm(d)<=POSITION_TOLERANCE_M and tilt<=ANGLE_TOLERANCE_RAD if kind=='revolute' else
+            radial<=POSITION_TOLERANCE_M and tilt<=ANGLE_TOLERANCE_RAD if kind=='cylindrical' else
             radial<=POSITION_TOLERANCE_M and angle<=ANGLE_TOLERANCE_RAD)
     return dict(passed=passed,anchor_gap_m=g.norm(d),axial_displacement_m=axial,radial_offset_m=radial,
         relative_rotation_rad=angle,axis_tilt_rad=tilt,signed_twist_rad=twist)
@@ -108,6 +109,13 @@ def trials(goal,poses):
         for sign in (1,-1):add('allowed_translation_'+str(sign),axis,False,True,sign)
         for i,v in enumerate(perpendicular):add('forbidden_transverse_'+str(i),v,False)
         for i,v in enumerate(([1,0,0],[0,1,0],[0,0,1])):add('forbidden_rotation_'+str(i),v,True)
+    elif kind=='cylindrical':
+        for sign in (1,-1):
+            add('allowed_translation_'+str(sign),axis,False,True,sign)
+            add('allowed_rotation_'+str(sign),axis,True,True,sign)
+        for i,v in enumerate(perpendicular):
+            add('forbidden_transverse_'+str(i),v,False)
+            add('forbidden_tilt_'+str(i),v,True)
     else:
         for angular in (False,True):
             for i,v in enumerate(([1,0,0],[0,1,0],[0,0,1])):add('forbidden_'+('rotation_' if angular else 'translation_')+str(i),v,angular)

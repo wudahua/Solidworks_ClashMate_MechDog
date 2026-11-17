@@ -51,7 +51,7 @@ def build(survey,analytic=None):
                 'axis_global':group['axis'],'axis_point_global_m':group['point'],
                 'observed_fixed_members':[components[c]['instance'] for c in members[start:start+16] if components[c].get('fixed_component') is True],
                 'recommended_question':'这些同轴成员中，哪些随同一运动组刚性联动，哪些保留转动或轴向滑动？AI复用已有机械目标，仅集中澄清未说明部分。',
-                'mechanical_options':['rigid','revolute','prismatic'],
+                'mechanical_options':['rigid','revolute','prismatic','cylindrical'],
                 'scope':'near_coaxial_material_lines_only_not_proven_connection_or_stationary_ownership',
                 'native_write_reference':False,'design_intent_proven':False})
     complete=(not budget and len(axes)<=MAX_AXIS_ROWS and invalid==0

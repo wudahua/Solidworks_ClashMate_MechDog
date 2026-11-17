@@ -116,7 +116,8 @@ stationary bodies. This is planning evidence, never finite-motion evidence.
     motion = joints.mobility(input_projection['rows'], graph.origin, graph.scale)
     if motion.get('recommended_joint_type') != 'prismatic' or input_projection['supported_effective_rank'] != 5:
         raise LoopReviewError('driven_loop_primary_input_locked_or_incompatible',
-                              input_rank=input_projection['supported_effective_rank'])
+                              input_rank=input_projection['supported_effective_rank'],
+                              conflict_witness=locking_witness(survey,goals,a,b))
     if abs(joints.ac.dot(joints.ac.unit(motion['axis_global']), joints.ac.unit(input_goal['axis_global']))) < 1-1e-8:
         raise LoopReviewError('driven_loop_primary_direction_conflict')
     # Checking both inclusions prevents missing a constraint or accidentally
@@ -132,8 +133,8 @@ stationary bodies. This is planning evidence, never finite-motion evidence.
     coupled = []
     for i, goal in enumerate(goals):
         rank = actual.rank(goal['component_a'], goal['component_b'])
-        expected = 6 if goal['kind'] == 'rigid' else 5
-        if rank == 6 and expected == 5 and i != primary_index:
+        expected = 6 if goal['kind'] == 'rigid' else 4 if goal['kind']=='cylindrical' else 5
+        if rank > expected and i != primary_index:
             coupled.append(i)
         elif rank != expected:
             raise LoopReviewError('driven_loop_joint_projection_incompatible', goal_index=i, rank=rank)
@@ -158,3 +159,20 @@ stationary bodies. This is planning evidence, never finite-motion evidence.
             'all_output_motion_required': True, 'both_directions_required': True,
             'global_DOF_certified': False, 'finite_motion_verified': False,
             'independent_joint_actuation_certified': False, 'write_dispatched': False}
+
+
+def locking_witness(survey,goals,a,b):
+    """Monotone prefix witness, not an automatic deletion recommendation."""
+    baseline=ideal_graph(survey,[]).rank(a,b)
+    if baseline==6:return {'baseline_rank':6,'goal_index':None,'source':'existing_constraints'}
+    lo,hi=1,len(goals)
+    while lo<hi:
+        mid=(lo+hi)//2
+        if ideal_graph(survey,goals[:mid]).rank(a,b)==6:hi=mid
+        else:lo=mid+1
+    index=lo-1;goal=goals[index]
+    before=ideal_graph(survey,goals[:index]).rank(a,b)
+    after=ideal_graph(survey,goals[:index+1]).rank(a,b)
+    return {'baseline_rank':baseline,'goal_index':index,'input_rank_before':before,'input_rank_after':after,
+            'closing_goal':{k:goal[k] for k in ('component_a','component_b','kind')},
+            'witness_is_not_unique_cause_or_deletion_authorization':True}

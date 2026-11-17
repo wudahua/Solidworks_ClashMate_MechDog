@@ -103,7 +103,7 @@ class ConnectionTests(unittest.TestCase):
         s=survey()
         for c in s['components']:c['cylinders']=[]
         r=joint.plan(s,[dict(component_a='moving',component_b='body',kind='revolute',axis_hint=[0,0,1])])
-        self.assertEqual(r['status'],'axis_selection_required')
+        self.assertEqual(r['status'],'axis_reference_unavailable')
         self.assertFalse(r['write_dispatched'])
 
     def test_bad_candidate_never_rebinds(self):

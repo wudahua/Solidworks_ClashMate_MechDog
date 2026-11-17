@@ -310,7 +310,7 @@ class MotionTaskEngine(TaskEngine):
 
     def plan(self,task_id,candidate_id='',moving_component_hint='',reference_component_hint='',initial_state='saved',alignment_mode='strict',
              gear_ratio_numerator=0,gear_ratio_denominator=0,input_shaft_hint='',output_shaft_hint='',input_gear_hint='',output_gear_hint='',stationary_component_hints=None,assembly_intent=None,connection_intent=None,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint='',assembly_sequence='',auto_plan=False,group_seeds=None,
-             verification_mode='independent_joint_trials',output_component_hints=None,initial_translation_limit_mm=.001,validated_assembly_task_id=''):
+             verification_mode='independent_joint_trials',output_component_hints=None,initial_translation_limit_mm=.001,validated_assembly_task_id='',mate_changes=None):
         t=self.tasks[task_id]
         if validated_assembly_task_id and (t.get('task_kind')!='motion' or initial_state!='saved'):
             raise core.StopBatch('CONNECTION_INTENT_INVALID','工作行程只能复用已保留整机成果的普通直线motion任务及保存初态，不混用配合写入、齿轮或归零初态。')
@@ -319,14 +319,14 @@ class MotionTaskEngine(TaskEngine):
             if candidate_id or (verification_mode!='driven_loop' and (moving_component_hint or reference_component_hint or alignment_mode!='strict')) or initial_state!='saved' or assembly_intent is not None or stationary_component_hints is not None or gear_ratio_numerator or gear_ratio_denominator or input_shaft_hint or output_shaft_hint or input_gear_hint or output_gear_hint:
                 raise core.StopBatch('CONNECTION_INTENT_INVALID','通用连接目标使用connection_intent，不混用齿轮分组、运动初态或圆边对齐参数。')
             if assembly_sequence:
-                if connection_intent is not None or rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared' or assembly_scope_hint or auto_plan or group_seeds is not None or verification_mode!='independent_joint_trials' or output_component_hints is not None or initial_translation_limit_mm!=.001:
+                if mate_changes is not None or connection_intent is not None or rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared' or assembly_scope_hint or auto_plan or group_seeds is not None or verification_mode!='independent_joint_trials' or output_component_hints is not None or initial_translation_limit_mm!=.001:
                     raise core.StopBatch('CONNECTION_INTENT_INVALID','分层序列操作不混用单层目标或范围，未忽略任何参数。')
                 from .assembly_sequence import dispatch
                 return dispatch(self,t,assembly_sequence)
             from .connection_task import propose
             return propose(self,t,connection_intent,rigid_groups,release_fixed_components,completion_scope,assembly_scope_hint,auto_plan,group_seeds=group_seeds,
-                verification_mode=verification_mode,moving_hint=moving_component_hint,reference_hint=reference_component_hint,output_hints=output_component_hints,alignment_mode=alignment_mode,initial_translation_limit_mm=initial_translation_limit_mm)
-        if connection_intent is not None or rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared' or assembly_scope_hint or assembly_sequence or auto_plan or group_seeds is not None or verification_mode!='independent_joint_trials' or output_component_hints is not None or initial_translation_limit_mm!=.001:raise core.StopBatch('CONNECTION_INTENT_INVALID','通用连接及completion_scope参数仅用于assembly_constraints，不静默忽略。')
+                verification_mode=verification_mode,moving_hint=moving_component_hint,reference_hint=reference_component_hint,output_hints=output_component_hints,alignment_mode=alignment_mode,initial_translation_limit_mm=initial_translation_limit_mm,mate_changes=mate_changes)
+        if mate_changes is not None or connection_intent is not None or rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared' or assembly_scope_hint or assembly_sequence or auto_plan or group_seeds is not None or verification_mode!='independent_joint_trials' or output_component_hints is not None or initial_translation_limit_mm!=.001:raise core.StopBatch('CONNECTION_INTENT_INVALID','通用连接及completion_scope参数仅用于assembly_constraints，不静默忽略。')
         if t.get('task_kind')=='external_gear_pair':
             from .external_gear_task import propose
             return propose(self,t,candidate_id,initial_state,alignment_mode,moving_component_hint,reference_component_hint,

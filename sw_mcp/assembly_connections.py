@@ -8,7 +8,13 @@ from . import assembly_constraints as ac
 from .assembly_completion import SparseBasis
 from . import constraint_graph,assembly_hierarchy
 
-KINDS = {'rigid', 'revolute', 'prismatic'}
+KINDS = {'rigid', 'revolute', 'prismatic', 'cylindrical'}
+
+
+class ConnectionPlanningError(ValueError):
+    def __init__(self,reason,**diagnostics):
+        self.diagnostics=diagnostics
+        super().__init__(reason)
 
 
 def nullspace(rows):
@@ -32,6 +38,9 @@ def target_rows(kind, axis, point, origin, scale):
     if kind == 'prismatic':
         return [[0.,0.,0.]+list(n) for n in ([1.,0,0],[0,1.,0],[0,0,1.])]+[
             list(n)+ac.cross(p, n) for n in ac.perpendiculars(a)]
+    if kind == 'cylindrical':
+        return [[0.,0.,0.]+list(n) for n in ac.perpendiculars(a)]+[
+            list(n)+ac.cross(p,n) for n in ac.perpendiculars(a)]
     raise ValueError('unsupported_connection_kind')
 
 
@@ -56,6 +65,15 @@ def mobility(rows, origin, scale):
     r = {'supported_local_rank': 6-len(free), 'local_free_coordinates': len(free),
          'recommended_joint_type': None, 'global_DOF': None, 'motion_verified': False}
     if not free: return {**r, 'recommended_joint_type': 'rigid'}
+    if len(free)==2:
+        angular=next((v for v in free if math.sqrt(ac.dot(v[3:],v[3:]))>1e-8),None)
+        if angular:
+            w=angular[3:];wn=math.sqrt(ac.dot(w,w));axis=ac.unit(w)
+            p=[x/(wn*wn) for x in ac.cross(w,angular[:3])]
+            point=[origin[i]+scale*p[i] for i in range(3)]
+            expected=target_rows('cylindrical',axis,point,origin,scale)
+            if len(ac.basis(rows))==4 and len(ac.basis(rows+expected))==4:
+                return {**r,'recommended_joint_type':'cylindrical','axis_global':axis,'axis_point_global_m':point}
     if len(free) != 1: return r
     v, w = free[0][:3], free[0][3:]; wn = math.sqrt(ac.dot(w,w)); vn = math.sqrt(ac.dot(v,v))
     if wn < 1e-8 and vn > 1e-8:
@@ -110,6 +128,20 @@ def _line_matches(a, b):
     return math.sqrt(ac.dot(ac.cross(x,y),ac.cross(x,y)))<=5e-7 and math.sqrt(ac.dot(ac.cross(d,x),ac.cross(d,x)))<=5e-8
 
 
+def axis_diagnostics(a,b,hint=None):
+    gaps=[]
+    for fa in a.get('cylinders',[]):
+        for fb in b.get('cylinders',[]):
+            u,v=ac.unit(fa['axis_global']),ac.unit(fb['axis_global'])
+            if math.sqrt(ac.dot(ac.cross(u,v),ac.cross(u,v)))>5e-7:continue
+            if hint is not None and abs(ac.dot(u,ac.unit(hint)))<1-1e-8:continue
+            d=[fa['reference_point_global_m'][i]-fb['reference_point_global_m'][i] for i in range(3)]
+            gaps.append(math.sqrt(ac.dot(ac.cross(d,u),ac.cross(d,u))))
+    return {'radial_tolerance_m':5e-8,'parallel_axis_radial_gap_min_m':min(gaps) if gaps else None,
+            'geometry_complete_a':a.get('geometry_complete',True),'geometry_complete_b':b.get('geometry_complete',True),
+            'snapshot_geometry_is_not_exhaustive_proof':True,'automatic_alignment_performed':False}
+
+
 def _axes(survey, a, b, hint, pair, origin, scale,kind):
     found = []; inferred = mobility(pair.get('rows',[]),origin,scale)
     if inferred.get('axis_global') and inferred.get('recommended_joint_type')==kind:
@@ -126,7 +158,7 @@ def _axes(survey, a, b, hint, pair, origin, scale,kind):
         except (KeyError,ValueError,TypeError):continue
         row={'axis_global':axis,'reference_point_global_m':p,'source':'existing_native_concentric_material_axis'}
         if not any(_line_matches(row,r) for r in found):found.append(row)
-    if found and kind=='revolute':
+    if found and kind in {'revolute','cylindrical'}:
         if hint is not None:found=[r for r in found if abs(ac.dot(ac.unit(hint),r['axis_global']))>1-1e-8]
         return found
     for fa in a.get('cylinders',[]):
@@ -226,9 +258,13 @@ def plan(survey, intents,whole_assembly=False,driven_loop=None):
             choices=[c for c in numbered if selected==c['candidate_id']]
             if not choices:raise ValueError('invalid_axis_candidate_for_current_goal')
         if len(choices)!=1:
-            return {'status':'axis_selection_required','write_dispatched':False,'goals':[], 'actions':[],
+            missing=not choices
+            return {'status':'axis_reference_unavailable' if missing else 'axis_selection_required','write_dispatched':False,'goals':[], 'actions':[],
                 'component_a':a_id,'component_b':b_id,'axis_choices':numbered,
-                'question':'请按材料轴线或运动用途澄清目标方向，AI使用候选，不要求用户填写实体ID。'}
+                'goal_index':len(goals),'instance_a':a['instance'],'instance_b':b['instance'],
+                'axis_diagnostics':axis_diagnostics(a,b,raw.get('axis_hint')) if missing else None,
+                'question':('当前快照没有满足严格同轴公差的材料轴线；AI核对几何完整性与径向偏差，必要时另行预演并确认有预算的初态平移，不要求用户从空列表选择。' if missing else
+                            '请按材料轴线或运动用途澄清目标方向，AI使用候选，不要求用户填写实体ID。')}
         chosen=choices[0];target=target_rows(kind,chosen['axis_global'],chosen['reference_point_global_m'],origin,scale)
         if len(ac.basis(target+pair['rows']))>len(ac.basis(target)):
             raise ValueError('existing_constraints_conflict_with_declared_motion')
@@ -261,7 +297,7 @@ def plan(survey, intents,whole_assembly=False,driven_loop=None):
                 'reason':'independent_supplement_within_declared_motion_target'})
         remaining=matrix.trial(target_global)
         trial_driver=None
-        if kind=='prismatic':
+        if kind in {'prismatic','cylindrical'}:
             possible=[]
             for _,k,fa,fb,rows,value in candidates:
                 if k!='distance' or abs(ac.dot(ac.unit(fa['axis_global']),chosen['axis_global']))<1-1e-8:continue
@@ -275,7 +311,7 @@ def plan(survey, intents,whole_assembly=False,driven_loop=None):
                     'normal_global':n,'signed_distance_m':signed,'kind':'distance','value':abs(signed),
                     'source':'current_native_parallel_planes_nonzero_separation',
                     'temporary_only':True,'removed_by_verified_result_checkpoint_after_each_trial':True}
-        rotary_driver=rotary_trial_driver(candidates,chosen['axis_global'],a_id,b_id) if kind=='revolute' else None
+        rotary_driver=rotary_trial_driver(candidates,chosen['axis_global'],a_id,b_id) if kind in {'revolute','cylindrical'} else None
         goals.append({'component_a':a_id,'component_b':b_id,'instance_a':a['instance'],'instance_b':b['instance'],
             'kind':kind,**chosen,'missing_supported_constraints_before':before,'remaining_supported_constraints':remaining,
             'added_action_count':len(actions)-start,'linear_trial_driver':trial_driver,
@@ -285,12 +321,17 @@ def plan(survey, intents,whole_assembly=False,driven_loop=None):
         if coupled is not None:goals[-1].update(coupled_verification_only=True,coupling_evidence=coupled,supported_target_fulfilment_certified=False)
     if actions and any(g.get('coupled_verification_only') for g in goals):raise ValueError('coupled_verification_cannot_mix_supplements')
     planned=constraint_graph.Graph(survey);planned.matrix.pivots=matrix.pivots.copy()
-    for goal in goals if driven_loop is None else []:
+    for index,goal in enumerate(goals if driven_loop is None else []):
         if goal['kind']=='rigid':continue
         effective=planned.relative(goal['component_a'],goal['component_b'])
         target=target_rows(goal['kind'],goal['axis_global'],goal['reference_point_global_m'],origin,scale)
         if len(ac.basis(target+effective['rows']))>len(ac.basis(target)):
-            raise ValueError('proposed_group_constraints_conflict_with_declared_motion')
+            raise ConnectionPlanningError('proposed_group_constraints_conflict_with_declared_motion',
+                goal_index=index,component_a=goal['component_a'],component_b=goal['component_b'],
+                instance_a=goal['instance_a'],instance_b=goal['instance_b'],declared_kind=goal['kind'],
+                declared_rank=len(ac.basis(target)),effective_rank=effective['supported_effective_rank'],
+                verification_mode='independent_joint_trials',
+                guidance='检查闭环机械目标；局部副不一定可独立驱动。不得把冲突见证自动解释为应删除的配合。')
     loop_review=None;construction_review=None
     if driven_loop is not None:
         from . import mechanism_loop

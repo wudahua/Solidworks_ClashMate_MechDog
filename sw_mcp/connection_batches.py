@@ -24,6 +24,7 @@ def prepare(proposal):
         if len(a)>MAX_BATCH_MATES:raise ValueError('native_batch_mate_budget_exceeded')
         payload={'goals':selected,'actions':a,'fixed_state_changes':c,'group_bindings':proposal.get('group_bindings',[])}
         if offset==0 and proposal.get('initial_translation') is not None:payload['initial_translation']=proposal['initial_translation']
+        if offset==0 and proposal.get('mate_changes'):payload['mate_changes']=proposal['mate_changes']
         text=json.dumps(payload,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False);payloads.append(text)
         summaries.append({'batch_index':len(payloads)-1,'goal_range_start':offset,'goal_range_end_exclusive':offset+len(selected),
                           'goals':len(selected),'added_mates':len(a),'release_fixed_components':[x['instance'] for x in c]})

@@ -170,6 +170,7 @@ def build(survey,review,overview,draft,binding='',draft_context=None):
             if name!=anchor:add(_goal(name,anchor,'rigid'))
     for row in overview.get('observed_joint_recommendations',[]):
         if not all(by[c].get('parent_component_id') is None for c in (row['component_a'],row['component_b'])):continue
+        if row['suggested_kind']=='cylindrical':continue  # Two free motions do not specify the intended joint.
         if row['suggested_kind'] in {'revolute','prismatic'} and row.get('supported_direct_rank',0)<5:continue
         add(_goal(row['instance_a'],row['instance_b'],row['suggested_kind'],row.get('axis_global')))
     # Only a unique preferred guide proposal can augment the observed skeleton.
@@ -180,6 +181,7 @@ def build(survey,review,overview,draft,binding='',draft_context=None):
         i=row.get('preferred_option_index')
         if row.get('blocker') or type(i) is not int or not 0<=i<len(row.get('options',[])):continue
         option=row['options'][i]
+        if option['kind']=='cylindrical':continue  # Recommend it; require an explicit mechanical goal before auto-planning it.
         missing=option.get('supported_whole_inventory_missing_coordinates_if_goal_chosen')
         if row['instance_a'] not in covered or type(missing) is int and missing>0:possible[row['instance_a']].append(option)
     if search_complete:

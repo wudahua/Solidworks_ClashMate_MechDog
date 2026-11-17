@@ -44,8 +44,8 @@ public partial class Cad {
         scope.Manifest=string.Join(":",hashes.Cast<string>());
         ValidateConnectionBatch(modelId,scope);
         data=Json.Deserialize<Dictionary<string,object>>((string)outer["batch_payload_json"]);
-        bool initialization=data.ContainsKey("initial_translation");
-        if(data.Count!=(initialization?5:4)||initialization&&scope.Index!=0||data.Keys.Any(k=>!new[]{"actions","goals","fixed_state_changes","group_bindings","initial_translation"}.Contains(k)))throw new CadFault("CONNECTION_REFERENCE_INVALID","批次载荷字段不符。");
+        bool initialization=data.ContainsKey("initial_translation"),mateChanges=data.ContainsKey("mate_changes");
+        if(data.Count!=4+(initialization?1:0)+(mateChanges?1:0)||(initialization||mateChanges)&&scope.Index!=0||data.Keys.Any(k=>!new[]{"actions","goals","fixed_state_changes","group_bindings","initial_translation","mate_changes"}.Contains(k)))throw new CadFault("CONNECTION_REFERENCE_INVALID","批次载荷字段不符。");
         data["reference_state_signature"]=outer["reference_state_signature"];
         return scope;
     }

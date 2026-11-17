@@ -6,7 +6,7 @@ from . import core
 
 PAGE_BYTES=8000
 PAGE_ROWS=16
-KINDS=('components','candidates','goals','questions','geometry','actions','groups','fixed_changes','mechanical_groups')
+KINDS=('components','candidates','goals','questions','geometry','actions','groups','fixed_changes','mechanical_groups','mate_changes','mates')
 _READ_CACHE=OrderedDict()
 _READ_LOCK=threading.RLock()
 
@@ -135,7 +135,16 @@ def publish_prepare(task,session):
     goals=assessment.get('proposed_connection_intent',[])
     from ..assembly_intent_guide import build as intent_guide
     guide=intent_guide(survey,analytic) if not readonly else None
-    collections={'components':components,'candidates':candidates,'goals':goals,'questions':questions,'geometry':geometry}
+    names={c['component_id']:c['instance'] for c in survey['components']}
+    mates=[]
+    for m in survey.get('mates',[]):
+        bindings=[e.get('component_id') for e in m.get('entities',[])]
+        mates.append({**{k:m.get(k) for k in ('native_feature_id','name','type','suppressed','error','warning')},
+            'component_instances':[names.get(cid) for cid in bindings[:8]],
+            'entity_count':len(bindings),'component_bindings_complete':len(bindings)<=8 and all(cid in names for cid in bindings),
+            'state_scope':'prepared_snapshot_revalidated_by_native_plan_not_live_observation',
+            'automatic_suppression_recommended':False})
+    collections={'components':components,'candidates':candidates,'goals':goals,'questions':questions,'geometry':geometry,'mates':mates}
     if guide:collections['mechanical_groups']=guide['groups']
     entry=_persist(task,session,'prepare',collections,source,additional)
     search=assessment.get('candidate_search') or {}
@@ -191,7 +200,7 @@ def publish_plan(task,session):
     # The full native plan remains in the task record and is hashed by this source.
     path=session.folder/('方案复核原文-'+task['plan_token']+'.json');core.write(path,p)
     entry=_persist(task,session,'plan',{'goals':goals,'actions':actions,'groups':groups,
-                 'fixed_changes':p.get('fixed_state_changes',[])},path)
+                 'fixed_changes':p.get('fixed_state_changes',[]),'mate_changes':p.get('mate_changes',[])},path)
     task['assembly_plan_review']={'snapshot':entry,'completion_scope':p.get('completion_scope'),
         'verification_mode':p.get('verification_mode','independent_joint_trials'),
         'construction_review':({k:p['construction_review'][k] for k in ('new_actions_before','new_actions_after','removed_new_action_indices','native_existing_mates_deleted','selection_basis','native_compatibility_verified')} if p.get('construction_review') else None),
@@ -202,7 +211,7 @@ def publish_plan(task,session):
             'coupled_goal_indices':p['driven_loop_review']['coupled_goal_indices'],
             'native_motion_and_all_joint_output_checks_required':True,'independent_actuation_certified':False} if p.get('driven_loop_review') else None),
         'selected_scope':task.get('assembly_brief',{}).get('selected_scope'),
-        'expected_added_mates':p.get('expected_added_mates'),'native_batch_count':len(p.get('batches') or [None]),
+        'expected_added_mates':p.get('expected_added_mates'),'mate_change_count':len(p.get('mate_changes',[])),'native_batch_count':len(p.get('batches') or [None]),
         'all_or_restore_import_checkpoint':p.get('all_or_restore_import_checkpoint'),
         'omitted_native_feature_ids':p.get('omitted_native_feature_ids'),
         'scope':p.get('scope'),'finish_policy':p.get('finish_policy'),
