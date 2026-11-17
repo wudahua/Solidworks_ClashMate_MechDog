@@ -18,12 +18,26 @@ public partial class Cad {
         catch(Exception e){return new{status="unavailable",error_code=HistoryErrorCode(e)};}
     }
     bool SameMotorReference(IModelDoc2 doc,object actual,string expected) {
-        if(actual==null)return false;var bytes=doc.Extension.GetPersistReference3(actual) as byte[];return bytes!=null&&Convert.ToBase64String(bytes)==expected;
+        return NativeObjectReferenceIdentity.Matches<object>(actual,expected,token=>{
+            byte[] bytes;try{bytes=Convert.FromBase64String(token);}catch(FormatException){return null;}
+            int error;var resolved=doc.Extension.GetObjectByPersistReference3(bytes,out error);return error==0?resolved:null;
+        },(a,b)=>Sw.IsSame(a,b)==(int)SolidWorks.Interop.swconst.swObjectEquality.swObjectSame,
+        (a,b)=>{
+            if(!(a is IFace2)||!(b is IFace2))return false;
+            var left=((IEntity)a).GetComponent() as IComponent2;var right=((IEntity)b).GetComponent() as IComponent2;
+            return left!=null&&right!=null&&left.GetID()==right.GetID()&&left.Name2==right.Name2&&
+                Sw.IsSame(left,right)==(int)SolidWorks.Interop.swconst.swObjectEquality.swObjectSame;
+        });
     }
-    void VerifyCreatedMotor(IModelDoc2 doc,ISimulationMotorFeatureData motor,string reference,double speed,string kind) {
+    object VerifyCreatedMotor(IModelDoc2 doc,ISimulationMotorFeatureData motor,string reference,double speed,string kind) {
         double expected=kind=="rotary"?speed*2*Math.PI/60:speed/1000;
-        if(motor==null||motor.MotionType!=0||motor.MotorType!=(kind=="rotary"?1:0)||!SameMotorReference(doc,motor.DirectionReference,reference)||!SameMotorReference(doc,motor.Location,reference)||!MotorMagnitudeMatches(motor.Magnitude,expected))
+        bool direction= motor!=null&&SameMotorReference(doc,motor.DirectionReference,reference);
+        bool location= motor!=null&&SameMotorReference(doc,motor.Location,reference);
+        if(motor==null||motor.MotionType!=0||motor.MotorType!=(kind=="rotary"?1:0)||!direction||!location||!MotorMagnitudeMatches(motor.Magnitude,expected))
             throw new CadFault("MOTOR_PARAMETERS_UNVERIFIED","原生马达的驱动参考、位置、类型或恒速参数未与请求一致。",new{expected_native_magnitude=expected,motor_type=kind,observed=NativeMotorParameters(doc,motor),solver_compatibility_proven=false});
+        return new{direction_native_identity_verified=direction,location_native_identity_verified=location,
+            method="resolve_requested_reference_then_native_entity_and_component_IsSame",
+            geometry_substitution=false,registration_rebound=false};
     }
     internal static bool MotorMagnitudeMatches(double actual,double expected){return !double.IsNaN(actual)&&!double.IsInfinity(actual)&&Math.Abs(actual-expected)<=Math.Max(1e-10,Math.Abs(expected)*1e-8);}
 }

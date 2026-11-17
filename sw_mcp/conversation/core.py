@@ -199,7 +199,11 @@ def launch(root,install,folder,on_started=None):
             break
         if time.monotonic()>deadline:raise StopBatch('COM_STARTUP_NOT_READY')
         time.sleep(2)
-    control(root,proc.pid,'empty',folder)
+    # A newly registered instance can still be servicing startup messages.
+    # Observe this ONE read-only identity/inventory request long enough to
+    # finish; never replace it with a second request after the old 30s window.
+    # The timeout remains finite and control() preserves unknown outcomes.
+    control(root,proc.pid,'empty',folder,timeout=120)
     return proc
 
 def restored_ok(value):

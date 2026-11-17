@@ -16,7 +16,7 @@ class DraftTests(unittest.TestCase):
         s=fixtures.survey();before=copy.deepcopy(s)
         d=recommendations.draft(s);self.assertEqual(d['status'],'draft_ready')
         c=d['candidates'][0]
-        self.assertEqual({o['kind'] for o in c['options']},{'rigid','revolute','prismatic'})
+        self.assertEqual({o['kind'] for o in c['options']},{'rigid','revolute','prismatic','cylindrical'})
         self.assertIsNone(c['preferred_option_index'])
         self.assertFalse(c['missing_connection_proven'])
         self.assertFalse(d['confirmation_token_created']);self.assertFalse(d['write_dispatched'])

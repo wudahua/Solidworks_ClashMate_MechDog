@@ -86,7 +86,7 @@ def resolve(s,intents,maximum=8):
                 return None,{'needs_mechanical_clarification':True,'field':key,'name_hint':text,
                     'choices':mechanical_choices(cs,text,None),'question':'请澄清组件名称或实例后缀；AI使用当前副本候选，不需要用户抄实体ID。','write_dispatched':False}
             row[key]=matches[0]['component_id']
-        if row.get('kind') not in joints.KINDS:raise core.StopBatch('CONNECTION_INTENT_INVALID','仅支持rigid/revolute/prismatic。')
+        if row.get('kind') not in joints.KINDS:raise core.StopBatch('CONNECTION_INTENT_INVALID','仅支持rigid/revolute/prismatic/cylindrical（轴向移动和转动均保留）。')
         if row.get('axis_hint') is not None:
             try:joints.ac.unit(row['axis_hint'])
             except (ValueError,TypeError) as error:raise core.StopBatch('CONNECTION_INTENT_INVALID','方向须为三个有限数，且不能为零向量。') from error
@@ -117,13 +117,15 @@ def select_scope(engine,t,row):
 
 
 def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint='',auto_plan=False,group_seeds=None,
-            verification_mode='independent_joint_trials',moving_hint='',reference_hint='',output_hints=None,alignment_mode='strict',initial_translation_limit_mm=.001):
+            verification_mode='independent_joint_trials',moving_hint='',reference_hint='',output_hints=None,alignment_mode='strict',initial_translation_limit_mm=.001,mate_changes=None):
     if type(auto_plan) is not bool:raise core.StopBatch('CONNECTION_INTENT_INVALID','auto_plan须为布尔值。')
     # A complete explicit whole-machine intent uses the ordinary full planner;
     # auto_plan is not a reason to reject it or force seven public tasks.
     if auto_plan and completion_scope=='whole_assembly' and intents is not None:
         auto_plan=False
-    driven=verification_mode=='driven_loop'
+    if mate_changes is not None and (auto_plan or group_seeds is not None or assembly_scope_hint or intents is None or alignment_mode!='strict' or completion_scope!='whole_assembly'):
+        raise core.StopBatch('CONNECTION_INTENT_INVALID','既有配合压缩修改须随显式完整目标预演，不混用自动草案、层选择或初态平移。')
+    driven=verification_mode=='driven_loop' 
     if verification_mode not in {'independent_joint_trials','driven_loop'}:raise core.StopBatch('CONNECTION_INTENT_INVALID','未知验证方式。')
     if driven:
         if alignment_mode=='strict' and initial_translation_limit_mm!=.001:raise core.StopBatch('CONNECTION_INTENT_INVALID','strict不使用初态平移预算，未静默忽略。')
@@ -236,6 +238,10 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
     expansion=None
     try:
         planning_survey=s.connection_survey
+        approved_mate_changes=[]
+        if mate_changes is not None:
+            from .. import connection_mate_changes
+            planning_survey,approved_mate_changes=connection_mate_changes.prepare(planning_survey,mate_changes)
         if rigid_groups is not None or release_fixed_components is not None:
             expansion=connection_groups.expand(planning_survey,goals,rigid_groups,release_fixed_components,whole_assembly=whole)
             core.write(s.folder/'整组目标展开.json',{k:v for k,v in expansion.items() if k!='planning_survey'})
@@ -254,6 +260,7 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
             planning_survey,initialization=initial_translation.propose(planning_survey,goals,initial_translation_limit_mm)
             core.write(s.folder/'微量初态平移预测.json',initialization)
         proposal=joints.plan(planning_survey,goals,whole_assembly=whole,driven_loop=loop_profile)
+        if approved_mate_changes:proposal['mate_changes']=approved_mate_changes
         if initialization is not None:proposal['initial_translation']=initialization
         if any(g.get('coupled_verification_only') for g in proposal.get('goals',[])) and (expansion is not None or whole):
             raise ValueError('coupled_verification_cannot_mix_supplements')
@@ -269,14 +276,16 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
             'native_full_constraint_conflicts_with_supported_missing_rank':'原生报告已全约束，但受支持局部模型仍有缺口；未知约束不能当作不存在，未继续补配合。',
             'existing_constraints_conflict_with_declared_motion':'原配合与目标运动冲突；未自动删除、压缩或解除固定。',
             'existing_indirect_constraints_conflict_with_declared_motion':'受支持的间接约束链与目标运动冲突；AI核对整装配约束图，不把直接配合较少当成缺项，不自动删除旧约束。',
-            'proposed_group_constraints_conflict_with_declared_motion':'整组补充约束会限制已声明的运动；方案未派发，AI核对分组或未解除的固定，不部分提交。',
+            'proposed_group_constraints_conflict_with_declared_motion':'整组目标在闭环中约束了某个声明副的独立运动；AI读取具体冲突目标。若设计就是联动闭环，须明确主输入和输出后评估driven_loop；不把该见证自动解释为应删除的配合。',
+            'driven_loop_primary_input_locked_or_incompatible':'完整目标使主输入锁死或与声明方向不兼容；AI读取秩变化和闭合目标见证，核对关节用途，不强行放行或自动删除约束。',
             'both_components_fixed_no_floating_target_for_native_trial':'目标两件均固定；先澄清机械目标，未自动解除固定。'}.get(reason,'连接目标或当前受支持范围未通过校验；AI核对诊断，不重试写入。')
         if reason=='pattern_group_requires_seed_scope_review':explanation='局部阵列的种子链、原生关系或同组范围未完整认证。AI先核对诊断中的种子归属并补全同用途组；不让用户逐个填写实体，不对派生件重试写入。'
+        if reason=='driven_loop_primary_input_locked_or_incompatible':code='CONNECTION_GOAL_CONFLICT'
         raise core.StopBatch(code,explanation,{'reason':reason,'cad_dispatched':False,'write_dispatched':False,
             'native_state_review_path':str(s.folder/'通用配合体检.json'),
             'constraint_graph_path':str(s.folder/'整装配约束图.json'),
             'component_state_observations':[{'instance':c['instance'],'fixed_component':c.get('fixed_component'),'constraint_state':c.get('constraint_state')}
-                for c in s.connection_survey['components'] if any(c['component_id'] in (g['component_a'],g['component_b']) for g in goals)],
+                for c in s.connection_survey['components'] if c['component_id'] in {getattr(error,'diagnostics',{}).get('component_a'),getattr(error,'diagnostics',{}).get('component_b')}],
             'nonlinear_constraints_observed':s.connection_survey.get('nonlinear_constraints',[]),
             'group_intent_diagnostics':getattr(error,'diagnostics',None),
             'observation_scope':'whole_inventory_non_equality_constraints_are_not_proven_root_causes',
@@ -309,7 +318,7 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
         else:t.pop('connection_transaction',None)
         t.update(phase='awaiting_confirmation',plan_token=uuid.uuid4().hex,plan_token_revoked=False,proposal={**native,
             'actions':proposal['actions'],'goals':proposal['goals'],'expected_added_mates':len(proposal['actions']),
-            'fixed_state_changes':proposal.get('fixed_state_changes',[]),'completion_scope':completion_scope,
+            'fixed_state_changes':proposal.get('fixed_state_changes',[]),'mate_changes':proposal.get('mate_changes',[]),'completion_scope':completion_scope,
             'verification_mode':verification_mode,'driven_loop_review':proposal.get('driven_loop_review'),'initial_translation':proposal.get('initial_translation'),
             'construction_review':proposal.get('construction_review'),
             'linear_allowed_trial_strategy':'temporary_native_motion_study_0_1mm_per_s_1s_30fps_then_verified_checkpoint_restore' if any(g.get('coupled_verification_only') for g in proposal['goals']) else native.get('linear_allowed_trial_strategy'),
@@ -364,10 +373,17 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
         fixed_audit={'passed':actual_fixed==expected_fixed,'expected':expected_fixed,'actual':actual_fixed,'changes':t['proposal'].get('fixed_state_changes',[])}
         core.write(s.folder/'固定状态变更核对.json',fixed_audit)
         if not fixed_audit['passed']:raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','实际固定标志超出确认的解除固定名单。',fixed_audit)
+        expected_mates={m['native_feature_id']:(m['type'],m['suppressed']) for m in s.initial_inspection['mates']}
+        for change in t['proposal'].get('mate_changes',[]):expected_mates[change['native_feature_id']]=(change['type'],change['after'])
+        actual_mates={m['native_feature_id']:(m['type'],m['suppressed']) for m in s.result_inspection['mates']}
+        mate_audit={'passed':all(actual_mates.get(k)==v for k,v in expected_mates.items()),
+                    'changes':t['proposal'].get('mate_changes',[]),'scope':'all_existing_mate_ids_types_and_expected_suppression_from_actual_result_readback'}
+        core.write(s.folder/'既有配合压缩修改核对.json',mate_audit)
+        if not mate_audit['passed']:raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','成果读回的原配合状态超出确认的压缩修改。',mate_audit)
         poses={c['component_id']:c['transform'] for c in s.result_inspection['components']}
         from .. import coupled_connections
         coupled_bounds={i:coupled_connections.bind(goal['coupling_evidence'],poses) for i,goal in enumerate(t['proposal']['goals']) if goal.get('coupled_verification_only')}
-        if coupled_bounds and (t['proposal'].get('actions') or t['proposal'].get('fixed_state_changes')):raise core.StopBatch('CONNECTION_SCOPE_UNSUPPORTED','既有联动受限验证不允许持久配合或固定状态写入。')
+        if coupled_bounds and (t['proposal'].get('actions') or t['proposal'].get('fixed_state_changes') or t['proposal'].get('mate_changes')):raise core.StopBatch('CONNECTION_SCOPE_UNSUPPORTED','既有联动受限验证不允许持久配合或固定状态写入。')
         coupled_signs={}
         if coupled_bounds:core.write(s.folder/'联动有界审计绑定.json',coupled_bounds)
         try:bounds=[trials.bind(goal,poses) for goal in t['proposal']['goals']]
@@ -433,6 +449,7 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
             'whole_assembly_declared_targets_passed':passed and t['proposal'].get('completion_scope')=='whole_assembly',
             'component_coverage':t['proposal'].get('component_coverage'),'batch_count':(t.get('connection_transaction') or {}).get('batch_count',1),
             'fixed_state_changes_verified':True,'fixed_state_changes':t['proposal'].get('fixed_state_changes',[]),
+            'existing_mate_changes_verified':mate_audit['passed'],'existing_mate_changes':mate_audit['changes'],
             'connection_count':declared_count,'existing_supported_connection_checks':len(bounds)-declared_count-group_extra_count-hierarchy_extra_count,
             'native_rigid_subassembly_binding_checks':hierarchy_extra_count,
             'additional_group_binding_checks':group_extra_count,'declared_group_bindings_checked_per_trial':len(t['proposal'].get('group_bindings',[])),

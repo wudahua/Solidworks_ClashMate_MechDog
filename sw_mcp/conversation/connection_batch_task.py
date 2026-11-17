@@ -8,7 +8,9 @@ def apply(engine,t,s):
     from .motion_tasks import pose_snapshot,require_same_poses
     tx=t['connection_transaction'];receipts=[]
     expected={c['component_id']:c['fixed_component'] for c in s.initial_inspection['components']}
-    old={m['native_feature_id']:m for m in s.initial_inspection['mates']};added=0
+    old={m['native_feature_id']:dict(m) for m in s.initial_inspection['mates']};added=0
+    for change in t['proposal'].get('mate_changes',[]):
+        old[change['native_feature_id']]['suppressed']=change['after']
     initialization=t['proposal'].get('initial_translation');expected_poses=pose_snapshot(s.initial_inspection['components'])
     if initialization:expected_poses={e['component_id']:e['after'][:12] for e in initialization['entries']}
     for i,summary in enumerate(tx['batches']):
@@ -24,6 +26,8 @@ def apply(engine,t,s):
         kwargs={'alignment_confirmed':True} if i==0 and initialization and initialization['requires_alignment_confirmation'] else {}
         response=s.call('_apply_assembly_connections',plan_id=plan_id,confirmed=True,**kwargs)
         core.write(s.folder/f'整装配批次{i+1:02d}成果.json',response)
+        if i==0 and t['proposal'].get('mate_changes') and (response.get('mate_changes')!=t['proposal']['mate_changes'] or response.get('mate_changes_verified') is not True):
+            raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','首批配合压缩修改缺少精确回执或验证。')
         header=response.get('batch_transaction') or {}
         if header.get('transaction_id')!=tx['transaction_id'] or header.get('batch_index')!=i or header.get('payload_sha256')!=tx['payload_hashes'][i] or response['added_mates']!=summary['added_mates']:
             raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','原生批次回执身份、载荷或新增数不符。')

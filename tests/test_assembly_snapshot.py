@@ -41,6 +41,13 @@ class SnapshotTests(unittest.TestCase):
         self.assertNotIn('native_reference"',json.dumps(rows));self.assertTrue(any('native_reference_sha256' in r for r in rows))
         self.assertEqual(core.read(self.session_dir/'通用配合原生调查.json'),self.survey)
         self.session.bridge.request.assert_not_called()
+    def test_existing_mate_identity_and_named_components_are_readable_without_CAD(self):
+        self.survey['mates'][0]['name']='同心1';core.write(self.session_dir/'通用配合原生调查.json',self.survey)
+        entry=self.publish();rows=self.collect(entry,'mates')
+        self.assertEqual(len(rows),1);row=rows[0]
+        self.assertEqual((row['native_feature_id'],row['name'],row['type'],row['suppressed']),(1,'同心1',1,False))
+        self.assertEqual(row['component_instances'],['moving','body']);self.assertTrue(row['component_bindings_complete'])
+        self.assertFalse(row['automatic_suppression_recommended']);self.session.bridge.request.assert_not_called()
     def test_geometry_truncation_and_search_truncation_are_independent(self):
         self.survey['components'][0]['geometry_complete']=False
         self.task['assembly_assessment']['candidate_search']['all_pair_ranges_read']=False

@@ -115,7 +115,7 @@ def draft(survey,review=None,cursor='',binding='',context=None):
         options=[]
         def option(kind,axis=None,source=None,point_hint=None):
             point=point_hint or a['transform'][9:12]
-            if kind=='revolute':
+            if kind in {'revolute','cylindrical'}:
                 matching=[r for r in axes if _parallel(r['axis_global'],axis)]
                 if source in {'supported_existing_constraint_rows','supported_indirect_constraint_rows'}:point=observed['axis_point_global_m']
                 elif point_hint is not None:point=point_hint
@@ -134,7 +134,7 @@ def draft(survey,review=None,cursor='',binding='',context=None):
                 matching=[i for i,c in enumerate(choices) if kind=='prismatic' or joints._line_matches(c,{'axis_global':axis,'reference_point_global_m':point})]
                 if not matching:return
                 if len(choices)>1:intent['candidate_id']='axis-'+str(matching[0]+1)
-            options.append({'kind':kind,'axis_global':axis,'axis_point_global_m':point if kind=='revolute' else None,'source':source,
+            options.append({'kind':kind,'axis_global':axis,'axis_point_global_m':point if kind in {'revolute','cylindrical'} else None,'source':source,
                 'connection_intent':intent,'requires_goal_confirmation':True,
                 'supported_local_missing_coordinates_if_goal_chosen':len(joints.ac.basis(target+rows))-len(joints.ac.basis(rows)),
                 'supported_whole_inventory_missing_coordinates_if_goal_chosen':graph.missing_target(target,a['component_id'],b['component_id']),
@@ -142,15 +142,19 @@ def draft(survey,review=None,cursor='',binding='',context=None):
         if observed['recommended_joint_type']:
             kind=observed['recommended_joint_type']
             option(kind,observed.get('axis_global'),'supported_indirect_constraint_rows' if effective['indirect_constraint_gain'] else 'supported_existing_constraint_rows')
+            if kind=='cylindrical':
+                for alternative in ('revolute','prismatic'):
+                    option(alternative,observed['axis_global'],'alternative_only_if_mechanical_goal_confirmed',observed['axis_point_global_m'])
             # Existing mobility is evidence, not the user's desired function.
             # Preserve it as the preferred choice; stopping it is a separately
             # confirmed mechanical goal, never proof that a mate was missing.
-            if kind in {'revolute','prismatic'}:
+            if kind in {'revolute','prismatic','cylindrical'}:
                 option('rigid',source='alternative_only_if_rigid_mechanical_goal_confirmed')
         else:
             for axis in axes[:3]:
                 option('revolute',axis['axis_global'],axis['source'],axis['reference_point_global_m'])
                 option('prismatic',axis['axis_global'],axis['source'])
+            for axis in axes[:3]:option('cylindrical',axis['axis_global'],axis['source'],axis['reference_point_global_m'])
             for guide in guides[:2]:option('prismatic',guide['axis_global'],guide['source'])
             if rows or axes:option('rigid',source='alternative_only_if_rigid_mechanical_goal_confirmed')
         if not options:continue

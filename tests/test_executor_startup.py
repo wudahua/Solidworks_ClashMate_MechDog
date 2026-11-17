@@ -121,6 +121,41 @@ class SpawnTests(unittest.TestCase):
         with patch.object(startup_process.subprocess,'Popen',return_value=process) as spawn,patch.object(startup_process.time,'sleep') as sleep:
             self.assertIs(startup_process.spawn(['x'],self.folder,'connection-check'),process)
         self.assertEqual(spawn.call_count,1);sleep.assert_not_called();process.wait.assert_not_called()
+    def _launch_with_delayed_empty_inventory(self,delay_s):
+        process=Mock(pid=123);process.poll.return_value=None
+        check=Mock(pid=456);check.wait.return_value=0
+        class PendingInventory:
+            pid=789
+            returncode=None
+            def poll(self):return self.returncode
+            def wait(self,timeout):
+                if timeout<delay_s:raise subprocess.TimeoutExpired('original-empty-inventory',timeout)
+                self.returncode=0
+                core.write(self_folder/'empty-control.json',{'ok':True,'result':{'ready':True,'pid':123,'document_count':0}})
+                return 0
+        self_folder=self.folder;helper=PendingInventory()
+        def spawn(command,folder,purpose,**kw):
+            if purpose=='solidworks':
+                if kw.get('on_created'):kw['on_created'](process)
+                return process
+            kw['stdout'].write(b'{"ready":true,"process_id":123}');kw['stdout'].flush();return check
+        with patch('sw_mcp.conversation.startup_gate.require_idle'),patch.object(startup_process,'self_test'),patch.object(startup_process,'spawn',side_effect=spawn) as starts,patch.object(core.subprocess,'Popen',return_value=helper) as helpers:
+            try:result=core.launch(self.folder,self.folder,self.folder)
+            except core.StopBatch as error:result=error
+        self.assertEqual(starts.call_count,2)
+        self.assertEqual(helpers.call_count,1,'Must observe the original inventory, never replay it')
+        process.terminate.assert_not_called();process.kill.assert_not_called()
+        return result,process,helper
+    def test_startup_inventory_completing_after_old_30s_window_is_observed_once(self):
+        result,process,helper=self._launch_with_delayed_empty_inventory(47)
+        self.assertIs(result,process);self.assertEqual(helper.returncode,0)
+        self.assertEqual(core.read(self.folder/'empty-control-exit.json')['helper_exit_code'],0)
+    def test_startup_inventory_beyond_bounded_window_stays_pending_without_termination(self):
+        result,process,helper=self._launch_with_delayed_empty_inventory(121)
+        self.assertIsInstance(result,core.StopBatch);self.assertEqual(result.code,'CONTROL_PENDING_NO_TERMINATION')
+        self.assertIsNone(helper.returncode)
+        self.assertFalse((self.folder/'empty-control.json').exists())
+        self.assertFalse(core.read(self.folder/'empty-control-exit.json')['termination_performed'])
     def test_retains_started_CAD_before_receipt_write_can_fail(self):
         process=Mock(pid=123);retained=[]
         with patch.object(startup_process.subprocess,'Popen',return_value=process) as spawn,patch.object(core,'write',side_effect=OSError('receipt denied')):
