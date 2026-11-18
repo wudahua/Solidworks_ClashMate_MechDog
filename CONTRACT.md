@@ -1,3 +1,11 @@
+# alpha.52 装配复核与受管闭合
+
+- `get_mechanism_task(snapshot_cursor=..., snapshot_page_size=50)` 可在集合首页指定 1 至 100 行。实际行数受 14,000 字节结果上限约束。后续使用原样返回的游标，累积各集合，页尾只代表该集合后缀。原游标和原查询仍可使用。运行中可按 `progress_only=true` 查看紧凑状态。
+- 已验证局部批次如提示 `continue_in_same_copy`，调用 `plan_mechanism_task(task_id=..., continue_verified_batch=true)` 核对原 CAD 副本的姿态、配合和固定状态。再提交明确的声明目标，按最新方案复核并取得独立确认。支持的平坦装配每批最多 8 个目标，累计至多 128 个。后续批次的秩和原生小位移检查保护已验证连接。默认收尾恢复最初的导入检查点。保留成果仍须明确授权，并以最后一批验证结论为准。
+- `coaxial_groups` 用 `name`、`axis_component` 和 `members` 指定材料轴和成员，每个成员给出 `component` 和 `axial`。 `free` 保留绕轴转动和轴向滑移，`located` 保留绕轴转动和现有轴向位置。名称或几何有歧义时可用当前快照中的方向和材料点作为提示，必要时集中向用户澄清。
+- COM 诊断中的 `rot_registered_pids` 是可见 PID moniker，`process_snapshot` 是进程枚举，`selected_pid` 是选择值，`returned_com_object_pid` 是对象回报，`verified_attached_pid` 仅在完成身份和版本核验后填写。旧字段继续返回。
+- 普通直线 `motion` 的 `target_openings_mm=[上限A,上限B]` 使用已保存的起始姿态和两个对向输出。AI 先提出目标开口方案，执行后核对四指、相对开口、干涉及正常收尾。认证范围以实际通过的行程为准。
+
 # alpha.51 圆柱副、既有配合调整及引用身份
 
 保持30个正式工具和AI对话入口。连接目标新增`cylindrical`：保留材料轴线上的平移及转动，约束径向偏移与轴线倾斜。独立试验检查正反平移、正反转动及禁止方向；主输入闭环路线仍检查全部声明关节、输出和恢复，不宣称每个局部副能独立驱动。

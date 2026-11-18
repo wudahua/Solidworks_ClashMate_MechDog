@@ -6,6 +6,8 @@ from . import core
 
 PAGE_BYTES=8000
 PAGE_ROWS=16
+EXPANDED_PAGE_BYTES=14000
+RECOMMENDED_PAGE_ROWS=50
 KINDS=('components','candidates','goals','questions','geometry','actions','groups','fixed_changes','mechanical_groups','mate_changes','mates')
 _READ_CACHE=OrderedDict()
 _READ_LOCK=threading.RLock()
@@ -29,13 +31,16 @@ def record_native_inventory(task,session,captured):
         'historical_after_finish':False,'live_query_performed_by_get':False}
 
 
-def _page_offsets(rows):
-    offsets=[0];start=0
-    while start<len(rows):
-        end=start
-        while end<len(rows) and end-start<PAGE_ROWS and page_bytes(rows[start:end+1])<=PAGE_BYTES-2000:end+=1
-        if end==start:raise ValueError('snapshot_row_exceeds_page_budget')
-        offsets.append(end);start=end
+def _page_offsets(sizes,row_limit,byte_limit):
+    offsets=[0]
+    used=2
+    for index,size in enumerate(sizes):
+        if size+2>byte_limit:raise ValueError('snapshot_row_exceeds_page_budget')
+        if index>offsets[-1] and (index-offsets[-1]>=row_limit or used+size+2>byte_limit):
+            offsets.append(index)
+            used=2
+        used+=size+(2 if index>offsets[-1] else 0)
+    if sizes:offsets.append(len(sizes))
     return offsets
 
 
@@ -52,15 +57,18 @@ def _read_snapshot(path,entry,task,folder):
         snap=json.loads(data.decode('utf-8-sig'))
         if snap['task_id']!=task['task_id'] or digest({'binding':str(folder),'snapshot':snap})!=entry['snapshot_id']:
             raise ValueError('snapshot_binding_changed')
-        cached=(snap,{kind:_page_offsets(rows) for kind,rows in snap['collections'].items()})
+        sizes={kind:[page_bytes(row) for row in rows] for kind,rows in snap['collections'].items()}
+        legacy_limit=PAGE_BYTES-2000
+        cached=(snap,sizes,{kind:_page_offsets(values,PAGE_ROWS,legacy_limit)
+                            for kind,values in sizes.items() if max(values,default=0)+2<=legacy_limit})
         with _READ_LOCK:
             _READ_CACHE[key]=cached
             while len(_READ_CACHE)>2:_READ_CACHE.popitem(last=False)
-    snap,offsets=cached
+    snap,sizes,default_boundaries=cached
     for bound in [{'path':snap['source_file'],'sha256':snap['source_sha256']},*snap.get('additional_sources',[])]:
         p=core.no_links(folder/bound['path']);p.relative_to(folder)
         if core.digest(p)!=bound['sha256']:raise ValueError('snapshot_source_changed')
-    return snap,offsets
+    return snap,sizes,default_boundaries
 
 
 def reference(row):
@@ -82,7 +90,8 @@ def _persist(task,session,stage,collections,source,additional_sources=None):
     core.write(path,snapshot)
     entry={'snapshot_id':sid,'path':str(path.relative_to(folder)),'file_sha256':core.digest(path),
            'counts':{k:len(v) for k,v in collections.items()},'stage':stage,
-           'queries':[{'tool':'get_mechanism_task','arguments':{'task_id':task['task_id'],'snapshot_cursor':sid+':'+k+':0'}}
+           'queries':[{'tool':'get_mechanism_task','arguments':{'task_id':task['task_id'],'snapshot_cursor':sid+':'+k+':0',
+                       **({'snapshot_page_size':RECOMMENDED_PAGE_ROWS} if len(v)>PAGE_ROWS or page_bytes(v)>PAGE_BYTES-2000 else {})}}
                       for k,v in collections.items() if v],
            'plan_token':task.get('plan_token') if stage=='plan' else None}
     task['assembly_'+stage+'_snapshot']=entry
@@ -92,7 +101,7 @@ def _persist(task,session,stage,collections,source,additional_sources=None):
 def publish_prepare(task,session):
     survey=session.connection_survey;review=task.get('connection_review') or {};assessment=task.get('assembly_assessment') or {}
     readonly=review.get('write_scope_allowed') is False
-    source=session.folder/('只读结构完整原生检查.json' if readonly else '通用配合原生调查.json')
+    source=session.folder/'只读结构完整原生检查.json' if readonly else getattr(session,'connection_survey_path',session.folder/'通用配合原生调查.json')
     statuses={c['component_id']:c for c in assessment.get('components',[])}
     components=[];geometry=[]
     for c in survey.get('components',[]):
@@ -115,7 +124,9 @@ def publish_prepare(task,session):
             if (analytic.get('model_id')!=session.model or analytic.get('reference_state_signature')!=survey.get('reference_state_signature')
                     or len(analytic.get('rows',[]))!=metadata.get('row_count')
                     or len(analytic['rows'])>20000):raise ValueError('native_geometry_binding_changed')
-            saved=session.folder/'原生批量几何观察.json';core.write(saved,analytic);additional.append(saved)
+            number=len(task.get('connection_batch_history',[]))+1
+            saved=session.folder/('原生批量几何观察.json' if number==1 else '原生批量几何观察-第'+str(number)+'批.json')
+            core.write(saved,analytic);additional.append(saved)
             # Raw persistent references remain only in the original native survey.
             geometry=[{**r,'collection':'analytic_faces'} for r in analytic['rows']]
             geometry += [{'instance':c['instance'],'component_id':c['component_id'],'collection':'completion_planes',
@@ -197,6 +208,10 @@ def publish_plan(task,session):
             'value_unit':'m' if a.get('kind')=='distance' else 'native_parameter'})
     groups=[{'name':g.get('name'),'anchor':name(g.get('anchor')),'member':name(member)}
             for g in p.get('rigid_groups',[]) for member in g.get('members',[])]
+    groups.extend({'name':g['name'],'kind':'shared_material_axis','axis_component':name(g['axis_component']),
+                   'member':name(m['component']),'axial':m['axial'],'rotation':m['rotation'],
+                   'axis_global':g['axis_global'],'reference_point_global_m':g['reference_point_global_m']}
+                  for g in p.get('coaxial_groups',[]) for m in g['members'])
     # The full native plan remains in the task record and is hashed by this source.
     path=session.folder/('方案复核原文-'+task['plan_token']+'.json');core.write(path,p)
     entry=_persist(task,session,'plan',{'goals':goals,'actions':actions,'groups':groups,
@@ -215,34 +230,57 @@ def publish_plan(task,session):
         'all_or_restore_import_checkpoint':p.get('all_or_restore_import_checkpoint'),
         'omitted_native_feature_ids':p.get('omitted_native_feature_ids'),
         'scope':p.get('scope'),'finish_policy':p.get('finish_policy'),
-        'group_binding_count':len(p.get('group_bindings',[])),'pattern_scope_review_count':len(p.get('pattern_scope_reviews',[])),
+        'group_binding_count':len(p.get('group_bindings',[])),'coaxial_group_count':len(p.get('coaxial_groups',[])),
+        'pattern_scope_review_count':len(p.get('pattern_scope_reviews',[])),
         'mechanical_intent_proven':False,'execution_authorized':False,
         'instruction':'按全部非空方案复核集合解释目标、每项新增与固定变化、完整组成员及试验范围，集中取得具体确认；一次令牌只用于这一方案。页尾只代表当前集合，不代替其他集合。'}
 
 
-def page(task,cursor,owner_available=False):
-    match=re.fullmatch(r'([a-f0-9]{64}):('+('|'.join(KINDS))+r'):([0-9]{1,5})',cursor or '')
+def page(task,cursor,owner_available=False,page_size=None):
+    match=re.fullmatch(r'([a-f0-9]{64}):('+('|'.join(KINDS))+r'):([0-9]{1,5})(?::([1-9][0-9]{0,2}))?',cursor or '')
     if not match:raise core.StopBatch('CONNECTION_INTENT_INVALID','装配快照游标格式错误；未查询CAD。')
     sid,kind,offset=match[1],match[2],int(match[3]);folder=core.no_links(Path(task['directory']))
+    cursor_size=int(match[4]) if match[4] else None
+    if ((page_size is not None and (type(page_size) is not int or not 1<=page_size<=100))
+            or (cursor_size is not None and (cursor_size>100 or page_size not in (None,cursor_size)))
+            or (cursor_size is None and offset and page_size is not None)):
+        raise core.StopBatch('CONNECTION_INTENT_INVALID','页大小在集合首页选择（1至100），后续使用原样返回的游标。')
+    page_size=cursor_size if cursor_size is not None else page_size
+    byte_limit=EXPANDED_PAGE_BYTES if page_size is not None else PAGE_BYTES
     entries=[task.get('assembly_'+stage+'_snapshot') or {} for stage in ('prepare','plan')]
+    for batch in task.get('connection_batch_history',[]):entries.extend(batch['snapshots'])
     entry=next((e for e in entries if e.get('snapshot_id')==sid),None)
     if not entry:raise core.StopBatch('CONNECTION_INTENT_INVALID','游标不属于本任务当前登记的装配快照。')
     try:
         path=core.no_links(folder/entry['path']);path.relative_to(folder)
-        snap,boundaries=_read_snapshot(path,entry,task,folder)
+        snap,sizes,default_boundaries=_read_snapshot(path,entry,task,folder)
         rows=snap['collections'][kind]
         if offset<0 or offset>=len(rows):raise ValueError('snapshot_offset_out_of_range')
         # Reproduce variable byte-budget page boundaries, rejecting offsets that
         # could skip rows or turn a shortened page into a self-referencing cursor.
-        if offset not in boundaries[kind][:-1]:raise ValueError('snapshot_offset_not_page_boundary')
-        end=boundaries[kind][boundaries[kind].index(offset)+1]
+        boundaries=default_boundaries.get(kind) if page_size is None else _page_offsets(sizes[kind],page_size,byte_limit-700)
+        if boundaries is None:
+            raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','该集合有单行超出旧分页预算，用较大页重新从集合首行读取。',
+                {'snapshot_cursor':sid+':'+kind+':0','snapshot_page_size':RECOMMENDED_PAGE_ROWS,'native_calls':False})
+        if offset not in boundaries[:-1]:raise ValueError('snapshot_offset_not_page_boundary')
+        end=boundaries[boundaries.index(offset)+1]
+        next_cursor=sid+':'+kind+':'+str(end) if end<len(rows) else None
+        current=owner_available and snap['stage']=='plan' and task.get('phase')=='awaiting_confirmation' and task.get('plan_token')==entry.get('plan_token') and not task.get('execution_consumed') and not task.get('plan_token_revoked')
+        if page_size is not None:
+            result={'task_id':task['task_id'],'snapshot_page':{'snapshot_id':sid,'stage':snap['stage'],'collection':kind,
+                'rows':copy.deepcopy(rows[offset:end]),'range_start':offset,'range_end_exclusive':end,'total_count':len(rows),
+                'next_cursor':next_cursor+':'+str(page_size) if next_cursor else None,'requested_page_size':page_size,
+                'collection_suffix_complete':end==len(rows),'all_collections_read':False,'native_calls':False,'write_dispatched':False,'plan_current':current,
+                'observation_scope':snap['scope']}}
+            if page_bytes(result)>byte_limit:raise ValueError('snapshot_page_envelope_over_budget')
+            return result
         result={'task_id':task['task_id'],'snapshot_page':{'snapshot_id':sid,'model_id':snap['model_id'],'stage':snap['stage'],'collection':kind,
             'rows':rows[offset:end],'range_start':offset,'range_end_exclusive':end,'total_count':len(rows),
-            'next_cursor':sid+':'+kind+':'+str(end) if end<len(rows) else None,
+            'next_cursor':next_cursor,
             'collection_suffix_complete':end==len(rows),'all_collections_read':False,
             'read_tracking':'not_tracked_stateless_page','all_collections_read_is_completion_claim':False,
             'other_collection_counts':entry['counts'],'native_calls':False,'write_dispatched':False,
-            'observation_scope':snap['scope'],'plan_current':owner_available and snap['stage']=='plan' and task.get('phase')=='awaiting_confirmation' and task.get('plan_token')==entry.get('plan_token') and not task.get('execution_consumed') and not task.get('plan_token_revoked')},
+            'observation_scope':snap['scope'],'plan_current':current},
             'instruction':'只读已保存快照；累计前页并保留其他集合待办。末页不表示所有集合读完、原生状态当前有效或已获得执行授权。'}
         if page_bytes(result)>PAGE_BYTES:raise ValueError('snapshot_page_envelope_over_budget')
         return copy.deepcopy(result)
@@ -257,6 +295,8 @@ def summary(task):
           'connection_status','task_owner_available','current_assembly_observation','validation_conclusions','orphan_review')
     result={k:task[k] for k in keys if k in task}
     result['validation_conclusions']=conclusions(task)
+    if task.get('connection_batch_history'):
+        result['previously_verified_batch_count']=len(task['connection_batch_history'])
     for key in ('error','previous_failure'):
         if isinstance(result.get(key),dict):
             result[key]={k:result[key][k] for k in ('code','message','assertion','restoration_status','native_unknown','retry_write_allowed') if k in result[key]}

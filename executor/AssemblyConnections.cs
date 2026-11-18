@@ -411,13 +411,39 @@ public partial class Cad {
         // Capture all poses in the caller before checking known mate errors.
         return accepted;
     }
+    string ReadBlockedPoseWitness(UserModel model,IModelDoc2 doc,out string reason) {
+        var documents=(Sw.GetDocuments() as object[]??new object[0]).Cast<IModelDoc2>().ToArray();
+        var paths=documents.Select(d=>d.GetPathName()).ToArray();
+        if(paths.Length!=model.Files.Length||!new HashSet<string>(paths,StringComparer.OrdinalIgnoreCase).SetEquals(model.Files)){
+            reason="document_inventory_unconfirmed";return null;
+        }
+        var studies=StudyStates(doc);
+        // Restrict the shortcut to the flat assembly's model tab and empty
+        // animation timelines. A visible zero clock alone proves no cache.
+        if(studies.Any(s=>s.active||s.type!=1||Math.Abs(s.time_s)>1e-8||s.duration_s>1e-8)){
+            reason="history_or_active_study_present";return null;
+        }
+        reason="captured";
+        return Json.Serialize(new{documents=documents.OrderBy(d=>d.GetPathName(),StringComparer.OrdinalIgnoreCase)
+            .Select(d=>new{path=d.GetPathName(),configuration=d.ConfigurationManager.ActiveConfiguration.Name,
+                part_dirty=d.GetPathName().Equals(model.Path,StringComparison.OrdinalIgnoreCase)?(bool?)null:d.GetSaveFlag()}).ToArray(),
+            hashes=model.Files.Select(FileHash).ToArray(),studies=studies.OrderBy(s=>s.name,StringComparer.Ordinal).ToArray(),
+            mate_references=ProbeWorkingState.MateIdentity(doc),
+            references=UserComponents(doc).Select(c=>new{instance=c.Name2,configuration=c.ReferencedConfiguration}).ToArray()});
+    }
+
+    static bool ExactUnchangedProbePoses(Dictionary<string,double[]> before,Dictionary<string,double[]> observed) {
+        return before.Count==observed.Count&&before.All(p=>observed.ContainsKey(p.Key)&&p.Value.SequenceEqual(observed[p.Key]));
+    }
+
     public object ProbeAssemblyConnectionPose(string id,string componentId,string targetJson,string checkpointId,string probeId,int goalIndex=-1,bool allowedTrial=false) {
         RequireCompletedConnectionBatches(id);
         if(!System.Text.RegularExpressions.Regex.IsMatch(probeId,"^[a-f0-9]{32}$"))throw new CadFault("CONNECTION_REFERENCE_INVALID","试验ID无效。");
         var timing=new OperationTiming("connection_probe_native_body_before_artifact_write_and_transport");timing.Start("parse_model_and_target");
         var m=GetUserModel(id);string requestHash=ConnectionRequestFingerprint.Hash(targetJson);var target=Json.Deserialize<double[]>(targetJson);string path=Path.Combine(Root,"runs","connection-probes",probeId+".json");Directory.CreateDirectory(Path.GetDirectoryName(path));
         Dictionary<string,double[]> before=null,after=null,restored=null;bool accepted=false,undoAccepted=false;string parameters=null;Dictionary<string,bool> fixedStates=null;ConnectionInternalWitness internalWitness=null;Dictionary<string,string> fixedParents=null;
-        bool touched=false,needsCheckpoint=false,undoAttempted=false,checkpointPerTrial=false,angularDriver=false;object postRestoreBatch=null;object moveObservation=null,undoObservation=null;Dictionary<string,object> driver=null;int[] originalIds=null;int? temporaryFeature=null;
+        bool touched=false,needsCheckpoint=false,undoAttempted=false,checkpointPerTrial=false,angularDriver=false,blockedPoseWitnessVerified=false;object postRestoreBatch=null;object moveObservation=null,undoObservation=null;Dictionary<string,object> driver=null;int[] originalIds=null;int? temporaryFeature=null;
+        string blockedPoseReason="not_a_flat_forbidden_pose_probe";bool? assemblyDirtyBefore=null,assemblyDirtyAfter=null;
         List<Dictionary<string,object>> goals;
         if(connectionTrialGoals.TryGetValue(id,out goals)&&goalIndex>=0&&goalIndex<goals.Count) {
             var goal=goals[goalIndex];object raw;
@@ -441,6 +467,11 @@ public partial class Cad {
                 if(PoseValidation.TranslationDistance(initial,target)>.005||PoseValidation.RotationDistance(initial,target)>Math.PI/180)throw new CadFault("CONNECTION_SCOPE_UNSUPPORTED","试验超出5mm/1度封顶，未派发移动。");
                 timing.Start("initial_mates_parameters_and_fixed_states");originalIds=EGAllMates(doc).Select(f=>f.GetID()).ToArray();parameters=CompletionOriginalParameters(doc,originalIds);fixedStates=UserComponents(doc).ToDictionary(c=>GTComponentId(doc,c),c=>c.IsFixed());
                 var hierarchy=ConnectionHierarchyForModel(m,doc);if(hierarchy!=null){internalWitness=ConnectionInternalAssemblyWitness(m,doc);fixedParents=hierarchy.ToDictionary(v=>v.Key,v=>v.Value.Parent);}
+                string blockedPoseWitness=null;
+                if(checkpointPerTrial&&!allowedTrial&&driver==null&&internalWitness==null&&UserComponents(doc).All(c=>!c.IsSuppressed()&&!c.IsVirtual&&c.GetModelDoc2() is IPartDoc)) {
+                    blockedPoseWitness=ReadBlockedPoseWitness(m,doc,out blockedPoseReason);
+                    assemblyDirtyBefore=doc.GetSaveFlag();
+                }
                 Progress(activeJobId,"connection_native_pose_trial",0,0,null);
                 timing.Start("native_trial_move_and_rebuild");
                 if(driver!=null) {
@@ -473,7 +504,20 @@ public partial class Cad {
                 timing.Start("pre_restore_observations_and_scope_exit");bool unchanged=before.Count==after.Count&&before.All(v=>after.ContainsKey(v.Key)&&PoseValidation.Matches(v.Value,after[v.Key]));
                 Progress(activeJobId,"connection_verify_trial_restore",0,0,null);
                 if(driver==null&&!checkpointPerTrial&&!unchanged){undoAttempted=true;undoAccepted=ConnectionMove(doc,moving,initial,out undoObservation);}
-                restored=ConnectionPoses(doc);needsCheckpoint=checkpointPerTrial||driver!=null||before.Count!=restored.Count||!before.All(v=>restored.ContainsKey(v.Key)&&PoseValidation.Matches(v.Value,restored[v.Key]));
+                restored=ConnectionPoses(doc);
+                if(blockedPoseWitness!=null) {
+                    assemblyDirtyAfter=doc.GetSaveFlag();
+                    blockedPoseReason="observed_pose_changed";
+                    if(ExactUnchangedProbePoses(before,after)&&ExactUnchangedProbePoses(before,restored)) {
+                        string afterWitness=ReadBlockedPoseWitness(m,doc,out blockedPoseReason);
+                        // The model-tab solve can mark the isolated assembly dirty even for
+                        // an exact projection onto its start. No save is performed here.
+                        // The finish path restores a saved checkpoint before delivery.
+                        blockedPoseWitnessVerified=blockedPoseWitness==afterWitness&&!(assemblyDirtyBefore==true&&assemblyDirtyAfter==false);
+                        if(afterWitness!=null)blockedPoseReason=blockedPoseWitnessVerified?"scope_and_pose_verified_unchanged":"scope_or_save_observation_changed";
+                    }
+                }
+                needsCheckpoint=(checkpointPerTrial&&!blockedPoseWitnessVerified)||driver!=null||before.Count!=restored.Count||!before.All(v=>restored.ContainsKey(v.Key)&&PoseValidation.Matches(v.Value,restored[v.Key]));
                 RequireMatesHealthy(doc);
                 if(parameters!=CompletionOriginalParameters(doc,originalIds)||UserComponents(doc).Any(c=>c.IsFixed()!=fixedStates[GTComponentId(doc,c)]))throw new CadFault("CONNECTION_CREATE_FAILED","试验反向恢复改变了配合参数或固定状态。");
             }
@@ -499,7 +543,11 @@ public partial class Cad {
             timing.Finish();var evidence=new{native_timings=timing.Export(),post_restore_native_batch=postRestoreBatch,model_id=id,component_id=componentId,probe_id=probeId,request_target_sha256=requestHash,target=target,before=before,after=after,restored=restored,
                 fixed_states=fixedStates,fixed_reference_parents=fixedParents,internal_subassembly_state_unchanged=true,native_trial_return=accepted,native_set_transform_return=driver==null?(bool?)accepted:null,
                 native_undo_attempted=undoAttempted,native_undo_return=undoAttempted?(bool?)undoAccepted:null,checkpoint_fallback_used=driver==null&&!checkpointPerTrial&&needsCheckpoint,
-                per_trial_checkpoint_required=checkpointPerTrial,solver_state_restoration=checkpointPerTrial?"saved_result_closed_reopened_and_verified":"pose_undo_or_verified_checkpoint",
+                per_trial_checkpoint_required=checkpointPerTrial&&!blockedPoseWitnessVerified,
+                blocked_probe_exact_no_change_verified=blockedPoseWitnessVerified,
+                blocked_probe_restore_decision=new{reason=blockedPoseReason,assembly_dirty_before=assemblyDirtyBefore,assembly_dirty_after=assemblyDirtyAfter,
+                    isolated_assembly_saved_during_probe=false},
+                solver_state_restoration=blockedPoseWitnessVerified?"verified_unchanged_flat_pose_probe":checkpointPerTrial?"saved_result_closed_reopened_and_verified":"pose_undo_or_verified_checkpoint",
                 checkpoint_restore_used=needsCheckpoint,temporary_trial_feature_id=temporaryFeature,temporary_trial_feature_removed=driver==null?(bool?)null:true,
                 temporary_trial_feature_status=driver==null?"not_used":"removed_and_checkpoint_verified",
                 native_backend=driver!=null?(angularDriver?"temporary_native_angle_constraint_solve_and_result_checkpoint_restore":"temporary_native_distance_constraint_solve_and_result_checkpoint_restore"):"SetTransformAndSolve3_then_rebuild",

@@ -39,16 +39,49 @@ class MechanismLoopTests(unittest.TestCase):
 
     def test_locking_primary_input_always_refused(self):
         s,goals,p=fixture();goals.append({'component_a':'drive','component_b':'frame','kind':'rigid'})
-        with self.assertRaisesRegex(loop.LoopReviewError,'primary_input_locked'):
+        with self.assertRaisesRegex(loop.LoopReviewError,'primary_input_locked') as raised:
             loop.review(s,goals,loop.ideal_graph(s,goals).matrix,p,['output'])
+        evidence=raised.exception.diagnostics
+        self.assertEqual(evidence['input_rank'],6)
+        self.assertEqual(evidence['conflict_witness']['closing_goal']['instance_a'],'drive')
+        self.assertIsNone(evidence['alternative_joint_to_review'])
 
     def test_missing_declared_constraint_not_excused_as_coupling(self):
         s,goals,p=fixture();matrix=loop.ideal_graph(s,[g for i,g in enumerate(goals) if i!=2]).matrix
-        with self.assertRaisesRegex(loop.LoopReviewError,'targets_not_fulfilled'):loop.review(s,goals,matrix,p,['output'])
+        with self.assertRaisesRegex(loop.LoopReviewError,'targets_not_fulfilled') as raised:
+            loop.review(s,goals,matrix,p,['output'])
+        evidence=raised.exception.diagnostics
+        self.assertGreater(evidence['missing_constraint_rank'],0)
+        self.assertTrue(any(row['goal_index']==2 and row['instance_a']=='output' and row['witness_twists'] for row in evidence['affected_goals']))
 
     def test_excess_constraints_not_excused_as_coupling(self):
         s,goals,p=fixture();matrix=loop.ideal_graph(s,goals+[{'component_a':'drive','component_b':'frame','kind':'rigid'}]).matrix
-        with self.assertRaisesRegex(loop.LoopReviewError,'exceed_declared_targets'):loop.review(s,goals,matrix,p,['output'])
+        with self.assertRaisesRegex(loop.LoopReviewError,'exceed_declared_targets') as raised:
+            loop.review(s,goals,matrix,p,['output'])
+        evidence=raised.exception.diagnostics
+        self.assertTrue(any(r['goal_index']==0 and r['required_projected_rank']==5 and r['planned_projected_rank']==6 for r in evidence['affected_goals']))
+
+    def test_wrong_primary_returns_a_named_compatible_candidate(self):
+        s,goals,p=fixture();matrix=loop.ideal_graph(s,goals).matrix
+        with self.assertRaisesRegex(loop.LoopReviewError,'primary_goal_not_unique') as raised:
+            loop.review(s,goals,matrix,{**p,'component_a':'output'},['output'])
+        evidence=raised.exception.diagnostics
+        self.assertEqual(evidence['matching_goal_count'],0)
+        self.assertEqual(evidence['recommended_primary']['instance_a'],'drive')
+        self.assertEqual(evidence['recommended_primary']['instance_b'],'frame')
+        self.assertEqual(evidence['recommended_primary']['projected_rank'],5)
+
+    def test_closing_revolute_suggests_reviewing_a_proven_axial_release(self):
+        s,goals,p=fixture()
+        goals.append({'component_a':'brace','component_b':'frame','kind':'revolute',
+                      'axis_global':[0,0,1],'reference_point_global_m':[0,0,0],
+                      'source':'current_native_coaxial_geometry_not_motion_proof'})
+        with self.assertRaisesRegex(loop.LoopReviewError,'primary_input_locked') as raised:
+            loop.review(s,goals,loop.ideal_graph(s,goals).matrix,p,['output'])
+        advice=raised.exception.diagnostics['alternative_joint_to_review']
+        self.assertEqual((advice['goal_index'],advice['review_kind'],advice['projected_input_rank']),(4,'cylindrical',5))
+        self.assertFalse(advice['automatic_change'] or advice['native_motion_verified'])
+        self.assertEqual(goals[-1]['kind'],'revolute')
 
     def test_unknown_native_constraint_is_not_treated_as_absent(self):
         s,goals,p=fixture();s['mates']=[{'native_feature_id':3,'suppressed':False,'error':0,'warning':False,'type':999,'entities':[]}]

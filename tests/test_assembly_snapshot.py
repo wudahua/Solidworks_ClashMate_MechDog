@@ -13,6 +13,35 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_progress_only_stays_small_and_does_not_reconcile(self):
+        import time
+        import motion_server
+        tid=self.task['task_id'];owner='owner'
+        self.task.update(server_instance_id=owner,busy=True,native_stage='capture_solver_poses',stage_started_at=time.time()-2,
+                         assembly_brief={'large':'x'*10000},progress={'operation':'run_user_study','operation_started_at':time.time()-3,
+                             'stage':'capture_solver_poses','native_progress_observed':True,'completed_frames':4,'total_frames':41})
+        self.session.current_call_for_observation={'operation':'run_user_study','started':time.time()-3}
+        engine=MotionTaskEngine(ROOT,self.folder/'progress-work',self.folder/'progress-rt')
+        engine.server_instance_id=owner;engine.tasks[tid]=self.task;engine.sessions[tid]=self.session
+        try:
+            with patch.object(motion_server,'_task_engine',engine),patch('sw_mcp.conversation.task_engine.TaskEngine.get',side_effect=AssertionError('default get called')):
+                wire=asyncio.run(motion_server.mcp.call_tool('get_mechanism_task',{'task_id':tid,'progress_only':True}))
+                self.assertFalse(wire.is_error)
+                self.assertLess(len(snapshots.encoded(wire.structured_content)),500)
+                view=wire.structured_content['result']
+                self.assertEqual((view['stage'],view['completed_frames'],view['total_frames']),('capture_solver_poses',4,41))
+                self.assertGreaterEqual(view['elapsed_s'],3)
+                self.assertTrue(view['owner_available'])
+                self.assertNotIn('assembly_brief',view)
+                self.task['server_instance_id']='retired-owner'
+                stale=asyncio.run(motion_server.mcp.call_tool('get_mechanism_task',{'task_id':tid,'progress_only':True})).structured_content['result']
+                self.assertFalse(stale['owner_available'] or stale['busy'] or stale['native_progress_observed'])
+                self.assertTrue(self.task['busy'])
+                invalid=asyncio.run(motion_server.mcp.call_tool('get_mechanism_task',{'task_id':tid,'progress_only':True,'summary_only':True}))
+                self.assertTrue(invalid.is_error)
+            self.session.bridge.request.assert_not_called()
+        finally:engine.shutdown()
+
     def setUp(self):
         self.folder=ROOT/'runs/assembly-snapshot-unit'/uuid.uuid4().hex[:10];self.session_dir=self.folder/'session';self.session_dir.mkdir(parents=True)
         self.survey=survey([mate(1,'moving','body','cylindrical_axis')]);self.survey['model_id']='user_'+'c'*32
@@ -67,6 +96,32 @@ class SnapshotTests(unittest.TestCase):
         entry=self.publish();self.assertGreater(entry['counts']['geometry'],77)
         self.collect(entry,'geometry');self.collect(entry,'components')
         self.assertEqual(set(q['arguments']['snapshot_cursor'].split(':')[1] for q in entry['queries']),{k for k,v in entry['counts'].items() if v})
+
+    def test_expanded_pages_cover_the_same_rows_and_bind_cursor_size(self):
+        c=self.survey['components'][0]
+        c['planes']=[{'axis_global':[0,0,1],'reference_point_global_m':[0,0,i],
+                     'native_reference':'参考'+str(i)} for i in range(110)]
+        core.write(self.session_dir/'通用配合原生调查.json',self.survey)
+        entry=self.publish()
+        query=next(q['arguments'] for q in entry['queries'] if ':geometry:' in q['arguments']['snapshot_cursor'])
+        self.assertEqual(query['snapshot_page_size'],50)
+        cursor,size=query['snapshot_cursor'],100
+        expected=self.collect(entry,'geometry')
+        rows=[]
+        while cursor:
+            result=snapshots.page(self.task,cursor,page_size=size)
+            view=result['snapshot_page']
+            self.assertEqual(view['requested_page_size'],100)
+            self.assertEqual(view['range_start'],len(rows))
+            self.assertLessEqual(snapshots.page_bytes(result),snapshots.EXPANDED_PAGE_BYTES)
+            self.assertFalse(view['all_collections_read'] or view['native_calls'])
+            rows.extend(view['rows'])
+            cursor,size=view['next_cursor'],None
+            if cursor:
+                self.assertTrue(cursor.endswith(':100'))
+                with self.assertRaises(core.StopBatch):snapshots.page(self.task,cursor,page_size=50)
+        self.assertEqual(rows,expected)
+        self.session.bridge.request.assert_not_called()
     def test_cached_page_boundaries_are_reused_but_evidence_hashes_still_checked(self):
         c=self.survey['components'][0];c['planes']=[{'axis_global':[0,0,1],'reference_point_global_m':[0,0,i]} for i in range(55)]
         core.write(self.session_dir/'通用配合原生调查.json',self.survey);entry=self.publish()

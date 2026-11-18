@@ -363,6 +363,9 @@ public partial class Cad {
         activeJobId=p.ContainsKey("job_id")?(string)p["job_id"]:null;activeRequestId=request.ContainsKey("id")?request["id"] as string:null;
         switch(op) {
             case "_survey_connection_layers": return SurveyConnectionLayers((string)p["model_id"]);
+            case "_aperture_vertices": return ApertureVertices((string)p["model_id"],Json.Deserialize<string[]>((string)p["components_json"]));
+            case "_run_aperture_cycle": return RunApertureCycle((string)p["model_id"],(string)p["driver_id"],(string)p["reference_id"],(string)p["entity_id"],Convert.ToBoolean(p["reverse"]),Convert.ToDouble(p["stroke_mm"]),Convert.ToInt32(p["frame_step"]),Convert.ToBoolean(p["candidate"]),(string)p["run_id"],(string)p["job_id"]);
+            case "_finish_aperture_cycle": return FinishApertureCycle((string)p["model_id"],(string)p["study"],Convert.ToBoolean(p["keep"]));
             case "_select_connection_layer": return SelectConnectionLayer((string)p["model_id"],(string)p["instance"]);
             case "_verify_connection_layer": return VerifyConnectionLayer((string)p["model_id"],p.ContainsKey("rebuild_root")&&Convert.ToBoolean(p["rebuild_root"]));
             case "_survey_assembly_connections": return SurveyAssemblyConnections((string)p["model_id"]);

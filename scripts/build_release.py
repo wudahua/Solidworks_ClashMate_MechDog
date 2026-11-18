@@ -8,13 +8,13 @@ from pathlib import Path
 from verify_release import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.3-alpha.51"
+VERSION = "0.4.3-alpha.52"
 
 
 def build(candidate=False):
     # Keep the installed/CI regression suite identical to the development suite.
     # Explicitly include the driven-loop and initial-placement safety suite.
-    sources = [ROOT/name for name in ("README.md", "CONTRACT.md", "发布说明_v0.4.3-alpha.51.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
+    sources = [ROOT/name for name in ("README.md", "CONTRACT.md", "发布说明_v0.4.3-alpha.52.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", "requirements.txt", "requirements.lock.txt", "motion_server.py", "mcp-config.example.json", "install.ps1", "start.ps1", "upgrade.ps1", "初始化环境.ps1", "启动MCP.ps1", "生成运动示例.ps1")]
     sources += [ROOT/'tests/test_managed_late_response.py',ROOT/'tests/test_managed_feedback.py',ROOT/'tests/test_upgrade_host_runtime.py',ROOT/'tests/test_connection_recommendations.py']
     sources += [ROOT/'tests/test_current_solve_results.py',ROOT/'tests/CurrentSolveResultsTests.cs']
     sources += [ROOT/'tests/test_executor_startup.py',ROOT/'tests/StartupEmptyControlTests.cs']
@@ -23,7 +23,7 @@ def build(candidate=False):
     sources += [ROOT/'tests/test_mate_snapshot.py',ROOT/'tests/MateSnapshotReadTests.cs']
     sources += [ROOT/'tests/test_connection_signature_diff.py',ROOT/'tests/ConnectionSignatureDiffTests.cs']
     sources += [ROOT/'tests'/name for name in ('test_initial_translation.py','test_initial_translation_native_guard.py','InitialTranslationGuardFixture.cs','test_mechanism_loop.py','test_driven_loop_motion.py')]
-    sources += [ROOT/'tests/test_working_stroke.py']
+    sources += [ROOT/'tests/test_working_stroke.py', ROOT/'tests/test_aperture.py']
     sources += [ROOT/'tests/test_feedback_alpha50.py', ROOT/'tests/RawDuplicateEnvironmentFixture.cs']
     sources += [ROOT/'tests/test_feedback_alpha51.py']
     sources += [ROOT/'tests/test_motor_reference_identity.py',ROOT/'tests/MotorReferenceIdentityTests.cs']

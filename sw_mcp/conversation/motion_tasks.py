@@ -20,6 +20,8 @@ def prepare_limits():
             'native_motion_study_solved':False,'saved_pose_model_context_only':True,
             'translation_trial_m':.0001,'rotation_trial_deg':.05,'global_DOF_certified':False},
         'motion':{'maximum_duration_s':5,'minimum_output_fps':5,'maximum_output_fps':120,'maximum_frames':601,
+            'aperture_cycle':{'target_parameter':'plan.target_openings_mm','outputs':4,'maximum_input_travel_mm':20,
+                'duration_s':4,'output_fps':10,'target_semantics':'two_maximum_opposed_gaps_in_initial_gap_order'},
             'working_stroke_validation':{'parameter':'plan.validated_assembly_task_id','requires_exact_kept_verified_flat_mechanism':True,
                 'motion':'linear','maximum_input_travel_mm':20,'maximum_component_translation_mm':50,'maximum_component_rotation_deg':15,
                 'design_full_travel_certified':False,'contact_force_certified':False},**grid},
@@ -310,22 +312,37 @@ class MotionTaskEngine(TaskEngine):
 
     def plan(self,task_id,candidate_id='',moving_component_hint='',reference_component_hint='',initial_state='saved',alignment_mode='strict',
              gear_ratio_numerator=0,gear_ratio_denominator=0,input_shaft_hint='',output_shaft_hint='',input_gear_hint='',output_gear_hint='',stationary_component_hints=None,assembly_intent=None,connection_intent=None,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint='',assembly_sequence='',auto_plan=False,group_seeds=None,
-             verification_mode='independent_joint_trials',output_component_hints=None,initial_translation_limit_mm=.001,validated_assembly_task_id='',mate_changes=None):
+             verification_mode='independent_joint_trials',output_component_hints=None,initial_translation_limit_mm=.001,validated_assembly_task_id='',mate_changes=None,
+             target_openings_mm=None,aperture_output_hints=None,aperture_tip_end='axis_min',coaxial_groups=None,continue_verified_batch=False):
         t=self.tasks[task_id]
+        if target_openings_mm is not None:
+            if (t.get('task_kind')!='motion' or t.get('motion_parameters',{}).get('motion')!='linear' or initial_state!='saved' or
+                validated_assembly_task_id or type(target_openings_mm) is not list or len(target_openings_mm)!=2 or
+                any(type(v) not in (int,float) or not math.isfinite(v) or v<=0 for v in target_openings_mm) or
+                (aperture_output_hints is not None and (type(aperture_output_hints) is not list or len(aperture_output_hints)!=4 or
+                 any(type(h) is not str or not h.strip() for h in aperture_output_hints))) or aperture_tip_end not in {'axis_min','axis_max'}):
+                raise core.StopBatch('CONNECTION_INTENT_INVALID','目标开口需要保存初态的直线运动、两个正的开口上限，以及可选的四个爪部件名称。')
+        elif aperture_output_hints is not None or aperture_tip_end!='axis_min':
+            raise core.StopBatch('CONNECTION_INTENT_INVALID','开口测点参数需要同时给出两个目标开口。')
         if validated_assembly_task_id and (t.get('task_kind')!='motion' or initial_state!='saved'):
             raise core.StopBatch('CONNECTION_INTENT_INVALID','工作行程只能复用已保留整机成果的普通直线motion任务及保存初态，不混用配合写入、齿轮或归零初态。')
         if type(auto_plan) is not bool:raise core.StopBatch('CONNECTION_INTENT_INVALID','auto_plan须为布尔值。')
+        if type(continue_verified_batch) is not bool or (t.get('task_kind')!='assembly_constraints' and (coaxial_groups is not None or continue_verified_batch)):
+            raise core.StopBatch('CONNECTION_INTENT_INVALID','coaxial_groups和continue_verified_batch仅用于assembly_constraints。')
         if t.get('task_kind')=='assembly_constraints':
             if candidate_id or (verification_mode!='driven_loop' and (moving_component_hint or reference_component_hint or alignment_mode!='strict')) or initial_state!='saved' or assembly_intent is not None or stationary_component_hints is not None or gear_ratio_numerator or gear_ratio_denominator or input_shaft_hint or output_shaft_hint or input_gear_hint or output_gear_hint:
                 raise core.StopBatch('CONNECTION_INTENT_INVALID','通用连接目标使用connection_intent，不混用齿轮分组、运动初态或圆边对齐参数。')
-            if assembly_sequence:
-                if mate_changes is not None or connection_intent is not None or rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared' or assembly_scope_hint or auto_plan or group_seeds is not None or verification_mode!='independent_joint_trials' or output_component_hints is not None or initial_translation_limit_mm!=.001:
-                    raise core.StopBatch('CONNECTION_INTENT_INVALID','分层序列操作不混用单层目标或范围，未忽略任何参数。')
+            if assembly_sequence or continue_verified_batch:
+                if mate_changes is not None or connection_intent is not None or rigid_groups is not None or release_fixed_components is not None or coaxial_groups is not None or completion_scope!='declared' or assembly_scope_hint or auto_plan or group_seeds is not None or verification_mode!='independent_joint_trials' or output_component_hints is not None or initial_translation_limit_mm!=.001 or (assembly_sequence and continue_verified_batch):
+                    raise core.StopBatch('CONNECTION_INTENT_INVALID','分层序列或同副本开始下一批需要单独调用，未忽略任何目标。')
+                if continue_verified_batch:
+                    from .connection_task import continue_batch
+                    return continue_batch(self,t)
                 from .assembly_sequence import dispatch
                 return dispatch(self,t,assembly_sequence)
             from .connection_task import propose
             return propose(self,t,connection_intent,rigid_groups,release_fixed_components,completion_scope,assembly_scope_hint,auto_plan,group_seeds=group_seeds,
-                verification_mode=verification_mode,moving_hint=moving_component_hint,reference_hint=reference_component_hint,output_hints=output_component_hints,alignment_mode=alignment_mode,initial_translation_limit_mm=initial_translation_limit_mm,mate_changes=mate_changes)
+                verification_mode=verification_mode,moving_hint=moving_component_hint,reference_hint=reference_component_hint,output_hints=output_component_hints,alignment_mode=alignment_mode,initial_translation_limit_mm=initial_translation_limit_mm,mate_changes=mate_changes,coaxial_groups=coaxial_groups)
         if mate_changes is not None or connection_intent is not None or rigid_groups is not None or release_fixed_components is not None or completion_scope!='declared' or assembly_scope_hint or assembly_sequence or auto_plan or group_seeds is not None or verification_mode!='independent_joint_trials' or output_component_hints is not None or initial_translation_limit_mm!=.001:raise core.StopBatch('CONNECTION_INTENT_INVALID','通用连接及completion_scope参数仅用于assembly_constraints，不静默忽略。')
         if t.get('task_kind')=='external_gear_pair':
             from .external_gear_task import propose
@@ -362,6 +379,10 @@ class MotionTaskEngine(TaskEngine):
             if s.call('_circular_reference_state',model_id=s.model)['signature']!=s.motion_signature:
                 raise core.StopBatch('MOTION_PROPOSAL_STALE')
             mechanism=None
+            aperture_card=None
+            if target_openings_mm is not None:
+                from . import aperture
+                aperture_card=aperture.bind(s,s.motion_candidates[found[0]],target_openings_mm,aperture_output_hints,aperture_tip_end)
             if validated_assembly_task_id:
                 from . import working_stroke
                 mechanism=working_stroke.bind(self,t,s,validated_assembly_task_id,s.motion_candidates[found[0]])
@@ -376,6 +397,11 @@ class MotionTaskEngine(TaskEngine):
             if mechanism:
                 t['proposal'].update(working_stroke_validation=mechanism,scope='sampled_declared_mechanism_working_stroke')
                 t['next_action']['instruction']='说明复用的整机成果、全部目标、主输入方向与行程及硬位姿预算；这不是设计全行程或抓取力认证。明确确认后执行，失败不扩大范围或重算。'
+            if aperture_card:
+                for field in ('speed','speed_unit','duration_s','output_fps','minimum_travel','expected_travel'):
+                    t['proposal'].pop(field,None)
+                t['proposal'].update(aperture_validation=aperture_card,scope=aperture_card['scope'],drive_profile='linear_displacement_open_close_open')
+                t['next_action']['instruction']='解释两组测点、开口上限、主输入闭合方向和最多20毫米试算范围。取得确认后分段试算并扫描干涉，通过才保存41帧开合算例和测量表。'
         return self._submit(t,'planning',operation)
 
     def execute(self,task_id,plan_token,confirmed=False,scope_confirmed=False,alignment_confirmed=False):
@@ -403,6 +429,17 @@ class MotionTaskEngine(TaskEngine):
                 working_stroke.load(s,mechanism)
             if s.call('_circular_reference_state',model_id=s.model)['signature']!=s.motion_signature:
                 raise core.StopBatch('MOTION_PROPOSAL_STALE')
+            if t['proposal'].get('aperture_validation'):
+                from . import aperture
+                s.import_restored=False
+                result=aperture.run(s,t['proposal'],r['drive'],r['reference'])
+                passed=result['declared_scope_passed']
+                s.temporary_motion_created=passed
+                t.update(phase='verified' if passed else 'verification_failed',verification=result,
+                    next_action={'tool':'finish_mechanism_task','arguments':{'task_id':task_id},
+                        'instruction':'说明开口、干涉及测量表，用户明确要保留时使用keep_result。' if passed else
+                        '请报告对应零件对、行程及最后通过采样点，再按默认恢复收尾。'})
+                return
             study='Dialogue_'+uuid.uuid4().hex[:10];drive=r['drive'];ref=r['reference']
             for name in t['proposal']['reset_studies_before_drive']:
                 reset=s.call('reset_study_time',model_id=s.model,study=name,allow_recalculate=True)
@@ -485,7 +522,15 @@ class MotionTaskEngine(TaskEngine):
                     whole_assembly_declared_targets_passed=passed,whole_travel_certified=False,contact_or_force_validated=False)
         return self._submit(t,'running',operation)
 
-    def get(self,task_id='',draft_cursor='',structure_cursor='',snapshot_cursor='',summary_only=False,compact=False):
+    def get(self,task_id='',draft_cursor='',structure_cursor='',snapshot_cursor='',summary_only=False,compact=False,progress_only=False,snapshot_page_size=None):
+        if snapshot_page_size is not None and not snapshot_cursor:
+            raise core.StopBatch('CONNECTION_INTENT_INVALID','snapshot_page_size须与快照游标一起使用。')
+        if progress_only:
+            if any((draft_cursor,structure_cursor,snapshot_cursor,summary_only,compact)) or not re.fullmatch('[a-f0-9]{32}',task_id):
+                raise core.StopBatch('CONNECTION_INTENT_INVALID','进度查询需要有效task_id及单一视图。')
+            with self.lock:
+                if task_id not in self.tasks:raise core.StopBatch('TASK_NOT_IN_CURRENT_SERVER')
+                return task_progress.compact_status(self.tasks[task_id],self.sessions.get(task_id),self.server_instance_id)
         if snapshot_cursor or summary_only:
             if draft_cursor or structure_cursor or (snapshot_cursor and summary_only) or not re.fullmatch('[a-f0-9]{32}',task_id):
                 raise core.StopBatch('CONNECTION_INTENT_INVALID','装配摘要/快照需要task_id，且不混用其他分页或摘要参数。')
@@ -494,10 +539,9 @@ class MotionTaskEngine(TaskEngine):
                 t=self.tasks[task_id]
                 if t.get('task_kind')!='assembly_constraints':raise core.StopBatch('CONNECTION_INTENT_INVALID','装配快照/摘要仅用于assembly_constraints，其他任务使用原get。')
                 from . import assembly_snapshot
-                if snapshot_cursor:return assembly_snapshot.page(t,snapshot_cursor,task_id in self.sessions and t.get('server_instance_id')==self.server_instance_id)
+                if snapshot_cursor:return assembly_snapshot.page(t,snapshot_cursor,task_id in self.sessions and t.get('server_instance_id')==self.server_instance_id,snapshot_page_size)
                 result=assembly_snapshot.summary(t)
                 if task_id in self.sessions:
-                    from . import task_progress
                     result=task_progress.current_view(self.sessions[task_id],result)
                 if task_id not in self.sessions and not t.get('closed'):
                     result['task_owner_available']=False
@@ -562,6 +606,9 @@ class MotionTaskEngine(TaskEngine):
             imported=core.read(s.folder/'导入.json')
             result_path=core.no_links(Path(imported['path']))
             result_path.relative_to(s.runtime.resolve())
+            aperture_result=t.get('proposal',{}).get('aperture_validation')
+            if aperture_result and source_integrity.normalized_hash(t['verification']['saved_assembly_sha256'])!=core.digest(result_path):
+                raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','已验证开合算例的保存文件发生变化，未作为本次成果交付。')
             if getattr(s,'selected_assembly_layer',None):
                 guard=s.call('_verify_connection_layer',model_id=s.model,rebuild_root=True)
                 core.write(s.folder/'保留内部成果总装守卫.json',guard)
@@ -579,5 +626,5 @@ class MotionTaskEngine(TaskEngine):
                 'cleanup_status':'pass' if native.get('normal_zero_exit') is True else 'warning_nonzero_native_exit',
                 'result_assembly_path':str(result_path),
                 'result_assembly_sha256':core.digest(result_path),'includes_test_motion_study':t.get('task_kind')!='assembly_constraints',
-                'result_scope':'verified_declared_basic_joint_small_trials_not_global_DOF_or_full_travel' if t.get('task_kind')=='assembly_constraints' else 'verified_declared_motion_or_concentric_scope_not_whole_mechanism_or_DOF'},integrity)
+                'result_scope':aperture_result['scope'] if aperture_result else 'verified_declared_basic_joint_small_trials_not_global_DOF_or_full_travel' if t.get('task_kind')=='assembly_constraints' else 'verified_declared_motion_or_concentric_scope_not_whole_mechanism_or_DOF'},integrity)
         return self._submit(t,'keeping_result',operation)
