@@ -217,7 +217,7 @@ def rotary_trial_driver(candidates, axis, component_a, component_b):
         'temporary_only':True,'removed_by_verified_result_checkpoint_after_each_trial':True}
 
 
-def plan(survey, intents,whole_assembly=False,driven_loop=None):
+def plan(survey, intents,whole_assembly=False,driven_loop=None,preserved_goals=()):
     if driven_loop is not None and (not isinstance(driven_loop,dict) or set(driven_loop)!={'primary','outputs'} or not whole_assembly):
         raise ValueError('driven_loop_requires_explicit_whole_assembly_profile')
     limit=128 if whole_assembly else 8
@@ -321,6 +321,16 @@ def plan(survey, intents,whole_assembly=False,driven_loop=None):
         if coupled is not None:goals[-1].update(coupled_verification_only=True,coupling_evidence=coupled,supported_target_fulfilment_certified=False)
     if actions and any(g.get('coupled_verification_only') for g in goals):raise ValueError('coupled_verification_cannot_mix_supplements')
     planned=constraint_graph.Graph(survey);planned.matrix.pivots=matrix.pivots.copy()
+    for goal in preserved_goals:
+        a_id,b_id=goal['component_a'],goal['component_b']
+        before=base_graph.relative(a_id,b_id)['rows']
+        after=planned.relative(a_id,b_id)['rows']
+        target=target_rows(goal['kind'],goal['axis_global'],goal['reference_point_global_m'],origin,scale)
+        rank=len(ac.basis(target))
+        if len(ac.basis(before))!=rank or len(ac.basis(after))!=rank or len(ac.basis(target+before+after))!=rank:
+            raise ConnectionPlanningError('proposed_batch_conflicts_with_previously_verified_goal',
+                component_a=a_id,component_b=b_id,declared_kind=goal['kind'],
+                declared_rank=rank,before_rank=len(ac.basis(before)),after_rank=len(ac.basis(after)))
     for index,goal in enumerate(goals if driven_loop is None else []):
         if goal['kind']=='rigid':continue
         effective=planned.relative(goal['component_a'],goal['component_b'])

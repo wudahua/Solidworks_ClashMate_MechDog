@@ -1,5 +1,6 @@
 """Generic basic joints in the existing conversation task lifecycle."""
 import json
+import math
 import uuid
 from . import core,source_integrity,task_execution
 from .task_engine import matching_components,mechanical_choices
@@ -7,18 +8,19 @@ from ..bridge import CadError
 from .. import assembly_connections as joints,connection_trials as trials,connection_recommendations as recommendations,connection_groups,assembly_overview,connection_batches,assembly_hierarchy
 
 
-def discover(s):
+def discover(s, continued_batch=None):
     s.state('reviewing_constraints','正在只读核对配合健康、固定状态及局部运动线索…')
     from . import constraint_inventory
     preflight=getattr(s,'import_preflight',None) or {}
     if constraint_inventory.blockers(preflight):
+        if continued_batch is not None:raise core.StopBatch('CONNECTION_SCOPE_UNSUPPORTED','当前副本不能继续补齐。')
         return constraint_inventory.discover(s,preflight)
     try:
         survey=s.call('_survey_assembly_connections',model_id=s.model)
     except (core.StopBatch,CadError) as error:
         diagnostic=error.diagnostics if isinstance(error.diagnostics,dict) else {}
         details=diagnostic.get('details') or {}
-        if (error.code!='CONNECTION_REFERENCE_INVALID' or getattr(s,'unknown',True)
+        if (continued_batch is not None or error.code!='CONNECTION_REFERENCE_INVALID' or getattr(s,'unknown',True)
                 or not isinstance(details,dict) or details.get('reason')!='native_mate_reference_identity_unavailable'
                 or details.get('write_dispatched') is not False or details.get('signature_complete') is not False):
             raise
@@ -27,8 +29,13 @@ def discover(s):
         core.write(s.folder/'现有配合参考身份未认证.json',details)
         s.state('reviewing_constraints','现有配合参考身份未认证，正在只读报告结构及原生健康；未跳过写入签名门禁。')
         return constraint_inventory.discover(s,preflight,reference_issue=details)
-    s.connection_survey=survey;s.initial_inspection=survey if survey.get('inventory_complete') else s.call('inspect_model',model_id=s.model,detail_level='full')
-    core.write(s.folder/'通用配合原生调查.json',survey)
+    if continued_batch is None:
+        s.initial_inspection=survey if survey.get('inventory_complete') else s.call('inspect_model',model_id=s.model,detail_level='full')
+    else:
+        audit_continuation(s,survey,continued_batch)
+    s.connection_survey=survey
+    s.connection_survey_path=s.folder/('通用配合原生调查.json' if continued_batch is None else '通用配合原生调查-第'+str(continued_batch)+'批.json')
+    core.write(s.connection_survey_path,survey)
     review=joints.review(survey);core.write(s.folder/'通用配合体检.json',review)
     core.write(s.folder/'整装配约束图.json',review.get('assembly_constraint_graph'))
     binding=str(s.folder.parent.absolute())
@@ -96,6 +103,36 @@ def resolve(s,intents,maximum=8):
     return out,None
 
 
+def resolve_coaxial_groups(s,groups):
+    if type(groups) is not list or not 1<=len(groups)<=16:
+        raise core.StopBatch('CONNECTION_INTENT_INVALID','coaxial_groups需要1至16个同轴组。')
+    normalized=[]
+    components=s.connection_survey['components']
+    for group in groups:
+        if (type(group) is not dict or set(group)-{'name','axis_component','members','axis_hint','axis_point_hint_m'}
+                or type(group.get('name')) is not str or not group['name'].strip()
+                or type(group.get('members')) is not list or not 2<=len(group['members'])<=16
+                or any(type(m) is not dict or set(m)!={'component','axial'} or m['axial'] not in ('free','located') for m in group['members'])):
+            raise core.StopBatch('CONNECTION_INTENT_INVALID','同轴组需要名称、轴线载体和至少两个各自声明轴向用途的成员。')
+        members=[dict(m) for m in group['members']]
+        resolved={**group,'members':members}
+        for obj,key in [(resolved,'axis_component'),*((m,'component') for m in members)]:
+            hint=obj.get(key)
+            if type(hint) is not str or not hint.strip():raise core.StopBatch('CONNECTION_INTENT_INVALID','同轴组组件名称不能为空。')
+            matches=matching_components(components,hint,None)
+            if len(matches)!=1:
+                return None,{'needs_mechanical_clarification':True,'group':group['name'],'field':key,'name_hint':hint,
+                    'choices':mechanical_choices(components,hint,None),'write_dispatched':False,'confirmation_token_created':False}
+            obj[key]=matches[0]['component_id']
+        for key in ('axis_hint','axis_point_hint_m'):
+            v=group.get(key)
+            if v is not None and (type(v) is not list or len(v)!=3 or any(type(x) not in (float,int) or not math.isfinite(x) for x in v)
+                    or (key=='axis_hint' and not any(v))):
+                raise core.StopBatch('CONNECTION_INTENT_INVALID','同轴组轴线方向或材料点须为三个有限数，方向不能为零。')
+        normalized.append(resolved)
+    return normalized,None
+
+
 def select_scope(engine,t,row):
     s=engine.sessions[t['task_id']]
     s.root_connection_survey=s.connection_survey
@@ -116,13 +153,83 @@ def select_scope(engine,t,row):
     engine.save(t)
 
 
+def _mate_state(inspection):
+    return {m['native_feature_id']:(m['type'],m['suppressed']) for m in inspection['mates']}
+
+
+def audit_continuation(session,survey,number):
+    from .motion_tasks import pose_snapshot,require_same_poses
+    previous=session.result_inspection
+    def fixed(view):
+        return {c['component_id']:c['fixed_component'] for c in view['components']}
+    if (survey.get('model_id')!=session.model or survey.get('inventory_complete') is not True
+            or fixed(previous)!=fixed(survey) or _mate_state(previous)!=_mate_state(survey)):
+        raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','续批前的模型身份、既有配合或固定状态与已验证成果不一致。')
+    pose=require_same_poses(pose_snapshot(previous['components']),pose_snapshot(survey['components']),'same_copy_verified_batch')
+    core.write(session.folder/('续批原生起点-第'+str(number)+'批.json'),{
+        'model_id':session.model,'previous_checkpoint_id':session.result_checkpoint,'match_pose':pose,
+        'existing_mate_count':len(survey['mates']),'native_mate_and_fixed_inventory_match':True})
+
+
+def can_continue(task,session):
+    proposal=task.get('proposal') or {}
+    return (task.get('phase')=='verified' and not task.get('closed') and not task.get('error')
+            and task.get('verification',{}).get('declared_scope_passed') is True
+            and proposal.get('completion_scope')=='declared' and not proposal.get('fixed_state_changes')
+            and not proposal.get('mate_changes') and not proposal.get('group_bindings')
+            and not any(g.get('coupled_verification_only') for g in proposal.get('goals',[]))
+            and not task.get('assembly_sequence_id') and not getattr(session,'selected_assembly_layer',None)
+            and getattr(session,'result_checkpoint',None) and getattr(session,'result_inspection',None)
+            and not getattr(session,'unknown',True)
+            and not any(c.get('subassembly') or c.get('parent_component_id') for c in session.result_inspection['components'])
+            and len(getattr(session,'preserved_connection_goals',[]))+len(proposal.get('goals',[]))<128)
+
+
+def continue_batch(engine,task):
+    task_id=task['task_id']
+    engine._require_session(task_id)
+    session=engine.sessions[task_id]
+    if not can_continue(task,session):
+        raise core.StopBatch('TASK_NOT_READY_FOR_PLAN','续批需要仍由原会话持有、已通过局部验证的平坦装配副本。')
+
+    def operation():
+        history=task.get('connection_batch_history',[])
+        number=len(history)+1
+        path=session.folder/('已验证局部批次-'+str(number)+'.json')
+        core.write(path,{'model_id':session.model,'proposal':task['proposal'],'verification':task['verification'],
+            'confirmation':task.get('confirmation'),'result_checkpoint_id':session.result_checkpoint,
+            'result_inspection':session.result_inspection})
+        history.append({'batch_number':number,'evidence_path':str(path),'evidence_sha256':core.digest(path),
+            'goal_count':len(task['proposal']['goals']),'verification_passed':True,
+            'snapshots':[task[k] for k in ('assembly_prepare_snapshot','assembly_plan_snapshot') if task.get(k)]})
+        task['connection_batch_history']=history
+        session.preserved_connection_goals=[*getattr(session,'preserved_connection_goals',[]),*task['proposal']['goals']]
+        for key in ('proposal','verification','confirmation','plan_token','assembly_plan_snapshot','assembly_plan_review'):
+            task.pop(key,None)
+        task.update(execution_consumed=False,plan_token_revoked=True)
+        if not source_integrity.review(task,session)['unchanged']:
+            raise core.StopBatch('SOURCE_CHANGED','原文件已变化，未在现有副本开始下一批。')
+        review=discover(session,number+1)
+        if review['connection_review'].get('complete') is not True or review['connection_review'].get('mate_health_issues'):
+            raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','续批体检未通过，保留已验证批次和默认恢复入口。')
+        session.connection_batch_baseline=session.result_inspection
+        publish_review(engine,task,review)
+        task['assembly_brief']['automatic_plan_available']=False
+        task['next_action']={'tool':'plan_mechanism_task','arguments':{'task_id':task_id},
+            'instruction':'已核对上批成果并复用同一CAD副本。AI推荐本批明确连接目标，解释对旧批次的保护；当前批须用新令牌重新确认。'}
+
+    return engine._submit(task,'reviewing_next_connection_batch',operation)
+
+
 def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint='',auto_plan=False,group_seeds=None,
-            verification_mode='independent_joint_trials',moving_hint='',reference_hint='',output_hints=None,alignment_mode='strict',initial_translation_limit_mm=.001,mate_changes=None):
+            verification_mode='independent_joint_trials',moving_hint='',reference_hint='',output_hints=None,alignment_mode='strict',initial_translation_limit_mm=.001,mate_changes=None,coaxial_groups=None):
     if type(auto_plan) is not bool:raise core.StopBatch('CONNECTION_INTENT_INVALID','auto_plan须为布尔值。')
     # A complete explicit whole-machine intent uses the ordinary full planner;
     # auto_plan is not a reason to reject it or force seven public tasks.
-    if auto_plan and completion_scope=='whole_assembly' and intents is not None:
+    if auto_plan and completion_scope=='whole_assembly' and intents is not None and coaxial_groups is None:
         auto_plan=False
+    if coaxial_groups is not None and (auto_plan or group_seeds is not None or assembly_scope_hint):
+        raise core.StopBatch('CONNECTION_INTENT_INVALID','同轴组随明确机械目标预演，不能与自动草案、层选择或分组推荐同传。')
     if mate_changes is not None and (auto_plan or group_seeds is not None or assembly_scope_hint or intents is None or alignment_mode!='strict' or completion_scope!='whole_assembly'):
         raise core.StopBatch('CONNECTION_INTENT_INVALID','既有配合压缩修改须随显式完整目标预演，不混用自动草案、层选择或初态平移。')
     driven=verification_mode=='driven_loop' 
@@ -141,6 +248,9 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
     engine._require_session(t['task_id'])
     if t['phase'] not in {'constraint_review_ready','awaiting_confirmation'}:raise core.StopBatch('TASK_NOT_READY_FOR_PLAN')
     s=engine.sessions[t['task_id']]
+    preserved=getattr(s,'preserved_connection_goals',[])
+    if preserved and (whole or auto_plan or assembly_scope_hint or release_fixed_components is not None or rigid_groups is not None):
+        raise core.StopBatch('CONNECTION_SCOPE_UNSUPPORTED','同一副本后续批次仅接受明确的局部连接目标，保留原固定状态和已通过批次。')
     loop_profile=None
     if driven:
         selected=[]
@@ -205,7 +315,7 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
     elif intents is not None or rigid_groups is not None or release_fixed_components is not None:
         t.pop('automatic_mechanical_goal_proposal',None)
     if (t.get('connection_review') or {}).get('write_scope_allowed') is False:
-        if intents is None and rigid_groups is None and release_fixed_components is None and completion_scope=='declared' and not assembly_scope_hint:
+        if intents is None and rigid_groups is None and release_fixed_components is None and coaxial_groups is None and completion_scope=='declared' and not assembly_scope_hint:
             return {'task_id':t['task_id'],'readonly_structure':True,'constraint_structure':t['constraint_structure'],
                     'connection_review':t['connection_review'],'write_dispatched':False,'confirmation_token_created':False}
         from .constraint_inventory import require_write_scope
@@ -224,7 +334,7 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
             if t['phase']=='awaiting_confirmation':
                 t.pop('plan_token',None);t.pop('proposal',None);t.update(phase='constraint_review_ready',plan_token_revoked=True);engine.save(t)
             return engine._submit(t,'selecting_assembly_layer',lambda:select_scope(engine,t,row))
-    if intents is None and rigid_groups is None and release_fixed_components is None:return {'task_id':t['task_id'],'needs_connection_intent':True,
+    if intents is None and rigid_groups is None and release_fixed_components is None and coaxial_groups is None:return {'task_id':t['task_id'],'needs_connection_intent':True,
         'assembly_assessment':t.get('assembly_assessment'),
         'connection_draft':getattr(s,'connection_draft',None) or recommendations.draft(s.connection_survey),
         'connection_review':t['connection_review'],'assembly_overview':t.get('assembly_overview'),'assembly_layers':t.get('assembly_layers'),'selected_assembly_layer':t.get('selected_assembly_layer'),'write_dispatched':False,
@@ -235,6 +345,8 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
         t.update(phase='constraint_review_ready',plan_token_revoked=True);engine.save(t)
     goals,question=resolve(s,intents,128 if whole else 8) if intents is not None else ([],None)
     if question:return {'task_id':t['task_id'],**question}
+    groups,question=resolve_coaxial_groups(s,coaxial_groups) if coaxial_groups is not None else ([],None)
+    if question:return {'task_id':t['task_id'],**question}
     expansion=None
     try:
         planning_survey=s.connection_survey
@@ -242,6 +354,16 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
         if mate_changes is not None:
             from .. import connection_mate_changes
             planning_survey,approved_mate_changes=connection_mate_changes.prepare(planning_survey,mate_changes)
+        coaxial_bindings=[]
+        if groups:
+            from .. import coaxial_groups as shared_axes
+            extra,coaxial_bindings,question=shared_axes.expand(planning_survey,groups,initial_translation_limit_mm if alignment_mode=='small_translation' else None)
+            if question:return {'task_id':t['task_id'],**question}
+            goals+=extra
+        if len(goals)>(128 if whole else 8) or len(goals)+len(preserved)>128:
+            raise ValueError('connection_goal_budget_exceeded_after_group_expansion')
+        pairs=[frozenset((g['component_a'],g['component_b'])) for g in [*goals,*preserved]]
+        if len(set(pairs))!=len(pairs):raise ValueError('duplicate_or_conflicting_connection_goals')
         if rigid_groups is not None or release_fixed_components is not None:
             expansion=connection_groups.expand(planning_survey,goals,rigid_groups,release_fixed_components,whole_assembly=whole)
             core.write(s.folder/'整组目标展开.json',{k:v for k,v in expansion.items() if k!='planning_survey'})
@@ -259,7 +381,9 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
             from .. import initial_translation
             planning_survey,initialization=initial_translation.propose(planning_survey,goals,initial_translation_limit_mm)
             core.write(s.folder/'微量初态平移预测.json',initialization)
-        proposal=joints.plan(planning_survey,goals,whole_assembly=whole,driven_loop=loop_profile)
+        if groups:shared_axes.rebind(planning_survey,goals,coaxial_bindings,initialization)
+        proposal=joints.plan(planning_survey,goals,whole_assembly=whole,driven_loop=loop_profile,preserved_goals=preserved)
+        if coaxial_bindings:proposal['coaxial_groups']=coaxial_bindings
         if approved_mate_changes:proposal['mate_changes']=approved_mate_changes
         if initialization is not None:proposal['initial_translation']=initialization
         if any(g.get('coupled_verification_only') for g in proposal.get('goals',[])) and (expansion is not None or whole):
@@ -278,9 +402,16 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
             'existing_indirect_constraints_conflict_with_declared_motion':'受支持的间接约束链与目标运动冲突；AI核对整装配约束图，不把直接配合较少当成缺项，不自动删除旧约束。',
             'proposed_group_constraints_conflict_with_declared_motion':'整组目标在闭环中约束了某个声明副的独立运动；AI读取具体冲突目标。若设计就是联动闭环，须明确主输入和输出后评估driven_loop；不把该见证自动解释为应删除的配合。',
             'driven_loop_primary_input_locked_or_incompatible':'完整目标使主输入锁死或与声明方向不兼容；AI读取秩变化和闭合目标见证，核对关节用途，不强行放行或自动删除约束。',
+            'driven_loop_primary_goal_not_unique':'在完整目标中找不到唯一匹配的主滑动副。AI读取有名称和秩的候选，先推荐符合浮动输入和接地参考的组，再澄清剩余歧义。',
+            'driven_loop_requires_floating_input_and_grounded_reference':'主输入需要浮动件和接地参考；AI读取满足条件的主滑动副候选，核对机构实际驱动。',
+            'driven_loop_declared_targets_not_fulfilled':'拟建配合未实现完整目标。AI查看目标级零件对、秩及额外自由方向，重新核对材料参考。',
+            'driven_loop_actions_exceed_declared_targets':'拟建配合增加了未声明的约束。AI查看目标级秩、受限方向和拟建关系，再重新预演。',
             'both_components_fixed_no_floating_target_for_native_trial':'目标两件均固定；先澄清机械目标，未自动解除固定。'}.get(reason,'连接目标或当前受支持范围未通过校验；AI核对诊断，不重试写入。')
         if reason=='pattern_group_requires_seed_scope_review':explanation='局部阵列的种子链、原生关系或同组范围未完整认证。AI先核对诊断中的种子归属并补全同用途组；不让用户逐个填写实体，不对派生件重试写入。'
-        if reason=='driven_loop_primary_input_locked_or_incompatible':code='CONNECTION_GOAL_CONFLICT'
+        if reason in {'driven_loop_primary_input_locked_or_incompatible','driven_loop_declared_targets_not_fulfilled','driven_loop_actions_exceed_declared_targets','proposed_batch_conflicts_with_previously_verified_goal'}:
+            code='CONNECTION_GOAL_CONFLICT'
+        if reason=='proposed_batch_conflicts_with_previously_verified_goal':
+            explanation='下一批会改变已通过连接的受支持相对自由度。AI核对冲突零件对，当前批未进入原生预演。'
         raise core.StopBatch(code,explanation,{'reason':reason,'cad_dispatched':False,'write_dispatched':False,
             'native_state_review_path':str(s.folder/'通用配合体检.json'),
             'constraint_graph_path':str(s.folder/'整装配约束图.json'),
@@ -324,7 +455,7 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
             'linear_allowed_trial_strategy':'temporary_native_motion_study_0_1mm_per_s_1s_30fps_then_verified_checkpoint_restore' if any(g.get('coupled_verification_only') for g in proposal['goals']) else native.get('linear_allowed_trial_strategy'),
             'batches':transaction['batches'] if whole else None,'component_coverage':proposal.get('component_coverage'),
             'all_or_restore_import_checkpoint':whole,'omitted_native_feature_ids':proposal['omitted_native_feature_ids'],
-            'group_bindings':proposal.get('group_bindings',[]),'rigid_groups':proposal.get('rigid_groups',[]),
+            'group_bindings':proposal.get('group_bindings',[]),'rigid_groups':proposal.get('rigid_groups',[]),'coaxial_groups':proposal.get('coaxial_groups',[]),
             'pattern_scope_reviews':proposal.get('pattern_scope_reviews',[]),
             'skipped_existing_pairs':proposal.get('skipped_existing_pairs',[]),'unassigned_components':proposal.get('unassigned_components',[]),
             'scope':'declared_basic_joints_small_trials_only_not_global_DOF_or_full_travel',
@@ -373,9 +504,9 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
         fixed_audit={'passed':actual_fixed==expected_fixed,'expected':expected_fixed,'actual':actual_fixed,'changes':t['proposal'].get('fixed_state_changes',[])}
         core.write(s.folder/'固定状态变更核对.json',fixed_audit)
         if not fixed_audit['passed']:raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','实际固定标志超出确认的解除固定名单。',fixed_audit)
-        expected_mates={m['native_feature_id']:(m['type'],m['suppressed']) for m in s.initial_inspection['mates']}
+        expected_mates=_mate_state(getattr(s,'connection_batch_baseline',s.initial_inspection))
         for change in t['proposal'].get('mate_changes',[]):expected_mates[change['native_feature_id']]=(change['type'],change['after'])
-        actual_mates={m['native_feature_id']:(m['type'],m['suppressed']) for m in s.result_inspection['mates']}
+        actual_mates=_mate_state(s.result_inspection)
         mate_audit={'passed':all(actual_mates.get(k)==v for k,v in expected_mates.items()),
                     'changes':t['proposal'].get('mate_changes',[]),'scope':'all_existing_mate_ids_types_and_expected_suppression_from_actual_result_readback'}
         core.write(s.folder/'既有配合压缩修改核对.json',mate_audit)
@@ -390,14 +521,19 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
         except (ValueError,KeyError,TypeError) as error:raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','初态材料参考绑定未通过。',{'reason':str(error)}) from error
         hierarchy=assembly_hierarchy.analyze(s.result_inspection['components']);expected_parents=hierarchy['parents'] if hierarchy['native_observed'] else None
         declared_count=len(bounds);declared_pairs={frozenset((g['component_a'],g['component_b'])) for g in t['proposal']['goals']}
+        preserved=getattr(s,'preserved_connection_goals',[])
+        for goal in preserved:
+            bounds.append(trials.bind(goal,poses))
+            declared_pairs.add(frozenset((goal['component_a'],goal['component_b'])))
+        preserved_count=len(bounds)-declared_count
         for binding in t['proposal'].get('group_bindings',[]):
             pair=frozenset((binding['component_a'],binding['component_b']))
             if pair not in declared_pairs:bounds.append(trials.bind(binding,poses));declared_pairs.add(pair)
-        group_extra_count=len(bounds)-declared_count
+        group_extra_count=len(bounds)-declared_count-preserved_count
         for binding in hierarchy['rigid_child_pairs']:
             pair=frozenset((binding['component_a'],binding['component_b']))
             if pair not in declared_pairs:bounds.append(trials.bind(binding,poses));declared_pairs.add(pair)
-        hierarchy_extra_count=len(bounds)-declared_count-group_extra_count
+        hierarchy_extra_count=len(bounds)-declared_count-group_extra_count-preserved_count
         observed=joints.review({'components':s.result_inspection['components'],'mates':s.result_inspection['mates'],'inventory_complete':True})
         for row in observed['connections']:
             if row['recommended_joint_type'] not in joints.KINDS or frozenset((row['component_a'],row['component_b'])) in declared_pairs:continue
@@ -451,6 +587,7 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
             'fixed_state_changes_verified':True,'fixed_state_changes':t['proposal'].get('fixed_state_changes',[]),
             'existing_mate_changes_verified':mate_audit['passed'],'existing_mate_changes':mate_audit['changes'],
             'connection_count':declared_count,'existing_supported_connection_checks':len(bounds)-declared_count-group_extra_count-hierarchy_extra_count,
+            'previous_batch_joint_checks_per_trial':preserved_count,
             'native_rigid_subassembly_binding_checks':hierarchy_extra_count,
             'additional_group_binding_checks':group_extra_count,'declared_group_bindings_checked_per_trial':len(t['proposal'].get('group_bindings',[])),
             'declared_pattern_bindings_checked_per_trial':len(t['proposal'].get('pattern_scope_reviews',[])),
@@ -469,6 +606,10 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
         if not passed:raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','补齐或有界运动验证未通过，停止后续试验；默认收尾恢复导入检查点。',proof)
         t.update(phase='verified',next_action={'tool':'finish_mechanism_task','arguments':{'task_id':t['task_id']},
             'instruction':'报告本次声明连接的小位移验证、旧约束和固定状态保持及每次恢复；不声称全机构自由度或全行程通过。默认恢复导入检查点并正常退出；只有用户明确要求才保留已验证成果副本。'})
+        if can_continue(t,s):
+            t['next_action']['continue_in_same_copy']={'tool':'plan_mechanism_task',
+                'arguments':{'task_id':t['task_id'],'continue_verified_batch':True},
+                'instruction':'只有还有补齐任务才复用当前副本，先复核上批成果，每批独立确认。'}
     def operation():
         try:return perform()
         except Exception as error:

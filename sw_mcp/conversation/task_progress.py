@@ -51,12 +51,39 @@ def current_view(session, value):
     except (OSError,ValueError,TypeError,KeyError,AttributeError):
         return value
 
+def compact_status(task, session, owner):
+    """Project a poll response without reconciling or reading CAD."""
+    view = {k: task[k] for k in ('progress','native_stage','round_index','round_total') if k in task}
+    if session is not None and not task.get('closed'):
+        view = current_view(session, view)
+    progress = view.get('progress') or {}
+    available = task.get('server_instance_id') == owner
+    current = available and session is not None and progress.get('current_native_call') is True
+    busy = available and task.get('busy') is True
+    stage_started = task.get('stage_started_at') if busy else None
+    elapsed = progress.get('operation_elapsed_s') if current else (
+        max(0, time.time()-stage_started) if available and type(stage_started) in (int,float) and math.isfinite(stage_started) else None)
+    error = (task.get('error') or {}).get('code')
+    result = {'task_id':task['task_id'], 'phase':task['phase'], 'busy':busy, 'closed':task.get('closed') is True,
+              'stage':view.get('native_stage'), 'elapsed_s':round(elapsed,2) if elapsed is not None else None,
+              'elapsed_basis':'native_request' if current else 'task_stage' if elapsed is not None else None,
+              'native_progress_observed':current and progress.get('native_progress_observed') is True,
+              'owner_available':available, 'poll_only':True}
+    if result['native_progress_observed'] and progress.get('total_frames'):
+        result.update(completed_frames=progress.get('completed_frames'), total_frames=progress['total_frames'])
+    if error:
+        result['error_code'] = error
+    return result
+
+
 LABELS = {
     'import_full_rebuild':'完整重建隔离副本', 'import_rebuild_snapshot':'核对重建前配合与姿态', 'prepare_gear_copy_metadata':'准备副本标准件标记',
     'initializing_solve': '初始化求解', 'motion_preflight': '检查求解条件',
     'native_calculate': '原生 Motion 求解', 'verify_native_time_axis': '读取并核对原生结果时间轴', 'capture_solver_poses': '采集全组件姿态',
     'postprocess_motion': '整理轨迹与验证驱动', 'restore_solve_scope': '恢复求解前状态',
     'finalize_solve_evidence': '核对恢复并保存证据',
+    'aperture_motor':'创建并回读位移曲线马达', 'aperture_calculate':'原生开合求解',
+    'aperture_interference_sampling':'逐帧测量并扫描整机干涉',
 }
 
 
@@ -117,7 +144,7 @@ def _native_record(path, job_id, run_id, started):
 @contextmanager
 def watch_call(session, operation, arguments, interval=2):
     callback = getattr(session, 'on_progress', None)
-    if callback is None or operation not in {'_survey_assembly_connections','_apply_assembly_connections','_probe_assembly_connection_pose','run_user_study','_apply_external_gear_pair','_apply_gear_transmission','restore_model_checkpoint','import_assembly','_import_gear_assembly','_import_constraint_assembly'}:
+    if callback is None or operation not in {'_survey_assembly_connections','_apply_assembly_connections','_probe_assembly_connection_pose','run_user_study','_apply_external_gear_pair','_apply_gear_transmission','restore_model_checkpoint','import_assembly','_import_gear_assembly','_import_constraint_assembly','_run_aperture_cycle'}:
         yield
         return
     started = time.time()
@@ -135,7 +162,7 @@ def watch_call(session, operation, arguments, interval=2):
             entered = stamp or started
         stage = record['stage'] if record else 'native_call_pending'
         completed, total = (record.get('completed'), record.get('total')) if record else (None, None)
-        fraction_known = stage == 'capture_solver_poses' and type(completed) is int and type(total) is int and 0 <= completed <= total and total > 0
+        fraction_known = stage in {'capture_solver_poses','aperture_interference_sampling'} and type(completed) is int and type(total) is int and 0 <= completed <= total and total > 0
         callback({'operation': operation, 'run_id': run_id, 'operation_started_at': started,
                   'operation_elapsed_s': max(0, time.monotonic() - clock), 'stage': stage,
                   'stage_started_at': entered, 'stage_elapsed_s': max(0, now - entered),

@@ -36,6 +36,8 @@ class SessionConnectionTests {
         var info=new ConnectionDiagnostics();
         var entries=Empty(); entries[22]=()=>new Fake{pid=22};
         Check(Connect("22",entries,info).pid==22 && info.connection_source=="pid_moniker" && lookups==0,"PID preferred");
+        Check(info.selected_pid==22 && info.selected_pid_in_rot==true && info.verified_attached_pid==22 &&
+            info.returned_com_object_pid==22 && info.rot_registered_pids.SequenceEqual(info.available_pids),"successful registration and verified attachment reported separately");
         info=new ConnectionDiagnostics(); Check(Connect(null,entries,info).pid==22 && lookups==0,"single PID automatic");
         entries[33]=()=>new Fake{pid=33};
         Reject(()=>Connect(null,entries,new ConnectionDiagnostics()),"AMBIGUOUS_COM_SESSION"); Check(lookups==0,"ambiguous cannot fallback");
@@ -43,6 +45,8 @@ class SessionConnectionTests {
         foreach(string value in new[]{"0","-1","no","2147483648"}) Reject(()=>Connect(value,Empty(),new ConnectionDiagnostics()),"INVALID_SOLIDWORKS_PID");
         info=new ConnectionDiagnostics();Check(Connect("22",Empty(),info).pid==22 && info.actual_pid==22 && info.configured_pid==22 && info.connection_source=="GetActiveObject_fallback","strict fallback");
         info=new ConnectionDiagnostics();Reject(()=>Connect("33",Empty(),info),"COM_SESSION_ID_MISMATCH");Check(info.actual_pid==22,"wrong identity recorded");
+        Check(info.selected_pid==33 && info.selected_pid_in_rot==false && info.returned_com_object_pid==22 &&
+            info.verified_attached_pid==null && info.rot_registered_pids.Length==0,"fallback mismatch reports separate selected and returned identities");
         info=new ConnectionDiagnostics();
         Reject(()=>SessionConnector.Connect<Fake>("22",Empty(),()=>{throw new COMException("no active object",unchecked((int)0x800401E3));},s=>s.pid,s=>s.revision,info),"COM_SESSION_UNAVAILABLE");
         Check(info.native_hresult==unchecked((int)0x800401E3) && info.connection_source=="GetActiveObject_fallback","generic lookup unavailable is diagnostic, not permission to launch");
@@ -58,7 +62,8 @@ class SessionConnectionTests {
         var auto=SessionConnector.Connect("auto",Empty(),Active,v=>v.pid,v=>v.revision,new ConnectionDiagnostics(),()=>{scans++;return inventory;});Check(auto.pid==22&&scans==2,"auto unique missing ROT verified twice");
         inventory.Identities[33]="start-B";int calls=lookups;Reject(()=>SessionConnector.Connect("auto",Empty(),Active,v=>v.pid,v=>v.revision,new ConnectionDiagnostics(),()=>inventory),"AMBIGUOUS_COM_SESSION");Check(calls==lookups,"auto multiple no COM lookup");
         inventory.Identities.Remove(33);inventory.Complete=false;Reject(()=>SessionConnector.Connect("auto",Empty(),Active,v=>v.pid,v=>v.revision,new ConnectionDiagnostics(),()=>inventory),"AUTO_SESSION_INVENTORY_UNAVAILABLE");inventory.Complete=true;
-        scans=0;Reject(()=>SessionConnector.Connect("auto",Empty(),Active,v=>v.pid,v=>v.revision,new ConnectionDiagnostics(),()=>{scans++;var snapshot=new SessionInventory();snapshot.Identities[22]=scans==1?"start-A":"start-reused-PID";return snapshot;}),"AUTO_SESSION_IDENTITY_CHANGED");
+        info=new ConnectionDiagnostics();scans=0;Reject(()=>SessionConnector.Connect("auto",Empty(),Active,v=>v.pid,v=>v.revision,info,()=>{scans++;var snapshot=new SessionInventory();snapshot.Identities[22]=scans==1?"start-A":"start-reused-PID";return snapshot;}),"AUTO_SESSION_IDENTITY_CHANGED");
+        Check(info.selected_pid==22 && info.returned_com_object_pid==22 && info.verified_attached_pid==null,"matching returned PID cannot override failed process identity verification");
         try{SessionConnector.Connect("auto",Empty(),Active,v=>v.pid,v=>v.revision,new ConnectionDiagnostics(),()=>new SessionInventory());throw new Exception("missing zero-instance error");}catch(CadFault e){Check(e.Code=="COM_SESSION_NOT_FOUND"&&e.Message.Contains("请先启动")&&!e.Message.Contains("多个"),"zero instances action, not ambiguity");}
         object live=null;
 #if NATIVE_SESSION_TESTS

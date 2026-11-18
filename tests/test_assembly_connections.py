@@ -24,6 +24,59 @@ def survey(mates=()):
 
 
 class ConnectionTests(unittest.TestCase):
+    @staticmethod
+    def coaxial_fixture():
+        s=survey()
+        extra=copy.deepcopy(s['components'][1])
+        extra.update(component_id='lower',instance='lower')
+        for face in extra['cylinders']+extra['completion_planes']:
+            face['native_reference']='lower-'+face['native_reference']
+        s['components'].append(extra)
+        return s, {'name':'shaft', 'axis_component':'body',
+                   'members':[{'component':'moving','axial':'located'},{'component':'lower','axial':'free'}]}
+
+    def test_one_material_axis_allows_distinct_axial_roles(self):
+        from sw_mcp import coaxial_groups
+        s,group=self.coaxial_fixture()
+        goals,bindings,question=coaxial_groups.expand(s,[group])
+        self.assertIsNone(question)
+        plan=joint.plan(s,goals)
+        self.assertEqual(plan['status'],'plan_ready')
+        self.assertEqual([g['kind'] for g in plan['goals']],['revolute','cylindrical'])
+        self.assertEqual([g['added_action_count'] for g in plan['goals']],[2,1])
+        self.assertEqual([m['axial'] for m in bindings[0]['members']],['located','free'])
+
+    def test_parallel_distinct_lines_cannot_form_a_shared_axis(self):
+        from sw_mcp import coaxial_groups
+        s,group=self.coaxial_fixture()
+        offset=[.004,0,0]
+        s['components'][2]['cylinders'][0]['reference_point_global_m']=offset
+        s['components'][0]['cylinders'].append({**s['components'][0]['cylinders'][0],
+            'native_reference':'second-axis','reference_point_global_m':offset})
+        self.assertEqual(coaxial_groups.expand(s,[group])[2]['status'],'coaxial_group_axis_unavailable')
+        self.assertEqual(coaxial_groups.expand(s,[group],.001)[2]['status'],'coaxial_group_axis_unavailable')
+
+    def test_shared_material_axis_survives_bounded_translation_candidate_rebinding(self):
+        from sw_mcp import coaxial_groups, initial_translation
+        s,group=self.coaxial_fixture()
+        s['components'][2]['cylinders'][0]['reference_point_global_m']=[2e-7,0,0]
+        goals,bindings,question=coaxial_groups.expand(s,[group],.001)
+        self.assertIsNone(question)
+        aligned,proof=initial_translation.propose(s,goals,.001)
+        self.assertTrue(proof['requires_alignment_confirmation'])
+        coaxial_groups.rebind(aligned,goals,bindings,proof)
+        self.assertEqual(joint.plan(aligned,goals)['status'],'plan_ready')
+
+    def test_new_batch_cannot_lock_previously_verified_rotation(self):
+        s,_=self.coaxial_fixture()
+        s['mates']=[mate(1,'body','moving','cylindrical_axis'),mate(2,'body','moving','planar_normal'),
+                    {'native_feature_id':3,'type':16,'name':'grounded branch','suppressed':False,
+                     'error':0,'warning':False,'entities':[{'component_id':'body'},{'component_id':'lower'}]}]
+        preserved=[{'component_a':'moving','component_b':'body','kind':'revolute',
+                    'axis_global':[0,0,1],'reference_point_global_m':[0,0,0]}]
+        with self.assertRaisesRegex(ValueError,'proposed_batch_conflicts_with_previously_verified_goal'):
+            joint.plan(s,[{'component_a':'moving','component_b':'lower','kind':'rigid'}],preserved_goals=preserved)
+
     def test_revolute_trial_automatically_selects_non_singular_datum_angle(self):
         s=survey([mate(1,'body','moving','cylindrical_axis'),mate(2,'body','moving','planar_normal')])
         p=joint.plan(s,[dict(component_a='moving',component_b='body',kind='revolute')])
