@@ -16,7 +16,7 @@ class Program {
         else if(e is InvalidCastException) code="API_TYPE_MISMATCH";
         else if(!Regex.IsMatch(code,"^[A-Z][A-Z0-9_]+$")) code="EXECUTOR_ERROR";
         var messages=new Dictionary<string,string> {
-            {"RESULTS_STALE","运动结果已过期，请重新运行算例。"},
+            {"RESULTS_STALE","原生运动结果不可读取或已标记过期；先复核本次诊断与恢复状态。"},
             {"MODEL_REVISION_CHANGED","模型文件或配置已改变，请重新求解。"},
             {"SOLVER_FAILED","Motion 求解失败，请检查驱动、配合与插件状态。"},
             {"RESTORATION_FAILED","无法确认初始状态已恢复，请检查 SolidWorks 当前姿态。"},

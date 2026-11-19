@@ -71,12 +71,17 @@ def compact_status(task, session, owner):
               'owner_available':available, 'poll_only':True}
     if result['native_progress_observed'] and progress.get('total_frames'):
         result.update(completed_frames=progress.get('completed_frames'), total_frames=progress['total_frames'])
+    if result['native_progress_observed'] and progress.get('total_files'):
+        result.update(completed_files=progress.get('completed_files'), total_files=progress['total_files'])
     if error:
         result['error_code'] = error
     return result
 
 
 LABELS = {
+    'copy_files':'复制源文件到隔离副本','redirect_references':'重定向副本引用','verify_isolation':'核对副本依赖隔离',
+    'open_registered_copy':'等待原生打开副本','checkpoint_snapshot':'记录原始恢复检查点',
+    'create_checkpoint':'创建导入检查点','preflight_motion':'核对导入后的运动条件',
     'import_full_rebuild':'完整重建隔离副本', 'import_rebuild_snapshot':'核对重建前配合与姿态', 'prepare_gear_copy_metadata':'准备副本标准件标记',
     'initializing_solve': '初始化求解', 'motion_preflight': '检查求解条件',
     'native_calculate': '原生 Motion 求解', 'verify_native_time_axis': '读取并核对原生结果时间轴', 'capture_solver_poses': '采集全组件姿态',
@@ -163,6 +168,7 @@ def watch_call(session, operation, arguments, interval=2):
         stage = record['stage'] if record else 'native_call_pending'
         completed, total = (record.get('completed'), record.get('total')) if record else (None, None)
         fraction_known = stage in {'capture_solver_poses','aperture_interference_sampling'} and type(completed) is int and type(total) is int and 0 <= completed <= total and total > 0
+        file_count_known = stage in {'copy_files','redirect_references','verify_isolation','externalize_virtual_part'} and type(completed) is int and type(total) is int and 0<=completed<=total and total>0
         callback({'operation': operation, 'run_id': run_id, 'operation_started_at': started,
                   'operation_elapsed_s': max(0, time.monotonic() - clock), 'stage': stage,
                   'stage_started_at': entered, 'stage_elapsed_s': max(0, now - entered),
@@ -171,6 +177,8 @@ def watch_call(session, operation, arguments, interval=2):
                   'native_progress_observed': record is not None,
                   'completed_frames': completed if fraction_known else None,
                   'total_frames': total if fraction_known else None,
+                  'completed_files': completed if file_count_known else None,
+                  'total_files': total if file_count_known else None,
                   'sampling_fraction': completed / total if fraction_known else None,
                   'overall_fraction': None, 'estimated_remaining_s': None,
                   'heartbeat_proves_native_progress': False, 'automatic_retry': False,

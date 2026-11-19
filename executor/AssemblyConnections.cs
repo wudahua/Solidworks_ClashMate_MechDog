@@ -301,6 +301,7 @@ public partial class Cad {
                 write_dispatched=false,plan_consumed=false,automatic_retry=false});
         }
         p.Consumed=true;string cp=null;bool mutating=false;
+        int? actionIndex=null;object actionWitness=null;string actionStage=null;
         try {
             BeginConnectionBatch(p);
             Progress(activeJobId,"connection_create_checkpoint",0,0,null);
@@ -354,6 +355,11 @@ public partial class Cad {
                 }
                 var evidence=new List<object>();int index=0;
                 foreach(var action in p.Actions) {
+                    actionIndex=index;
+                    var a=(string)action["component_a"];var b=(string)action["component_b"];
+                    actionWitness=new{kind=action["kind"],component_a=a,component_b=b,instance_a=p.Names[a],instance_b=p.Names[b],
+                        reference_kind_a=action["reference_kind_a"],reference_kind_b=action["reference_kind_b"]};
+                    actionStage="add_mate";
                     Progress(activeJobId,"basic_connection_completion",index++,p.Actions.Count,null);
                     action["model_id"]=m.Id;IFeature added;
                     try{added=CreateConnectionMate(m,doc,action);}
@@ -367,10 +373,16 @@ public partial class Cad {
                         details["kind"]=(string)action["kind"];details["extra_native_queries_for_diagnostics"]=0;
                         throw new CadFault(error.Code,error.Message,details);
                     }
+                    actionStage="check_mate_feature";
                     CheckMate(added,"basic_connection_supplement");
-                    if(!doc.EditRebuild3())throw new CadFault("CONNECTION_CREATE_FAILED","新增约束后重建失败。");RequireMatesHealthy(doc);
+                    actionStage="rebuild_after_mate";
+                    if(!doc.EditRebuild3())throw new CadFault("CONNECTION_CREATE_FAILED","新增约束后重建失败。");
+                    actionStage="check_assembly_mate_health";
+                    RequireMatesHealthy(doc);
+                    actionStage="check_result_pose";
                     evidence.Add(VerifyCompletionPose(doc,preservedPoses,added,action));
                     if(testFault)throw new CadFault("CONNECTION_CREATE_FAILED","受控验收故障：验证完整回退。");
+                    actionIndex=null;actionWitness=null;actionStage=null;
                 }
                 if(CompletionOriginalParameters(doc,originalIds)!=expectedOriginalParameters||EGAllMates(doc).Length!=originalIds.Length+p.Actions.Count)
                     throw new CadFault("CONNECTION_CREATE_FAILED","原配合或新增数量发生非预期变化。");
@@ -391,7 +403,9 @@ public partial class Cad {
             if(error is COMException||error is ComponentInventoryReadFault||error is NativeCommandStateException||LastContextRestoration=="unknown") {LastOperationRestoration="unknown";throw new CadFault("CONNECTION_NATIVE_UNKNOWN","原生状态未知，未重试写入或恢复。",new{checkpoint_id=cp,original_failure=FailureEvidence(error)});}
             if(!mutating)throw;
             try{RestoreUserCheckpoint(m.Id,cp);LastOperationRestoration="restored";}catch(Exception rollback){LastOperationRestoration="unknown";throw new CadFault("CONNECTION_NATIVE_UNKNOWN","已知失败后恢复未验证。",new{checkpoint_id=cp,original_failure=FailureEvidence(error),rollback_failure=FailureEvidence(rollback)});}
-            throw new CadFault("CONNECTION_APPLY_ROLLED_BACK","基础连接未通过，已恢复检查点。",new{checkpoint_id=cp,original_failure=FailureEvidence(error),rollback_verified=true});
+            throw new CadFault("CONNECTION_APPLY_ROLLED_BACK","基础连接未通过，已恢复检查点。",new{checkpoint_id=cp,
+                failed_action_index=actionIndex,failed_action=actionWitness,failed_action_stage=actionStage,
+                original_failure=FailureEvidence(error),conflicting_existing_mates_status="not_proven",rollback_verified=true});
         }
     }
     Dictionary<string,double[]> ConnectionPoses(IModelDoc2 doc) {

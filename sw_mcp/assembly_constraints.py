@@ -96,14 +96,25 @@ def _rows(mate, entities, origin, scale):
         separation=dot(axis_a,[point_a[i]-point_b[i] for i in range(3)])
         if abs(separation)>1e-5:raise ValueError('coincident_circle_plane_gap')
         return angular+[location(axis_a)]
+    coincident_ring=t==0 and {kind_a,kind_b}=={'cylindrical_axis','circular_edge'}
+    if coincident_ring:
+        # An entire matching circle on a cylinder shares its material axis.
+        # This observes an existing native mate and never registers creation.
+        circle_index=0 if kind_a=='circular_edge' else 1
+        circle,cylinder=(entities[i].get('geometry') or entities[i].get('constraint_geometry') or {} for i in (circle_index,1-circle_index))
+        radii=(circle.get('circle_radius_m'),cylinder.get('cylinder_radius_m'))
+        if (circle.get('full_circle') is not True or
+                any(type(r) not in (float,int) or not math.isfinite(r) or r<=0 for r in radii) or
+                abs(radii[0]-radii[1])>1e-7):
+            raise ValueError('coincident_circle_cylinder_contact_unverified')
     axial_kinds={'cylindrical_axis','circular_edge','conical_axis','reference_axis'}
-    if t == 1 and kind_a in axial_kinds and kind_b in axial_kinds:
+    if coincident_ring or (t==1 and kind_a in axial_kinds and kind_b in axial_kinds):
         # Concentric observations with visibly different axes are not treated
         # as sound constraints even if the native mate error field is zero.
         d = [point_a[i]-point_b[i] for i in range(3)]
         radial = [d[i]-dot(d, axis_a)*axis_a[i] for i in range(3)]
-        if math.sqrt(dot(radial, radial)) > 1e-5:
-            raise ValueError('concentric_reference_gap')
+        if math.sqrt(dot(radial, radial)) > (1e-7 if coincident_ring else 1e-5):
+            raise ValueError('coincident_circle_cylinder_radial_gap' if coincident_ring else 'concentric_reference_gap')
         rows = angular+[location(v) for v in perpendiculars(axis_a)]
         lock = mate.get('rotation_lock_observation') or {}
         if lock.get('status') == 'observed' and lock.get('locked') is True:

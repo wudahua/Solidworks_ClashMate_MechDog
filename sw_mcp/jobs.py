@@ -73,7 +73,12 @@ class Jobs:
             job.update(status="running", started_at=time.time())
             self._persist(job)
         try:
-            result = self.bridge.request(job["operation"], **job["params"])
+            params = job["params"]
+            if job["operation"] == "inspect_model" and params.get("detail_level") == "summary":
+                from . import inspection_snapshot
+                result = inspection_snapshot.store(self.root,self.bridge.request("inspect_model",**{**params,"detail_level":"full"}))
+            else:
+                result = self.bridge.request(job["operation"], **params)
         except CadError as exc:
             update = {"status": "timed_out" if exc.code == "CAD_TIMEOUT" else "executor_lost" if exc.code == "EXECUTOR_LOST" else "failed",
                       "error": operational_error(exc.code, str(exc), exc.restoration_status, exc.diagnostics, exc.document_context_restoration_status, job_created=True)}

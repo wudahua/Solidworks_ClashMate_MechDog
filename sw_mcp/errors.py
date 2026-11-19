@@ -15,6 +15,12 @@ NATIVE_ACTION_CLASSES={
                     ('native_session_identity_review_required','AI核对SolidWorks实例与COM身份；仅在明确、安全的会话选择条件下重新选择，不能把进程存在当作COM可用。')),
     **dict.fromkeys(('NATIVE_TIME_AXIS_MISMATCH','MOTION_RESULTS_INCOMPLETE'),
                     ('native_result_evidence_review_required','AI先读取已保存时间轴、采样和失败工件；不把不完整结果记为通过，不为补诊断重复求解。')),
+    'RESULTS_STALE': ('native_result_evidence_review_required',
+                      'AI读取已保存的原生算例、驱动绑定和求解前约束复核，区分缺失连接、受限方向和未查明原因；核对恢复后再提出方案。'),
+    'PART_MATERIAL_WRITE_ROLLED_BACK': ('native_material_review_required',
+                                       'AI核对零件配置、材质库、预期读回和已验证的检查点回滚；方案变化须重新预演及确认。'),
+    'PART_MASS_PROPERTIES_UNAVAILABLE': ('native_material_review_required',
+                                        'AI核对模型解析状态与零件材质盘点，报告缺失的原生质量属性。'),
     **dict.fromkeys(('INVALID_MODEL_ID','MODEL_NOT_REGISTERED'),
                     ('registered_model_selection_required','AI从已有任务或登记清单核对model_id；不能用文件路径或其他会话ID冒充，也不自动重复导入。')),
 }

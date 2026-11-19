@@ -6,16 +6,16 @@ using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swmotionstudy;
 
 public partial class Cad {
-    object VerifyNewStudyMateState(IModelDoc2 doc,Dictionary<int,bool> expected,Dictionary<string,double[]> poses) {
+    object VerifyNewStudyMateState(IModelDoc2 doc,Dictionary<int,bool> expected,Dictionary<string,double[]> poses,string stage="study_created") {
         var features=EGAllMates(doc);var ids=features.Select(f=>f.GetID()).ToArray();
-        if(ids.Length!=expected.Count||ids.Any(id=>!expected.ContainsKey(id)))throw new CadFault("STUDY_CONSTRAINT_STATE_UNVERIFIED","新建算例改变了原配合清单，未继续。");
+        if(ids.Length!=expected.Count||ids.Any(id=>!expected.ContainsKey(id)))throw new CadFault("STUDY_CONSTRAINT_STATE_UNVERIFIED","算例配合清单与记录不符。",new{stage,expected_count=expected.Count,observed_count=ids.Length});
         var changes=features.Where(f=>EGSuppressed(f)!=expected[f.GetID()]).Select(f=>new{native_feature_id=f.GetID(),expected_suppressed=expected[f.GetID()],observed_suppressed=EGSuppressed(f)}).ToArray();
         // Study-local mates cannot be transferred by changing their model
         // suppression flag. Refuse this scope change instead of a blind write.
-        if(changes.Length>0)throw new CadFault("STUDY_CONSTRAINT_STATE_UNVERIFIED","新算例未保持创建前配合启用状态，未改写配合或开始求解。",new{changed_count=changes.Length,examples=changes.Take(10).ToArray(),automatic_transfer_attempted=false});
+        if(changes.Length>0)throw new CadFault("STUDY_CONSTRAINT_STATE_UNVERIFIED","算例的配合压缩状态与记录不符。",new{stage,changed_count=changes.Length,examples=changes.Take(10).ToArray(),automatic_transfer_attempted=false});
         RequireMatesHealthy(doc);var actual=Transforms(doc);
         if(poses.Count!=actual.Count||!poses.All(v=>actual.ContainsKey(v.Key)&&PoseValidation.Matches(v.Value,actual[v.Key])))
-            throw new CadFault("STUDY_CONSTRAINT_STATE_UNVERIFIED","新算例激活改变初始姿态。",PoseDifference(poses,actual));
+            throw new CadFault("STUDY_CONSTRAINT_STATE_UNVERIFIED","当前姿态与算例起点记录不符。",new{stage,difference=PoseDifference(poses,actual)});
         return new{verified=true,mate_count=expected.Count,mask_source="observed_current_assembly_before_new_study",poses_unchanged=true,
             changed_mate_states=0,original_mates_deleted=false,original_mates_recreated=false,existing_study_intent_inferred=false};
     }

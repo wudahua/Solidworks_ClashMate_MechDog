@@ -4,6 +4,7 @@ import math
 import unittest
 from sw_mcp import assembly_connections as j,connection_trials as t,connection_groups as groups
 from sw_mcp import connection_mate_changes as masks,connection_batches as batches,mechanism_loop as loop
+from sw_mcp import mate_redundancy
 from tests.test_assembly_connections import survey
 from tests.test_assembly_constraints import component,mate
 from tests.test_mechanism_loop import fixture
@@ -100,6 +101,48 @@ class ConnectionFeedbackTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'healthy_basic_mate'):masks.prepare(s,[{'native_feature_id':5,'suppressed':True}])
         s['mates'][0].pop('native_feature_type');s['nonlinear_constraints']=[{'native_feature_id':5,'kind':'limit_distance'}]
         with self.assertRaisesRegex(ValueError,'healthy_basic_mate'):masks.prepare(s,[{'native_feature_id':5,'suppressed':True}])
+
+    def test_local_mask_requires_the_exact_declared_pair(self):
+        s=survey([mate(5,'body','moving','planar_normal')]);s['components'].append(component('unrelated'))
+        request=[{'native_feature_id':5,'suppressed':True}]
+        local=[{'component_a':'moving','component_b':'unrelated'}]
+        with self.assertRaisesRegex(ValueError,'matching_declared_pair'):masks.prepare(s,request,local_goals=local)
+        local[0]['component_b']='body'
+        self.assertTrue(masks.prepare(s,request,local_goals=local)[1][0]['after'])
+
+    def test_drive_review_differentiates_unconnected_and_axially_blocked(self):
+        s=survey()
+        drive={'component_id':'moving','axis_global':[0,0,1],'reference_point_global_m':[0.,0.,0.]}
+        body={'component_id':'body'}
+        unattached=mate_redundancy.drive_review(s,drive,body,'linear')
+        self.assertFalse(unattached['reference_link_observed'])
+        s=survey([mate(0,'body','moving','planar_normal')])
+        blocked=mate_redundancy.drive_review(s,drive,body,'linear')
+        self.assertTrue(blocked['reference_link_observed'])
+        self.assertEqual(blocked['status'],'supported_direction_blocked_at_start')
+        self.assertFalse(blocked['root_cause_proven'])
+
+    def test_existing_mixed_coincident_mate_needs_a_complete_matching_ring(self):
+        feature=mate(1,'moving','body','cylindrical_axis',t=0)
+        face=feature['entities'][0]['geometry']
+        circle=feature['entities'][1]['geometry']
+        face['cylinder_radius_m']=.01
+        circle.update(kind='circular_edge',circle_radius_m=.01,full_circle=True)
+        self.assertEqual(len(j.ac.basis(j.ac._rows(feature,feature['entities'],[0,0,0],1))),4)
+        circle['full_circle']=False
+        with self.assertRaisesRegex(ValueError,'contact_unverified'):
+            j.ac._rows(feature,feature['entities'],[0,0,0],1)
+
+    def test_same_part_pairs_report_an_extra_axial_location_as_a_candidate(self):
+        members=[{**component(name),'path':path,'configuration':'Default'}
+                 for name,path in [('base-left','base.SLDPRT'),('base-right','base.SLDPRT'),
+                                   ('slider-left','slider.SLDPRT'),('slider-right','slider.SLDPRT')]]
+        mates=[mate(1,'base-left','slider-left','cylindrical_axis'),mate(2,'base-right','slider-right','cylindrical_axis'),
+               mate(3,'base-right','slider-right','planar_normal')]
+        result=mate_redundancy.axial_variations({'components':members,'mates':mates})
+        self.assertEqual([(row['native_feature_id'],row['local_rank_without_candidate']) for row in result],[(3,4)])
+        self.assertEqual(result[0]['peer_pairs_with_observed_axial_freedom'],[['base-left','slider-left']])
+        self.assertFalse(result[0]['automatic_suppression_allowed'])
 
 
 if __name__=='__main__':unittest.main()

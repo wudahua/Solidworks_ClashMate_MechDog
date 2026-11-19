@@ -1,6 +1,6 @@
 """Expand explicitly declared rigid groups; never infer mechanical ownership."""
 import copy
-from . import constraint_graph,assembly_constraints,assembly_hierarchy
+from . import constraint_graph,assembly_constraints,assembly_hierarchy,mirror_connections
 
 
 class GroupIntentError(ValueError):
@@ -73,6 +73,7 @@ def expand(survey,intents,groups=None,release_names=None,whole_assembly=False):
     released=[identify(n) for n in release_names or []]
     if len(set(released))!=len(released):raise GroupIntentError('duplicate_fixed_release')
     patterns={c['component_id'] for c in (survey.get('structural_relations') or {}).get('components',[]) if c.get('is_pattern_instance') is True}
+    mirrored={r['component_id']:r for r in mirror_connections.review(survey)}
     for cid in released:
         if hierarchy['parents'][cid] is not None:raise GroupIntentError('nested_component_fixed_release_unsupported',instance=by[cid]['instance'])
         if by[cid].get('fixed_component') is not True:raise GroupIntentError('release_target_not_observed_fixed',instance=by[cid]['instance'])
@@ -99,12 +100,24 @@ def expand(survey,intents,groups=None,release_names=None,whole_assembly=False):
         for cid in ids:memberships[cid]=label
         if any(g['kind']!='rigid' and g['component_a'] in ids and g['component_b'] in ids for g in intents):raise GroupIntentError('mobile_joint_inside_declared_rigid_group',group=label)
         if any(cid in patterns for cid in ids):
-            if not whole_assembly:pattern_reviews.extend(_local_pattern_scope(survey,ids,patterns,label))
+            for cid in sorted(set(ids)&mirrored.keys()):
+                row=mirrored[cid]
+                required={r['component_id'] for r in row['source_candidates']+row['root_source_candidates']}
+                if row['root_source_status']!='unique_root_of_observed_dependency_chain' or not required<=set(ids):
+                    raise GroupIntentError('pattern_group_requires_seed_scope_review',group=label,
+                        scope_reason='unverified_or_external_mirror_chain',instance=row['instance'],
+                        required_seed_instances=[by[c]['instance'] for c in sorted(required-set(ids))],mirror_dependency=row)
+                pattern_reviews.append({'component_id':cid,'instance':row['instance'],
+                    'seed_component_ids':sorted(required),'native_pattern_preserved':True,
+                    'individual_mate_write_allowed':False,'rigid_motion_proven':False,
+                    'scope':'declared_rigid_binding_requires_native_trial'})
+            if not whole_assembly:pattern_reviews.extend(_local_pattern_scope(survey,ids,patterns-mirrored.keys(),label))
             deps={r['component_id']:r for r in assembly_constraints.analyze(cs,survey['mates'],structural_relations=survey.get('structural_relations'))['pattern_dependencies']}
             def valid_seed(cid,seen):
                 if cid not in ids:return False
                 if cid not in patterns:return True
                 if cid in seen:return False
+                if cid in mirrored:return True  # Explicit complete source scope checked above.
                 row=deps.get(cid,{})
                 return bool(row.get('seed_component_ids')) and all(valid_seed(p,seen|{cid}) for p in row['seed_component_ids'])
             if not all(valid_seed(cid,set()) for cid in ids if cid in patterns):raise GroupIntentError('pattern_seed_group_scope_unresolved',group=label)

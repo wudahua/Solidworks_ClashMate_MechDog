@@ -1,5 +1,10 @@
 import copy,unittest
+from types import SimpleNamespace
+from unittest.mock import Mock
 from sw_mcp import connection_groups as groups
+from sw_mcp import mirror_connections
+from sw_mcp.conversation import connection_task,core
+from sw_mcp.task_errors import task_failure
 from tests.test_assembly_connections import survey
 from tests.test_assembly_constraints import component
 
@@ -12,6 +17,17 @@ def fixture():
         {'component_id':'copy','instance':'copy','native_feature_id':3,'is_pattern_instance':True,'parent_features':[{'native_feature_id':10},{'native_feature_id':2}]}],
         'patterns':[{'native_feature_id':10,'type':'LocalCirPattern','suppressed':False,'seed_component_ids':['moving'],'child_features':[{'native_feature_id':3}]}],
         'feature_inventory_truncated':False,'issues':[]}
+    return s
+
+
+def mirror_fixture():
+    s=fixture();structure=s['structural_relations']
+    structure['components'][2]['parent_features']=[
+        {'native_feature_id':10,'name':'镜向零部件1','type':'MirrorCompFeat'},
+        {'native_feature_id':2,'name':'moving','type':'Reference'}]
+    structure['patterns']=[]
+    structure['mirrors']=[{'native_feature_id':10,'name':'镜向零部件1','definition_available':True,
+        'suppressed':False,'definition_source_component_ids':['moving'],'child_features':[{'native_feature_id':3}]}]
     return s
 
 
@@ -107,6 +123,76 @@ class ScopedPatternTests(unittest.TestCase):
         for i in range(30):s['components'].append(component('extra'+str(i)))
         with self.assertRaisesRegex(groups.GroupIntentError,'member_budget'):
             self.expand(s,[c['instance'] for c in s['components']])
+
+    def test_mirror_review_keeps_native_parent_source_and_no_automatic_remap(self):
+        row=mirror_connections.review(mirror_fixture())[0]
+        self.assertEqual(row['source_binding_status'],'unique_native_source_observed')
+        self.assertEqual(row['source_candidates'],[{'component_id':'moving','instance':'moving'}])
+        self.assertEqual(row['root_source_candidates'],row['source_candidates'])
+        self.assertFalse(row['rigid_motion_proven'] or row['automatic_goal_remap'] or row['individual_mate_write_allowed'])
+
+    def test_explicit_mirror_family_keeps_derived_member_for_verification(self):
+        s=mirror_fixture()
+        for whole in (False,True):
+            e=groups.expand(s,[],[{'name':'test','members':['body','moving','copy'],'anchor':'body'}],whole_assembly=whole)
+            self.assertEqual([g['component_a'] for g in e['goals']],['moving'])
+            self.assertEqual({b['component_a'] for b in e['group_bindings']},{'moving','copy'})
+            self.assertEqual(e['pattern_scope_reviews'][0]['instance'],'copy')
+            self.assertFalse(e['pattern_scope_reviews'][0]['rigid_motion_proven'])
+        with self.assertRaisesRegex(groups.GroupIntentError,'pattern_group_requires_seed_scope_review'):
+            groups.expand(s,[],[{'name':'test','members':['body','copy'],'anchor':'body'}])
+
+    def test_mirror_incomplete_native_definition_is_only_a_candidate(self):
+        for what in ('definition','children','candidates','multiple_parent_features','inventory'):
+            with self.subTest(what=what):
+                s=mirror_fixture()
+                structure=s['structural_relations'];m=structure['mirrors'][0]
+                if what=='definition':m['definition_available']=False
+                elif what=='children':m['child_features']=[]
+                elif what=='candidates':m['definition_source_component_ids']=['moving','outside_scope']
+                elif what=='multiple_parent_features':
+                    structure['components'][2]['parent_features'].append({'native_feature_id':11,'type':'MirrorCompFeat','name':'other'})
+                else:structure['feature_inventory_truncated']=True
+                row=mirror_connections.review(s)[0]
+                self.assertEqual(row['source_binding_status'],'mirror_source_review_required')
+                self.assertEqual(row['root_source_candidates'],[])
+
+    def test_nested_mirror_can_have_one_root_without_exact_nested_remap(self):
+        s=mirror_fixture();structure=s['structural_relations']
+        s['components'].append(component('nested'))
+        parent={'native_feature_id':11,'name':'镜向零部件2','type':'MirrorCompFeat'}
+        structure['components'].append({'component_id':'nested','native_feature_id':4,'is_pattern_instance':True,
+                                        'parent_features':[parent,{'native_feature_id':2,'type':'Reference'}]})
+        structure['mirrors'].append({'native_feature_id':11,'definition_available':True,'suppressed':False,
+            'definition_source_component_ids':['moving','copy'],'child_features':[{'native_feature_id':4}]})
+        nested=mirror_connections.review(s)[1]
+        self.assertEqual(nested['source_binding_status'],'mirror_source_review_required')
+        self.assertEqual(nested['root_source_candidates'],[{'component_id':'moving','instance':'moving'}])
+        self.assertFalse(nested['automatic_goal_remap'])
+
+    def test_direct_mirror_goal_refused_before_native_queue_with_goal_indices(self):
+        s=mirror_fixture()
+        task={'task_id':'t','phase':'constraint_review_ready','connection_review':{'write_scope_allowed':True}}
+        session=SimpleNamespace(connection_survey=s)
+        engine=Mock();engine.sessions={'t':session}
+        goals=[{'component_a':'moving','component_b':'body','kind':'revolute'},
+               {'component_a':'copy','component_b':'body','kind':'revolute'}]
+        for mode in ('declared','whole_assembly'):
+            with self.subTest(mode=mode),self.assertRaises(core.StopBatch) as caught:
+                connection_task.propose(engine,task,goals,completion_scope=mode)
+            diag=caught.exception.diagnostics
+            self.assertEqual(caught.exception.code,'CONNECTION_SCOPE_UNSUPPORTED')
+            self.assertEqual(diag['blocked_goals'][0]['goal_index'],1)
+            self.assertEqual(diag['remaining_goal_indices_not_verified'],[0])
+            self.assertFalse(diag['cad_dispatched'] or diag['partial_submission'] or diag['confirmation_token_created'])
+            self.assertEqual(task['phase'],'constraint_review_ready')
+            engine._submit.assert_not_called()
+        query={'task_id':'a'*32,'snapshot_cursor':'b'*64+':mirror_dependencies:0'}
+        failure=task_failure(caught.exception.code,str(caught.exception),{**diag,'mirror_review_arguments':query},task_id='a'*32)
+        self.assertIs(failure['diagnostics']['cad_dispatched'],False)
+        self.assertIs(failure['diagnostics']['job_created'],False)
+        self.assertEqual(failure['restoration_status'],'not_required')
+        self.assertEqual(failure['next_action']['arguments'],query)
 
 
 if __name__=='__main__':unittest.main()

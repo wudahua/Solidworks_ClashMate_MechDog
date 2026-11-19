@@ -12,7 +12,7 @@ public partial class Cad {
         var clock=Stopwatch.StartNew();var features=new List<IFeature>();
         var next=doc.FirstFeature() as IFeature;
         while(next!=null&&features.Count<512){features.Add(next);next=next.GetNextFeature() as IFeature;}
-        var components=new List<object>();var patterns=new List<object>();var issues=new List<object>();
+        var components=new List<object>();var patterns=new List<object>();var mirrors=new List<object>();var issues=new List<object>();
         foreach(var feature in features) {
             string type=feature.GetTypeName2();
             try {
@@ -41,9 +41,30 @@ public partial class Cad {
                         child_features=children.Select(c=>new{native_feature_id=c.GetID(),name=c.Name,type=c.GetTypeName2()}).ToArray(),
                         relationship_scope="native_pattern_dependency_not_rigid_motion_proof"});
                 }
+                if(type=="MirrorCompFeat") {
+                    var definition=feature.GetDefinition() as IMirrorComponentFeatureData;
+                    var parents=(feature.GetParents() as object[]??new object[0]).OfType<IFeature>().Take(64).ToArray();
+                    var children=(feature.GetChildren() as object[]??new object[0]).OfType<IFeature>().Take(256).ToArray();
+                    var seeds=new List<string>();
+                    if(definition!=null&&!EGSuppressed(feature)) {
+                        foreach(var selection in new[]{definition.ComponentsToInstanceAlignToComponentOrigin,
+                            definition.ComponentsToInstanceAlignToSelection,definition.OppositeHandComponents}) {
+                            foreach(var item in selection as object[]??new object[0]) {
+                                var c=item as IComponent2;var f=item as IFeature;
+                                if(c==null&&f!=null)c=f.GetSpecificFeature2() as IComponent2;
+                                if(c!=null)seeds.Add(GTComponentId(doc,c));
+                            }
+                        }
+                    }
+                    mirrors.Add(new{native_feature_id=feature.GetID(),name=feature.Name,type=type,suppressed=EGSuppressed(feature),
+                        definition_available=definition!=null,definition_source_component_ids=seeds.Distinct().ToArray(),
+                        parent_features=parents.Select(p=>new{native_feature_id=p.GetID(),name=p.Name,type=p.GetTypeName2()}).ToArray(),
+                        child_features=children.Select(c=>new{native_feature_id=c.GetID(),name=c.Name,type=c.GetTypeName2()}).ToArray(),
+                        relationship_scope="mirror_feature_dependencies_not_mate_or_rigidity_proof"});
+                }
             }catch(COMException error){issues.Add(new{native_feature_id=feature.GetID(),name=feature.Name,type=type,hresult=error.HResult});}
         }
-        return new{components=components,patterns=patterns,issues=issues,feature_inventory_truncated=next!=null,
+        return new{components=components,patterns=patterns,mirrors=mirrors,issues=issues,feature_inventory_truncated=next!=null,
             elapsed_ms=clock.Elapsed.TotalMilliseconds,write_dispatched=false,pattern_dependency_is_rigid_motion_proof=false};
     }
 }
