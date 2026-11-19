@@ -61,6 +61,14 @@ class FormalEngine:
             # identity admission above, and every lease/native gate below.
             validate_prepare_arguments(arguments)
         recovery_session=self.tasks.sessions.get(self.tasks.active) if self.tasks.active and name in {'get_recovery_state','restore_model_checkpoint'} else None
+        material_session=None
+        if self.tasks.active and name=='inspect_model' and arguments.get('detail_level','summary') in {'materials','mass_properties','summary'}:
+            self.tasks._require_session(self.tasks.active)
+            session=self.tasks.sessions[self.tasks.active]
+            if (not session.bridge or not session.model or arguments.get('model_id')!=session.model
+                    or arguments.get('wait_for_completion',True) is not True):
+                raise core.StopBatch('MANAGED_TASK_ACTIVE','当前仅可同步盘点受管任务同一副本，请用该任务返回的model_id。')
+            material_session=session
         if self.tasks.prior_unfinished and name in {'get_recovery_state','restore_model_checkpoint'}:
             raise core.StopBatch('ORPHAN_NATIVE_SESSION_UNAVAILABLE','原活会话丢失；get_mechanism_task读取旧归属记录，不能用主安装日志冒充该任务状态。',
                 {'tasks':self.tasks.get(),'native_calls':False})
@@ -76,11 +84,14 @@ class FormalEngine:
         if name=='prepare_mechanism_task':
             # Reuse the upgrade/install lease while a managed CAD task owns its native copy.
             self.product.bridge._acquire_lease();self.managed_upgrade_guard=True
-        if name not in managed|offline and not (name=='replay_motion_frame' and binding) and not recovery_session and self.tasks.active:
+        inspection_page=name=='inspect_model' and arguments.get('detail_level')=='page'
+        if name not in managed|offline and not (name=='replay_motion_frame' and binding) and not recovery_session and not material_session and not inspection_page and self.tasks.active:
             raise core.StopBatch('MANAGED_TASK_ACTIVE','已有受管任务；使用get_mechanism_task读取，不向另一实例派发。',{'task_id':self.tasks.active})
         original_artifacts=self.product.artifacts;original_bridge=self.product.bridge
         bridge_override=False
         try:
+            if material_session:
+                self.product.bridge=material_session.bridge;bridge_override=True
             if recovery_session:
                 if not recovery_session.bridge:raise core.StopBatch('MANAGED_RUNTIME_NOT_READY','任务没有可用的原生连接；读取该任务收尾记录，不改查主安装日志。',
                     {'task_id':self.tasks.active,'phase':self.tasks.tasks.get(self.tasks.active,{}).get('phase'),

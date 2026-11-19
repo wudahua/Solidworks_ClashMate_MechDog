@@ -46,19 +46,21 @@ public partial class Cad {
         ApertureRequire(trial!=null&&trial.IsActive,"aperture_candidate_changed");
         trial.Stop();trial.SetTime(0);Application.DoEvents();
         ApertureRequire(Math.Abs(trial.GetTime())<1e-8,"aperture_zero_clock_failed");
-        VerifyNewStudyMateState(doc,state.MateMask,state.Initial);
         VerifyUserSources(model);
         if(keep) {
+            VerifyNewStudyMateState(doc,state.MateMask,state.Initial,"before_saving_aperture_study");
             Save(doc,model.Path);
             var active=(IMotionStudy)((IMotionStudyManager)doc.Extension.GetMotionStudyManager()).GetMotionStudy(state.Study);
             var results=active==null?null:(IMotionStudyResults)active.GetResults(4);
             ApertureRequire(active!=null&&results!=null&&!results.IsOutOfDate()&&Math.Abs(active.GetTime())<1e-8,"saved_aperture_results_not_current");
         } else {
             var previous=(IMotionStudy)manager.GetMotionStudy(state.OriginalStudy);
-            ApertureRequire(previous!=null&&previous.Activate()&&manager.DeleteMotionStudy(state.Study),"aperture_probe_removal_failed");
+            ApertureRequire(previous!=null&&previous.Activate()&&previous.IsActive,"aperture_original_study_activation_failed");
             ApertureRequire(Math.Abs(previous.GetTime())<1e-8,"original_study_clock_changed");
+            VerifyNewStudyMateState(doc,state.MateMask,state.Initial,"after_reactivating_original_study");
+            ApertureRequire(manager.DeleteMotionStudy(state.Study),"aperture_probe_removal_failed");
         }
-        VerifyNewStudyMateState(doc,state.MateMask,state.Initial);
+        VerifyNewStudyMateState(doc,state.MateMask,state.Initial,keep?"after_saving_aperture_study":"after_removing_aperture_probe");
         VerifyUserSources(model);
         apertureCandidate=null;
         LastOperationRestoration="restored";
@@ -113,7 +115,7 @@ public partial class Cad {
                 ApertureRequire(study.Activate(),"aperture_study_activation_failed");
                 study.StudyType=4;
                 ApertureRequire(study.StudyType==4,"motion_analysis_required");
-                VerifyNewStudyMateState(doc,state.MateMask,state.Initial);
+                VerifyNewStudyMateState(doc,state.MateMask,state.Initial,"aperture_study_before_calculate");
                 var motor=(ISimulationMotorFeatureData)study.CreateDefinition(77);
                 motor.DirectionReference=face;motor.Location=face;motor.ReverseDirection=reverse;motor.RelativeComponent=(Component2)support;
                 motor.InterpolatedMotor((int)swSimulationMotorDriveType_e.swSimulationMotorDrive_Displacement,(int)swInterpolationType_e.swCubicInterpolation);
@@ -153,7 +155,7 @@ public partial class Cad {
                 var interferences=Path.Combine(directory,"aperture-interference.json");
                 AtomicJson(interferences,new{baseline_mm3=basePairs,rows,threshold_mm3=.01});
                 study.SetTime(0);Application.DoEvents();
-                VerifyNewStudyMateState(doc,state.MateMask,state.Initial);
+                VerifyNewStudyMateState(doc,state.MateMask,state.Initial,"aperture_trial_after_sampling_and_reset");
                 VerifyUserSources(model);
                 if(candidate)apertureCandidate=state;
                 else PutApertureBack(model,state,false);
@@ -164,7 +166,7 @@ public partial class Cad {
                 if(failure is COMException||failure is NativeCommandStateException) { scope.DeferRestoration(failure);LastOperationRestoration="unknown";throw; }
                 if(!created) { LastOperationRestoration="unknown";throw; }
                 try { PutApertureBack(model,state,false); }
-                catch(Exception cleanup) { scope.DeferRestoration(cleanup);LastOperationRestoration="unknown";throw new CadFault("RESTORATION_FAILED","算例失败后无法确认试算清理，保留现场。",new{original=failure.Message,cleanup=cleanup.Message}); }
+                catch(Exception cleanup) { scope.DeferRestoration(cleanup);LastOperationRestoration="unknown";throw new CadFault("RESTORATION_FAILED","算例失败后无法确认试算清理，保留现场。",new{original=failure.Message,cleanup=cleanup.Message,original_failure=FailureEvidence(failure),cleanup_failure=FailureEvidence(cleanup)}); }
                 throw;
             }
         }

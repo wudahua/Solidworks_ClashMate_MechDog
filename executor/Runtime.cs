@@ -397,6 +397,8 @@ public partial class Cad {
             case "import_assembly": return ImportUserAssembly((string)p["path"],p.ContainsKey("configuration")?(string)p["configuration"]:null,null,null,p.ContainsKey("import_id")?(string)p["import_id"]:null,p.ContainsKey("materialize_virtual_components")&&Convert.ToBoolean(p["materialize_virtual_components"]));
             case "list_models": return UserListModels();
             case "inspect_model": return InspectUserModel((string)p["model_id"],p.ContainsKey("detail_level")?(string)p["detail_level"]:"full");
+            case "_preview_part_materials": return PreviewPartMaterials((string)p["model_id"],(string)p["assignments_json"]);
+            case "_apply_part_materials": return ApplyPartMaterials((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));
             case "list_motion_studies": return UserStudies((string)p["model_id"],p.ContainsKey("inspect_native_drives")&&Convert.ToBoolean(p["inspect_native_drives"]));
             case "probe_motion_compatibility": return ProbeUserCompatibility((string)p["model_id"],(string)p["study"],Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"],p.ContainsKey("checkpoint_id")?(string)p["checkpoint_id"]:"");
             case "preflight_motion": return PreflightUserMotion((string)p["model_id"],p.ContainsKey("study")?(string)p["study"]:null);

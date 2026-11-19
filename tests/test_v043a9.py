@@ -181,9 +181,15 @@ class StartupAndDiagnosticsTests(unittest.TestCase):
             value=asyncio.run(mcp.call_tool('get_mechanism_task',{'collect_evidence':True})).structured_content
         self.assertTrue(value['ok']);self.assertEqual(value['result']['CAD_calls'],0);self.assertTrue(Path(value['result']['zip_path']).is_file())
 
-    def test_twenty_reported_native_codes_have_deliberate_nonautomatic_guidance(self):
+    def test_reported_native_codes_have_deliberate_nonautomatic_guidance(self):
         codes=set(NATIVE_ACTION_CLASSES)|{'EXECUTOR_ALREADY_RUNNING'}
-        self.assertEqual(len(codes),20)
+        reported={'CHECKPOINT_REQUIRES_INITIAL_TIME','CREATE_STUDY_REQUIRES_INITIAL_TIME','ACTIVE_TIME_NOT_FRAME_ALIGNED',
+                  'CHECKPOINT_SETTINGS_MISMATCH','CHECKPOINT_TIME_RESTORE_FAILED','STUDY_NOT_FOUND','MODEL_PREFLIGHT_FAILED',
+                  'DRIVE_ENTITY_STALE','CANDIDATE_CURSOR_STALE','DRIVE_ENTITY_NOT_FOUND','COM_SESSION_NOT_FOUND',
+                  'COM_SESSION_UNAVAILABLE','INVALID_SOLIDWORKS_PID','COM_SESSION_ID_MISMATCH','AMBIGUOUS_COM_SESSION',
+                  'NATIVE_TIME_AXIS_MISMATCH','MOTION_RESULTS_INCOMPLETE','INVALID_MODEL_ID','MODEL_NOT_REGISTERED',
+                  'EXECUTOR_ALREADY_RUNNING','RESULTS_STALE','PART_MATERIAL_WRITE_ROLLED_BACK','PART_MASS_PROPERTIES_UNAVAILABLE'}
+        self.assertTrue(reported<=codes,reported-codes)
         backend='\n'.join(p.read_text(encoding='utf-8-sig') for p in (ROOT/'executor').glob('*.cs'))
         backend+='\n'+'\n'.join(p.read_text(encoding='utf8') for p in (ROOT/'sw_mcp').glob('*.py'))
         for code in codes:

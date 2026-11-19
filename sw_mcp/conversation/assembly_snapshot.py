@@ -8,7 +8,7 @@ PAGE_BYTES=8000
 PAGE_ROWS=16
 EXPANDED_PAGE_BYTES=14000
 RECOMMENDED_PAGE_ROWS=50
-KINDS=('components','candidates','goals','questions','geometry','actions','groups','fixed_changes','mechanical_groups','mate_changes','mates')
+KINDS=('components','candidates','goals','questions','geometry','actions','groups','fixed_changes','mechanical_groups','mate_changes','mates','mirror_dependencies','redundancy_candidates')
 _READ_CACHE=OrderedDict()
 _READ_LOCK=threading.RLock()
 
@@ -157,6 +157,13 @@ def publish_prepare(task,session):
             'automatic_suppression_recommended':False})
     collections={'components':components,'candidates':candidates,'goals':goals,'questions':questions,'geometry':geometry,'mates':mates}
     if guide:collections['mechanical_groups']=guide['groups']
+    from .. import mirror_connections
+    mirrors=mirror_connections.review(survey)
+    if mirrors:collections['mirror_dependencies']=mirrors
+    if not readonly:
+        from ..mate_redundancy import review as redundancy_review
+        redundant=redundancy_review(survey)
+        if redundant:collections['redundancy_candidates']=redundant
     entry=_persist(task,session,'prepare',collections,source,additional)
     search=assessment.get('candidate_search') or {}
     task['assembly_brief']={'schema_version':1,'observation_stage':'prepare_snapshot_before_native_preview',
@@ -182,9 +189,14 @@ def publish_prepare(task,session):
         'automatic_plan_available':assessment.get('automatic_plan_available') is True,
         'snapshot':entry,'mechanical_intent_proven':False,'motion_verified':False,
         'instruction':'AI先读取goals与questions，复用已明确用途集中澄清；需要时读取候选/组件/几何快照，不逐面访问CAD。快照不证明设计意图、缺项或当前状态。所有未知项及搜索截断仍保留阻断。实际plan须当前原生预演，具体方案确认后一次执行全部内部批次。'}
+    if mirrors:
+        task['assembly_brief']['mirror_dependency_count']=len(mirrors)
+        task['assembly_brief']['mirror_sources_requiring_review']=sum(m['source_binding_status']=='mirror_source_review_required' for m in mirrors)
+        query=next(q for q in entry['queries'] if ':mirror_dependencies:' in q['arguments']['snapshot_cursor'])
+        task['next_action']={**query,'instruction':'AI先读镜向源件及派生实例。根据机械用途评估源件目标，避免给派生件直接加配合或将镜向等同于刚性。'}
     if guide:
         task['assembly_brief']['intent_guide']={k:v for k,v in guide.items() if k!='groups'}
-        if guide['zero_mate_assembly']:
+        if guide['zero_mate_assembly'] and not mirrors:
             group_query=next((q for q in entry['queries'] if ':mechanical_groups:' in q['arguments']['snapshot_cursor']),None)
             if group_query:
                 task['next_action']={'tool':group_query['tool'],'arguments':group_query['arguments'],
@@ -297,12 +309,20 @@ def summary(task):
     result['validation_conclusions']=conclusions(task)
     if task.get('connection_batch_history'):
         result['previously_verified_batch_count']=len(task['connection_batch_history'])
+    if (task.get('proposal') or {}).get('task_operation')=='assign_part_materials':
+        result['material_assignment_review']={'count':len(task['proposal']['assignments']),
+            'requires_explicit_confirmation':True,
+            'query':{'tool':'get_mechanism_task','arguments':{'task_id':task['task_id'],'full_record':True}}}
+    if task.get('material_input_review'):
+        result['material_input_review']={k:task['material_input_review'][k] for k in ('code','message')}
     for key in ('error','previous_failure'):
         if isinstance(result.get(key),dict):
             result[key]={k:result[key][k] for k in ('code','message','assertion','restoration_status','native_unknown','retry_write_allowed') if k in result[key]}
             result[key]['details_in_full_task']=True
     if isinstance(task.get('verification'),dict):
         result['verification']={k:v for k,v in task['verification'].items() if v is None or type(v) in (str,int,float,bool)}
+        for key in ('initial_openings_mm','achieved_openings_mm','final_openings_mm','target_openings_mm'):
+            if key in task['verification']:result['verification'][key]=task['verification'][key]
         result['verification']['full_task_retains_detailed_evidence']=True
     if task.get('finish'):
         f=task['finish'];result['finish']={k:f.get(k) for k in ('cleanup_status','next_round_allowed','source_files_unchanged','result_assembly_path','result_assembly_sha256','native_exit','executor_exit')}

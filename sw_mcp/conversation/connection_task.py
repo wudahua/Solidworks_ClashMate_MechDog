@@ -5,7 +5,7 @@ import uuid
 from . import core,source_integrity,task_execution
 from .task_engine import matching_components,mechanical_choices
 from ..bridge import CadError
-from .. import assembly_connections as joints,connection_trials as trials,connection_recommendations as recommendations,connection_groups,assembly_overview,connection_batches,assembly_hierarchy
+from .. import assembly_connections as joints,connection_trials as trials,connection_recommendations as recommendations,connection_groups,assembly_overview,connection_batches,assembly_hierarchy,mirror_connections
 
 
 def discover(s, continued_batch=None):
@@ -78,7 +78,10 @@ def publish_review(engine,t,value):
 
 
 def resolve(s,intents,maximum=8):
-    if not isinstance(intents,list) or not 1<=len(intents)<=maximum:raise core.StopBatch('CONNECTION_INTENT_INVALID','本次连接目标上限为'+str(maximum)+'项。')
+    if not isinstance(intents,list) or not 1<=len(intents)<=maximum:
+        raise core.StopBatch('CONNECTION_INTENT_INVALID','本次连接目标上限为'+str(maximum)+'项。'+
+            ('需要覆盖整个装配时可明确选择whole_assembly（最多128项）；局部修复可拆成各自有机械意义的批次。' if maximum==8 else ''),
+            {'maximum_goals':maximum,'write_dispatched':False})
     cs=s.connection_survey['components'];out=[]
     for raw in intents:
         if hasattr(raw,'model_dump'):raw=raw.model_dump()
@@ -230,8 +233,9 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
         auto_plan=False
     if coaxial_groups is not None and (auto_plan or group_seeds is not None or assembly_scope_hint):
         raise core.StopBatch('CONNECTION_INTENT_INVALID','同轴组随明确机械目标预演，不能与自动草案、层选择或分组推荐同传。')
-    if mate_changes is not None and (auto_plan or group_seeds is not None or assembly_scope_hint or intents is None or alignment_mode!='strict' or completion_scope!='whole_assembly'):
-        raise core.StopBatch('CONNECTION_INTENT_INVALID','既有配合压缩修改须随显式完整目标预演，不混用自动草案、层选择或初态平移。')
+    if mate_changes is not None and (auto_plan or group_seeds is not None or assembly_scope_hint or not intents or alignment_mode!='strict'
+            or (completion_scope=='declared' and any(value is not None for value in (rigid_groups,release_fixed_components,coaxial_groups)))):
+        raise core.StopBatch('CONNECTION_INTENT_INVALID','既有配合压缩修改须随显式目标预演。局部模式仅调整目标零件对，不混用自动草案、分组、层选择、解除固定或初态平移。')
     driven=verification_mode=='driven_loop' 
     if verification_mode not in {'independent_joint_trials','driven_loop'}:raise core.StopBatch('CONNECTION_INTENT_INVALID','未知验证方式。')
     if driven:
@@ -249,7 +253,9 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
     if t['phase'] not in {'constraint_review_ready','awaiting_confirmation'}:raise core.StopBatch('TASK_NOT_READY_FOR_PLAN')
     s=engine.sessions[t['task_id']]
     preserved=getattr(s,'preserved_connection_goals',[])
-    if preserved and (whole or auto_plan or assembly_scope_hint or release_fixed_components is not None or rigid_groups is not None):
+    if mate_changes is not None and getattr(s,'selected_assembly_layer',None):
+        raise core.StopBatch('CONNECTION_SCOPE_UNSUPPORTED','既有配合压缩修改须在根装配范围预演。')
+    if preserved and (whole or auto_plan or assembly_scope_hint or release_fixed_components is not None or rigid_groups is not None or mate_changes is not None):
         raise core.StopBatch('CONNECTION_SCOPE_UNSUPPORTED','同一副本后续批次仅接受明确的局部连接目标，保留原固定状态和已通过批次。')
     loop_profile=None
     if driven:
@@ -353,13 +359,23 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
         approved_mate_changes=[]
         if mate_changes is not None:
             from .. import connection_mate_changes
-            planning_survey,approved_mate_changes=connection_mate_changes.prepare(planning_survey,mate_changes)
+            planning_survey,approved_mate_changes=connection_mate_changes.prepare(planning_survey,mate_changes,local_goals=None if whole else goals)
         coaxial_bindings=[]
         if groups:
             from .. import coaxial_groups as shared_axes
             extra,coaxial_bindings,question=shared_axes.expand(planning_survey,groups,initial_translation_limit_mm if alignment_mode=='small_translation' else None)
             if question:return {'task_id':t['task_id'],**question}
             goals+=extra
+        mirror_rows=mirror_connections.review(planning_survey)
+        mirror_blockers=mirror_connections.blockers(planning_survey,goals,mirror_rows)
+        mirror_query=next((q['arguments'] for q in (t.get('assembly_prepare_snapshot') or {}).get('queries',[])
+                           if ':mirror_dependencies:' in q['arguments']['snapshot_cursor']),None)
+        if mirror_blockers:
+            raise core.StopBatch('CONNECTION_SCOPE_UNSUPPORTED','镜向派生目标已在原生预演前识别。AI结合源件链复核机械用途，同属刚性运动时用rigid_groups保留并验证派生件；其余目标可重新提交局部方案。',
+                {'reason':'mirror_occurrence_requires_source_review','blocked_goals':mirror_blockers,
+                 'remaining_goal_indices_not_verified':[i for i in range(len(goals)) if all(b['goal_index']!=i for b in mirror_blockers)],
+                 'cad_dispatched':False,'write_dispatched':False,'confirmation_token_created':False,
+                 'partial_submission':False,'automatic_goal_remap':False,'mirror_review_arguments':mirror_query})
         if len(goals)>(128 if whole else 8) or len(goals)+len(preserved)>128:
             raise ValueError('connection_goal_budget_exceeded_after_group_expansion')
         pairs=[frozenset((g['component_a'],g['component_b'])) for g in [*goals,*preserved]]
@@ -396,7 +412,8 @@ def propose(engine,t,intents,rigid_groups=None,release_fixed_components=None,com
     except (ValueError,TypeError) as error:
         reason=str(error)
         code='CONNECTION_GOAL_CONFLICT' if reason in {'existing_constraints_conflict_with_declared_motion','existing_indirect_constraints_conflict_with_declared_motion','proposed_group_constraints_conflict_with_declared_motion','mobile_joint_inside_declared_rigid_group','both_components_fixed_no_floating_target_for_native_trial','native_fully_constrained_mobile_goal_requires_review','native_full_constraint_conflicts_with_supported_missing_rank'} else 'CONNECTION_SCOPE_UNSUPPORTED' if reason in {'coupled_verification_cannot_mix_supplements','native_inventory_or_health_requires_review','pattern_group_requires_seed_scope_review','pattern_member_fixed_release_unsupported','fixed_release_requires_an_existing_fixed_reference_to_remain'} else 'CONNECTION_INTENT_INVALID'
-        explanation={'native_fully_constrained_mobile_goal_requires_review':'局部运动线索与原生全约束观察冲突；先核对装配模型作用域及整条约束链，未解固定或补配合。',
+        explanation={'local_mate_change_requires_matching_declared_pair':'已有配合不在任何已声明的局部目标零件对内。先复核受影响的机械关系，跨零件对的整机调整使用whole_assembly。',
+            'native_fully_constrained_mobile_goal_requires_review':'局部运动线索与原生全约束观察冲突；先核对装配模型作用域及整条约束链，未解固定或补配合。',
             'native_full_constraint_conflicts_with_supported_missing_rank':'原生报告已全约束，但受支持局部模型仍有缺口；未知约束不能当作不存在，未继续补配合。',
             'existing_constraints_conflict_with_declared_motion':'原配合与目标运动冲突；未自动删除、压缩或解除固定。',
             'existing_indirect_constraints_conflict_with_declared_motion':'受支持的间接约束链与目标运动冲突；AI核对整装配约束图，不把直接配合较少当成缺项，不自动删除旧约束。',
@@ -613,6 +630,18 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
     def operation():
         try:return perform()
         except Exception as error:
+            if isinstance(error,CadError) and error.code=='CONNECTION_APPLY_ROLLED_BACK' and isinstance(error.diagnostics,dict):
+                details=error.diagnostics.get('details') or {}
+                failed=details.get('failed_action') or {}
+                original=(details.get('original_failure') or {}).get('details') or {}
+                if original.get('native_error_name')=='swAddMateError_OverDefinedAssembly':
+                    from ..mate_redundancy import review as redundancy_review
+                    candidates=redundancy_review(engine.sessions[t['task_id']].connection_survey)
+                    endpoints={failed.get('component_a'),failed.get('component_b')}
+                    related=[c for c in candidates if endpoints.intersection(c['component_ids'])]
+                    details['same_endpoint_redundancy_candidates']=related[:8]
+                    details['snapshot_redundancy_candidate_count']=len(candidates)
+                    details['conflicting_existing_mates_status']='not_proven_by_local_rank'
             if t.get('connection_transaction'):
                 from .connection_batch_task import restore_failed_transaction
                 restore_failed_transaction(engine.sessions[t['task_id']],t,error)

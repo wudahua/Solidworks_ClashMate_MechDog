@@ -13,6 +13,29 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_public_inspection_sections_are_frozen_and_model_bound(self):
+        from sw_mcp import inspection_snapshot
+        result=inspection_snapshot.store(self.folder, self.survey)
+        key=self.survey['model_id']
+        start=result['queries']['components']['cursor']
+        first=inspection_snapshot.page(self.folder,key,start,1)
+        self.assertEqual(first['range_start'],0)
+        next_page=inspection_snapshot.page(self.folder,key,first['next_cursor'],2)
+        self.assertEqual(next_page['range_start'],1)
+        self.assertIsNone(next_page['next_cursor'])
+        with self.assertRaises(ValueError):inspection_snapshot.page(self.folder,'different-model',start,1)
+        section=inspection_snapshot.page(self.folder,key,result['queries']['geometry']['cursor'],100)
+        self.assertTrue(all('native_feature_id' in x for x in section['rows']))
+        self.assertFalse(section['cad_dispatched'])
+
+    def test_readonly_motion_summary_preserves_aperture_result_and_offers_full_record(self):
+        from sw_mcp.conversation import assembly_snapshot
+        record={'task_id':'1'*32,'task_kind':'motion','phase':'verified',
+                'verification':{'declared_scope_passed':True,'achieved_openings_mm':[25.5,25.7],'frames':41,'pose_rows':['heavy']*100}}
+        compact=assembly_snapshot.summary(record)
+        self.assertEqual(compact['verification']['achieved_openings_mm'],[25.5,25.7])
+        self.assertNotIn('pose_rows',compact['verification'])
+        self.assertTrue(compact['full_record_query']['arguments']['full_record'])
     def test_progress_only_stays_small_and_does_not_reconcile(self):
         import time
         import motion_server

@@ -54,6 +54,11 @@ class StrictMCPServer(MCPServer):
         tools = await super().list_tools()
         for tool in tools:
             tool.input_schema = {**tool.input_schema, 'additionalProperties': False}
+            if tool.name=='plan_mechanism_task':
+                tool.input_schema['allOf']=[*tool.input_schema.get('allOf',[]), {
+                    'if':{'required':['completion_scope'],'properties':{'completion_scope':{'const':'whole_assembly'}}},
+                    'else':{'properties':{'connection_intent':{'maxItems':8}}},
+                }]
             if tool.name in {'list_mate_references', 'list_drive_candidates'}:
                 properties = {k: dict(v) for k, v in tool.input_schema['properties'].items()}
                 for field, bounds in {'mate_context_budget_s': {'minimum': 1, 'maximum': 30},
@@ -99,6 +104,11 @@ class StrictMCPServer(MCPServer):
             if 'const' in schema: diag['accepted_values'] = [schema['const']]
             label = ', '.join(diag['missing_keys']) if issue.validator == 'required' else field
             code = 'INVALID_ARGUMENT'
+            if name=='plan_mechanism_task' and field=='connection_intent' and issue.validator=='maxItems':
+                limit=schema['maxItems']
+                return refuse('CONNECTION_INTENT_INVALID',
+                    '当前模式最多'+str(limit)+'个连接目标。完整机械目标可选择whole_assembly，局部补齐可按机械分组分批。',
+                    {**diag,'maximum_goals':limit,'completion_scope':arguments.get('completion_scope','declared')})
             if name in {'list_mate_references', 'list_drive_candidates'} and issue.validator in {'minimum', 'maximum'}:
                 code = {'mate_context_budget_s': 'INVALID_MATE_CONTEXT_BUDGET', 'geometry_scan_budget_s': 'INVALID_GEOMETRY_SCAN_BUDGET', 'face_offset': 'INVALID_FACE_OFFSET',
                         'limit': 'LIMIT_OUT_OF_RANGE'}.get(field, code)

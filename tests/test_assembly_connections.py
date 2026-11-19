@@ -24,6 +24,18 @@ def survey(mates=()):
 
 
 class ConnectionTests(unittest.TestCase):
+    def test_rollback_status_preserves_verified_native_recovery_scope(self):
+        from sw_mcp.task_errors import task_failure
+        code='CONNECTION_APPLY_ROLLED_BACK'
+        details={'checkpoint_id':'b'*32,'rollback_verified':True}
+        envelope=task_failure(code,'rollback',{'details':details},asynchronous=True)
+        self.assertEqual(envelope['restoration_status'],'restored')
+        self.assertEqual(envelope['diagnostics']['restoration_scope'],'verified_pre_apply_checkpoint')
+        for unproved in ({**details,'rollback_verified':False},{**details,'checkpoint_id':'invalid'}):
+            failed=task_failure(code,'rollback',{'details':unproved},asynchronous=True)
+            self.assertEqual(failed['restoration_status'],'unknown')
+        self.assertEqual(task_failure(code,'rollback',{'details':details})['restoration_status'],'unknown')
+
     @staticmethod
     def coaxial_fixture():
         s=survey()

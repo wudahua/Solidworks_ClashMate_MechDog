@@ -31,7 +31,7 @@ class Bridge:
 
     LONG_OPERATIONS = frozenset({"_survey_connection_layers", "_select_connection_layer", "_verify_connection_layer", "_test_connection_parameter_readers", "_connection_reference_state", "_survey_assembly_connections", "_preview_assembly_connections", "_apply_assembly_connections", "_probe_assembly_connection_pose", "_test_connection_rollback", "_test_connection_suppression", "_test_connection_deletion", "_import_constraint_assembly", "_import_gear_assembly", "_survey_external_gear_pair", "_preview_external_gear_pair", "_apply_external_gear_pair", "_test_external_gear_rollback", "check_interference_during_motion", "run_parameter_search", "diagnose_gear_phase",
         "import_assembly", "run_user_study", "verify_motion_preservation", "replay_motion_frame", "_run_aperture_cycle", "_finish_aperture_cycle",
-        "restore_model_checkpoint", "apply_mate", "create_motion_study", "convert_motion_study",
+        "restore_model_checkpoint", "apply_mate", "create_motion_study", "convert_motion_study", "_preview_part_materials", "_apply_part_materials",
         "reset_study_time", "create_model_checkpoint", "probe_motion_compatibility", "_preview_gear_transmission", "_apply_gear_transmission", "_test_gear_transmission_rollback"})
     ASYNC_QUERIES = frozenset({"inspect_model", "list_mate_references", "list_drive_candidates"})
     RESTORATION_WAIT_S = 60

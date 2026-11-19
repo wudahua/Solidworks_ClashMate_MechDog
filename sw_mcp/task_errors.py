@@ -28,7 +28,7 @@ GROUPS = (
     ('user_parameter_correction_required',
      'AI核对工具声明、字段范围及原调用；定位文件或修正参数后显式调用。仅机械选择或授权确有必要时询问用户，不要求用户手抄ID或命令。',
      {'INVALID_MOTION_TYPE', 'INVALID_MOTION_PARAMETERS', 'INVALID_MINIMUM_TRAVEL',
-      'INVALID_TASK_KIND', 'CONNECTION_INTENT_INVALID', 'CONCENTRIC_FIXED_CARD_PARAMETERS', 'GEAR_PARAMETERS_INVALID', 'INVALID_ASSEMBLY_PATH',
+      'INVALID_TASK_KIND', 'CONNECTION_INTENT_INVALID', 'PARAMETER_NOT_APPLICABLE', 'CONCENTRIC_FIXED_CARD_PARAMETERS', 'GEAR_PARAMETERS_INVALID', 'INVALID_ASSEMBLY_PATH',
       'ASSEMBLY_NOT_FOUND', 'INVALID_INITIAL_STATE', 'INVALID_TASK_ID','INVALID_ALIGNMENT_MODE','SCOPE_CONFIRMATION_MUST_BE_BOOLEAN',
       'INCOMPATIBLE_FINISH_CHOICES', 'INVALID_POSE_BUDGET', 'INVALID_RECOMMENDATION_INDEX',
       'INVALID_RUN_ID', 'INVALID_SCOPE_CONFIRMATION', 'UNKNOWN_MATE_ACTION','EXTERNAL_GEAR_RATIO_INVALID','EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE'}),
@@ -126,7 +126,7 @@ for status, instruction, codes in GROUPS:
 PRE_DISPATCH_CODES = frozenset({
     'INVALID_MOTION_TYPE', 'INVALID_MOTION_PARAMETERS', 'INVALID_MINIMUM_TRAVEL',
     'INVALID_TASK_KIND', 'CONCENTRIC_FIXED_CARD_PARAMETERS', 'INVALID_ASSEMBLY_PATH',
-    'INVALID_INITIAL_STATE', 'INVALID_TASK_ID', 'INCOMPATIBLE_FINISH_CHOICES',
+    'INVALID_INITIAL_STATE', 'INVALID_TASK_ID', 'INCOMPATIBLE_FINISH_CHOICES', 'PARAMETER_NOT_APPLICABLE',
     'TASK_NOT_IN_CURRENT_SERVER', 'PLAN_TOKEN_MISMATCH', *CONFIRMATION_CODES,
 })
 
@@ -136,6 +136,14 @@ def task_failure(code, message, diagnostics=None, *, task_id='', asynchronous=Fa
     diag = deepcopy(diagnostics or {})
     task_id = task_id if re.fullmatch('[a-f0-9]{32}', task_id or '') else ''
     known_refusal = not asynchronous and code in PRE_DISPATCH_CODES
+    mirror_refusal = (not asynchronous and code=='CONNECTION_SCOPE_UNSUPPORTED'
+        and diag.get('reason') in {'mirror_occurrence_requires_source_review','mirror_rigid_binding_requires_native_motion_evidence'}
+        and diag.get('cad_dispatched') is False and diag.get('confirmation_token_created') is False)
+    connection_details = diag.get('details')
+    connection_restored = (asynchronous and code in {'CONNECTION_APPLY_ROLLED_BACK','PART_MATERIAL_WRITE_ROLLED_BACK'}
+        and isinstance(connection_details,dict) and connection_details.get('rollback_verified') is True
+        and re.fullmatch('[a-f0-9]{32}', str(connection_details.get('checkpoint_id') or '')) is not None)
+    known_refusal = known_refusal or mirror_refusal
     host = code.startswith('HOST_') or code in TASK_ACTION_CLASSES and TASK_ACTION_CLASSES[code][0].startswith('host_infrastructure_')
     if host:
         known_refusal = not asynchronous and (diag.get('launch_attempted') is False or code in {'HOST_TASK_COLLISION', 'HOST_PRINCIPAL_UNVERIFIABLE'})
@@ -150,8 +158,11 @@ def task_failure(code, message, diagnostics=None, *, task_id='', asynchronous=Fa
     value = operational_error(code, message, 'unknown', diag, job_created=diag['job_created'])
     if known_refusal:
         value['assertion'] = 'not_applicable'
-    if startup_failure:
+    if startup_failure or mirror_refusal:
         value['restoration_status']='not_required'
+    if connection_restored:
+        value['restoration_status']='restored'
+        value['diagnostics']['restoration_scope']='verified_pre_apply_checkpoint'
     action = value['next_action']
     if host:
         status, instruction = next((s, i) for s, i, _ in GROUPS if s.startswith('host_infrastructure_'))
@@ -176,6 +187,10 @@ def task_failure(code, message, diagnostics=None, *, task_id='', asynchronous=Fa
             action.update(tool='get_recovery_state',arguments={},instruction='AI先读取原请求状态；请求未结束时不释放执行器。')
     else:
         action.update(tool='get_mechanism_task', arguments={'collect_evidence': True} if host else {'task_id': task_id} if task_id else {})
+    if mirror_refusal:
+        action.update(arguments=diag.get('mirror_review_arguments') or action['arguments'],
+            instruction='AI先读原任务镜向依赖与完整源件链。只有同属刚性运动时才用rigid_groups覆盖派生件；其余目标可在同一副本独立重新规划。',
+            options_status='supported_mechanical_scope_review_required')
     if code=='EXTERNAL_GEAR_OPTIONS_NOT_APPLICABLE' and diag.get('requested_initial_state')=='study_zero' and diag.get('old_study_frame_zero_supported_in_this_task') is False:
         suggestion=diag.get('next_action') or {};arguments=suggestion.get('arguments') or {}
         selected=arguments.get('task_id','')

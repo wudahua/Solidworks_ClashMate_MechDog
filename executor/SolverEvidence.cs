@@ -26,8 +26,8 @@ public partial class Cad {
         RequireFreshSolveResults(study,current,modelId,name,stage);
     }
     void RequireFreshSolveResults(IMotionStudy study,IMotionStudyResults results,string modelId,string name,string stage){
-        if(results==null)throw new CadFault("RESULTS_STALE","原生求解未返回可读取结果对象。",new{model_id=modelId,study=name,stage=stage,native_calculate_return=true,result_object_returned=false,results_out_of_date=(bool?)null,settings=HistorySettings(study),active=study.IsActive,root_cause="not_proven"});
+        if(results==null)throw new CadFault("RESULTS_STALE","原生求解未返回可读取结果对象。",new{model_id=modelId,study=name,stage=stage,native_calculate_return=true,result_object_returned=false,results_out_of_date=(bool?)null,settings=HistorySettings(study),active=study.IsActive,root_cause="not_proven",solver_messages_status="not_available_from_verified_native_interface"});
         bool stale=results.IsOutOfDate();
-        if(stale)throw new CadFault("RESULTS_STALE","原生结果标为过期；保留诊断并恢复操作前状态。",new{model_id=modelId,study=name,stage=stage,native_calculate_return=true,result_object_returned=true,results_out_of_date=stale,settings=HistorySettings(study),active=study.IsActive,root_cause="not_proven",likely_causes=new[]{"study_inputs_or_solver_state_changed","drive_and_constraint_compatibility_requires_review"}});
+        if(stale)throw new CadFault("RESULTS_STALE","原生结果标为过期；保留诊断并恢复操作前状态。",new{model_id=modelId,study=name,stage=stage,native_calculate_return=true,result_object_returned=true,results_out_of_date=stale,settings=HistorySettings(study),active=study.IsActive,root_cause="not_proven",solver_messages_status="not_available_from_verified_native_interface",likely_causes=new[]{"study_inputs_or_solver_state_changed","drive_and_constraint_compatibility_requires_review"}});
     }
 }

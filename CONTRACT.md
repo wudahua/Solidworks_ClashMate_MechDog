@@ -1,3 +1,10 @@
+# 装配体检、旧配合复核与材质
+
+- `inspect_model` 默认读取紧凑体检，返回冻结几何和组件、配合、镜向依赖、冗余候选的分页入口。显式 `full` 保留原有详细结构。`summary_only=true` 和 `progress_only=true` 适用于各类受管任务。
+- 旧配合压缩和解除压缩支持依照明确的局部目标调整同一零件对。跨零件对的变更仍需明确整机目标。镜向派生件可随完整源件链声明为刚性组成员，由原生运动验证关系。
+- `inspect_model(detail_level="materials")` 返回零件引用配置及材质库名。`plan_mechanism_task(material_assignments=...)` 仅接受当前隔离装配的配置，明确确认后写入并读回。`mass_properties` 返回原生质量、体积、质心和主惯量。`native_material_review_required` 指示核对材质盘点、读回与恢复证据。
+- `RESULTS_STALE` 与时间轴不完整分别报告。求解前的约束复核展示已观察的配合路径、镜向依赖和候选冗余。`axial_mate_variations` 可分页核对同一零件配置对之间的轴向定位差异，故意设计的非对称也可能出现。原生求解器未给出可读取的根因时保留未确定状态。
+
 # alpha.52 装配复核与受管闭合
 
 - `get_mechanism_task(snapshot_cursor=..., snapshot_page_size=50)` 可在集合首页指定 1 至 100 行。实际行数受 14,000 字节结果上限约束。后续使用原样返回的游标，累积各集合，页尾只代表该集合后缀。原游标和原查询仍可使用。运行中可按 `progress_only=true` 查看紧凑状态。

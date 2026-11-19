@@ -96,7 +96,10 @@ public partial class Cad {
                 }
                 CloseUserDocuments(m.Files);evidence["stage"]="reopen_verify_externalized_copy";saveEvidence();object verification;
                 using(var scope=new Scope(this,m.Path,null)){RequireCopyReferenceClosure(m,false);if(UserComponents(scope.Doc).Any(c=>c.IsVirtual))throw new CadFault("VIRTUAL_COMPONENT_STILL_EMBEDDED","重新打开后仍有虚拟组件，未完成导入。",new{model_id=m.Id});verification=CompareVirtualWitness(before,VirtualWitness(scope.Doc));InspectUserCore(m,scope.Doc);Fingerprint(scope.Doc,scope.DocumentPath);}
-                VerifyUserSources(m);m.ImportState="complete";SaveUserModel(m);evidence["verification"]=verification;evidence["stage"]="verified_externalized_copy";evidence["completed"]=true;saveEvidence();var checkpoint=CreateUserCheckpoint(m.Id);var preflight=PreflightUserMotion(m.Id,null);LastOperationRestoration="restored";
+                evidence["verification"]=verification;evidence["stage"]="finalizing_externalized_copy";saveEvidence();
+                object checkpoint,preflight;
+                FinalizeUserImport(m,out checkpoint,out preflight);
+                evidence["stage"]="verified_externalized_copy";evidence["completed"]=true;saveEvidence();LastOperationRestoration="restored";
                 return new{model_id=m.Id,path=m.Path,configuration=m.Configuration,file_count=m.Files.Length,source_files_unchanged=true,materialization=new{requested=true,virtual_component_count=virtualComponentCount,externalized_files=conversions.Count,conversions=conversions.Take(20).ToArray(),returned_conversion_count=Math.Min(20,conversions.Count),conversions_truncated=conversions.Count>20,full_evidence_path=Path.Combine(directory,"import-evidence.json"),verification=verification,scope="single_configuration_top_level_loaded_virtual_parts"},checkpoint=checkpoint,preflight=preflight};
             } catch(Exception failure) {
                 m.ImportState="incomplete";SaveUserModel(m);

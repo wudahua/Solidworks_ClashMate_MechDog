@@ -8,7 +8,7 @@ import math
 import re
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Annotated,Literal
 from pydantic import BaseModel,ConfigDict,Field
 
 class ConnectionIntent(BaseModel):
@@ -18,6 +18,13 @@ class ConnectionIntent(BaseModel):
     kind:Literal['rigid','revolute','prismatic','cylindrical']
     axis_hint:list[float]|None=Field(default=None,min_length=3,max_length=3)
     candidate_id:str=Field(default='',max_length=40)
+
+class PartMaterialAssignment(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    part_file:str=Field(min_length=1,max_length=255)
+    configuration:str=Field(min_length=1,max_length=256)
+    database:str=Field(min_length=1,max_length=255)
+    material:str=Field(min_length=1,max_length=256)
 
 class MateChangeIntent(BaseModel):
     model_config=ConfigDict(extra='forbid')
@@ -58,7 +65,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.52", instructions='日常只用AI对话和现有30个MCP工具。先get_mechanism_task找回任务，无任务再prepare；任务期间按next_action读取、规划、确认、执行和finish，收尾后再开始下一轮。装配任务默认get读紧凑当前状态及assembly_brief，full_record=true读原文；summary_only=true仅保存摘要、不协调原请求。按snapshot.queries只读已保存组件、几何、候选、目标和集中问题，不让用户逐面选引用或抄ID。分页保留所有集合待办；未完整搜索、几何截断、未知用途与不支持项不能说成配合完善。复用用户已明确用途；需要时一次说明各运动组及必要改动，取得具体方案授权。零配合先读mechanical_groups几何建议，按组复用或澄清用途；同轴不证明刚性。已明确完整连接、主直线输入和输出的闭环优先评估driven_loop，不把独立逐关节试验当唯一整机路线。整机completion_scope=whole_assembly一次确认后内部自动分批；不会批量固定未分配零件。方案复核快照与当前令牌绑定，读取全部非空集合后再解释和确认执行。只读结构仍受原写入门禁，不能把父级刚性当内部完善或擅改柔性。motion支持旋转/直线；external_gear_pair为两平行轴比例联动，不认证齿面接触或受力。小幅配合试验不等于完整Motion。名称/轴线歧义用机械用途澄清，几何排名不证明设计意图。未知、超时或断连只读取原任务和恢复记录，不重放写入、强制清理或重建COM；已明确未导入的创建失败按任务指引安全收尾。默认finish恢复导入检查点；仅用户明确要保留已验证副本时keep_result=true。旧owner丢失须资源身份/退出证据及明确同意才异常归档，不能冒充恢复通过。低层工具需要时仍先import副本，再体检/查询/预演/确认写入；几何续查保留兄弟队列。所有结果区分本机/跨机、快照/当前原生、有限试验/全行程；失败证据保留。')
+mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.53", instructions='日常只用AI对话和现有30个MCP工具。先get_mechanism_task找回任务，无任务再prepare；任务期间按next_action读取、规划、确认、执行和finish，收尾后再开始下一轮。装配任务默认get读紧凑当前状态及assembly_brief，full_record=true读原文；summary_only=true仅保存摘要、不协调原请求。按snapshot.queries只读已保存组件、几何、候选、目标和集中问题，不让用户逐面选引用或抄ID。分页保留所有集合待办；未完整搜索、几何截断、未知用途与不支持项不能说成配合完善。复用用户已明确用途；需要时一次说明各运动组及必要改动，取得具体方案授权。零配合先读mechanical_groups几何建议，按组复用或澄清用途；同轴不证明刚性。已明确完整连接、主直线输入和输出的闭环优先评估driven_loop，不把独立逐关节试验当唯一整机路线。整机completion_scope=whole_assembly一次确认后内部自动分批；不会批量固定未分配零件。方案复核快照与当前令牌绑定，读取全部非空集合后再解释和确认执行。只读结构仍受原写入门禁，不能把父级刚性当内部完善或擅改柔性。motion支持旋转/直线；external_gear_pair为两平行轴比例联动，不认证齿面接触或受力。小幅配合试验不等于完整Motion。名称/轴线歧义用机械用途澄清，几何排名不证明设计意图。未知、超时或断连只读取原任务和恢复记录，不重放写入、强制清理或重建COM；已明确未导入的创建失败按任务指引安全收尾。默认finish恢复导入检查点；仅用户明确要保留已验证副本时keep_result=true。旧owner丢失须资源身份/退出证据及明确同意才异常归档，不能冒充恢复通过。低层工具需要时仍先import副本，再体检/查询/预演/确认写入；几何续查保留兄弟队列。所有结果区分本机/跨机、快照/当前原生、有限试验/全行程；失败证据保留。')
 
 _task_engine=None
 _formal_engine=None
@@ -83,7 +90,7 @@ async def prepare_mechanism_task(assembly_path:str,moving_component_hint:str='',
 
 @mcp.tool()
 async def get_mechanism_task(task_id:str='',collect_evidence:bool=False,draft_cursor:str='',structure_cursor:str='',snapshot_cursor:str='',summary_only:bool=False,full_record:bool=False,progress_only:bool=False,snapshot_page_size:int|None=Field(default=None,ge=1,le=100)):
-    '不传ID查找任务。progress_only=true配合task_id用于轮询阶段、耗时和原生观测；任务停止时再用默认查询核对结果和恢复。装配任务默认协调原请求后返回当前状态；full_record=true读取完整记录。summary_only=true只读保存摘要。snapshot_cursor读组件、候选、几何、问题或具体方案分页；累计各集合全部页。snapshot_page_size可在首页指定1至100，按返回游标续查。collect_evidence=true打包已有证据。各视图互斥。'
+    '不传ID查找任务。progress_only=true配合task_id用于轮询阶段、耗时和原生观测；任务停止时再用默认查询核对结果和恢复。装配任务默认协调原请求后返回当前状态；full_record=true读取完整记录。summary_only=true只读保存摘要，适用于所有受管任务。snapshot_cursor读组件、候选、几何、问题或具体方案分页；累计各集合全部页。snapshot_page_size可在首页指定1至100，按返回游标续查。collect_evidence=true打包已有证据。各视图互斥。'
     if snapshot_page_size is not None and not snapshot_cursor:
         return packed({'ok':False,'error':task_failure('CONNECTION_INTENT_INVALID','snapshot_page_size须与快照游标一起使用。')},True)
     if progress_only:
@@ -118,12 +125,14 @@ async def plan_mechanism_task(task_id:str,candidate_id:str='',moving_component_h
     rigid_groups:list[RigidGroupIntent]|None=Field(default=None,min_length=1,max_length=8),release_fixed_components:list[str]|None=Field(default=None,min_length=1,max_length=16),completion_scope:Literal['declared','whole_assembly']='declared',assembly_scope_hint:str='',assembly_sequence:Literal['','start','continue','stop']='',auto_plan:bool=False,group_seeds:dict[str,list[str]]|None=None,
     verification_mode:Literal['independent_joint_trials','driven_loop']='independent_joint_trials',output_component_hints:list[str]|None=Field(default=None,min_length=1,max_length=16),initial_translation_limit_mm:float=Field(default=.001,gt=0,le=.01),validated_assembly_task_id:str=Field(default='',pattern=r'^(?:[a-f0-9]{32})?$'),mate_changes:list[MateChangeIntent]|None=Field(default=None,min_length=1,max_length=16),
     target_openings_mm:list[float]|None=Field(default=None,min_length=2,max_length=2),aperture_output_hints:list[str]|None=Field(default=None,min_length=4,max_length=4),aperture_tip_end:Literal['axis_min','axis_max']='axis_min',
-    coaxial_groups:list[CoaxialGroupIntent]|None=Field(default=None,min_length=1,max_length=16),continue_verified_batch:bool=False):
-    '只规划，不执行。按当前任务next_action和推荐填写，机械歧义集中澄清。\n圆柱副cylindrical保留轴向移动及绕轴转动，须使用真实材料轴线。mate_changes只随whole_assembly显式完整目标，最多16项既有基础配合的压缩/解除压缩；先读get返回的mates快照，由AI按配合名称和组件推荐并获取身份，不让用户填ID；方案复核列出前后状态，确认后一起执行，失败恢复；不自动删除配合。\n装配auto_plan可合并少量connection_intent；whole_assembly最多128目标/512新增，内部8/64分批。group_seeds只读推荐归组；rigid_groups及解除固定须明确用途，未分配件不默认静止。\ndriven_loop仅用于完整平坦基础关节机构：moving/reference_component_hint明确主直线输入和接地参考，output_component_hints明确各输出；正反各0.1mm临时Motion检查所有组件和关节，不承诺每个铰接能独立运动。可用small_translation预测零配合模型的无旋转微量初态平移，默认预算0.001mm、最高0.01mm，execute另需alignment_confirmed。\n普通linear motion可用validated_assembly_task_id复用已验证并保留的driven_loop整机成果，核对全部原目标；输入最多20mm、组件位移50mm/转角15度，不认证设计全行程或接触力。\ncoaxial_groups声明同一材料轴的两件以上成员，分别保留轴向自由free或轴向定位located，均保留转动；轴有歧义时AI核对材料点。已验证的declared平坦装配可单独调用continue_verified_batch=true复用同一副本；后续仍需新方案及明确确认。\n运动、齿轮初态和分层序列按阶段指引；small_translation另需初态调整确认。核对完整目标、逐项改动、组成员和验证范围后才确认执行。几何和局部秩不证明设计意图、全局自由度或运动通过。'
+    coaxial_groups:list[CoaxialGroupIntent]|None=Field(default=None,min_length=1,max_length=16),continue_verified_batch:bool=False,
+    material_assignments:list[PartMaterialAssignment]|None=Field(default=None,min_length=1,max_length=64)):
+    '只规划，不执行。按当前任务next_action和推荐填写，机械歧义集中澄清。四指往复走motion任务，在plan传target_openings_mm和可选的aperture_output_hints。material_assignments随装配体检任务单独规划，按盘点的零件文件和配置选择本机材质库，写入前须明确确认。\n圆柱副cylindrical保留轴向移动及绕轴转动，须使用真实材料轴线。mate_changes随显式连接目标，最多16项既有基础配合的压缩或解除压缩；declared仅调整所声明的同一零件对，跨零件对需要whole_assembly；先读get返回的mates快照，由AI按配合名称和组件推荐并获取身份，不让用户填ID；方案复核列出前后状态，确认后一起执行，失败恢复；不自动删除配合。\n装配auto_plan可合并少量connection_intent；whole_assembly最多128目标/512新增，内部8/64分批。group_seeds只读推荐归组；rigid_groups及解除固定须明确用途，未分配件不默认静止。\ndriven_loop仅用于完整平坦基础关节机构：moving/reference_component_hint明确主直线输入和接地参考，output_component_hints明确各输出；正反各0.1mm临时Motion检查所有组件和关节，不承诺每个铰接能独立运动。可用small_translation预测零配合模型的无旋转微量初态平移，默认预算0.001mm、最高0.01mm，execute另需alignment_confirmed。\n普通linear motion可用validated_assembly_task_id复用已验证并保留的driven_loop整机成果，核对全部原目标；输入最多20mm、组件位移50mm/转角15度，不认证设计全行程或接触力。\ncoaxial_groups声明同一材料轴的两件以上成员，分别保留轴向自由free或轴向定位located，均保留转动；轴有歧义时AI核对材料点。已验证的declared平坦装配可单独调用continue_verified_batch=true复用同一副本；后续仍需新方案及明确确认。\n运动、齿轮初态和分层序列按阶段指引；small_translation另需初态调整确认。核对完整目标、逐项改动、组成员和验证范围后才确认执行。几何和局部秩不证明设计意图、全局自由度或运动通过。'
     options={} if target_openings_mm is None and aperture_output_hints is None and aperture_tip_end=='axis_min' else {
         'target_openings_mm':target_openings_mm,'aperture_output_hints':aperture_output_hints,'aperture_tip_end':aperture_tip_end}
     if coaxial_groups is not None:options['coaxial_groups']=[g.model_dump() for g in coaxial_groups]
     if continue_verified_batch:options['continue_verified_batch']=True
+    if material_assignments is not None:options['material_assignments']=[a.model_dump() for a in material_assignments]
     return await dialogue_call('plan',task_id,candidate_id,moving_component_hint,reference_component_hint,initial_state,alignment_mode,
                                gear_ratio_numerator,gear_ratio_denominator,input_shaft_hint,output_shaft_hint,input_gear_hint,output_gear_hint,stationary_component_hints,assembly_intent,
                                [r.model_dump() for r in connection_intent] if connection_intent is not None else None,
@@ -222,8 +231,26 @@ async def list_models() -> CallToolResult:
 
 
 @mcp.tool()
-async def inspect_model(model_id: str, detail_level: Literal["full", "components"] = "full", wait_for_completion: bool = True) -> CallToolResult:
-    """读取组件、当前原生配合健康及几何；detail_level="components"只读组件清单、跳过配合几何，适合大装配；wait_for_completion=False异步取job_id；本次返回的受支持顶层面在核验持久引用/归属后登记，可直接用于配合或驱动。其他参考不自动改绑；不隐式重建，自由度仍unknown。full还返回assembly_constraint_review及完整证据路径，区分既有约束、阵列依赖、局部缺口与运动意图；离线计算不额外派发CAD，不把分类或局部秩当作真实运动证明。"""
+async def inspect_model(model_id: str, detail_level: Literal["full", "components", "materials", "mass_properties", "summary", "page"] = "summary", wait_for_completion: bool = True,
+        cursor:str="", page_size:Annotated[int,Field(ge=1,le=100)]=50) -> CallToolResult:
+    """默认summary返回紧凑体检及分页入口，page使用原样返回的游标。显式full获取原有完整结构和assembly_constraint_review；components只读组件，跳过配合几何；materials按零件文件和引用配置盘点材质与已安装材质库；mass_properties读原生质量、体积、质心和主惯量。活跃受管任务须同一model_id且同步查询摘要、材质或质量。其他摘要和原生查询可用wait_for_completion=False获取job_id；page只读冻结快照且同步。受支持顶层面核验并登记后可用于配合或驱动，不隐式重建，不以局部秩证明全局自由度。"""
+    if detail_level in {'summary','page'}:
+        from sw_mcp import inspection_snapshot
+        if (detail_level=='page')!=bool(cursor) or (detail_level=='summary' and page_size!=50):
+            raise InputRefusal('INVALID_ARGUMENT','分页需要原样传回游标，页大小仅用于分页。')
+        if not wait_for_completion:
+            if detail_level=='page':raise InputRefusal('INVALID_ARGUMENT','快照分页为同步只读查询。')
+            return enqueue('inspect_model',{'model_id':model_id,'detail_level':'summary'})
+        try:
+            if detail_level=='page':
+                return packed({'ok':True,'result':await asyncio.to_thread(inspection_snapshot.page,ROOT,model_id,cursor,page_size)})
+            native=await call('inspect_model',model_id=model_id,detail_level='full')
+            if native.is_error:return native
+            return packed({'ok':True,'result':await asyncio.to_thread(inspection_snapshot.store,ROOT,native.structured_content['result'])})
+        except (OSError,ValueError,KeyError) as error:
+            raise InputRefusal('INVALID_ARGUMENT',str(error)) from error
+    if cursor or page_size!=50:
+        raise InputRefusal('INVALID_ARGUMENT','分页参数仅配合体检快照使用。')
     params = dict(model_id=model_id, detail_level=detail_level)
     return await call("inspect_model", **params) if wait_for_completion else enqueue("inspect_model", params)
 

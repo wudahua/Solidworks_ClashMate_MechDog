@@ -313,8 +313,21 @@ class MotionTaskEngine(TaskEngine):
     def plan(self,task_id,candidate_id='',moving_component_hint='',reference_component_hint='',initial_state='saved',alignment_mode='strict',
              gear_ratio_numerator=0,gear_ratio_denominator=0,input_shaft_hint='',output_shaft_hint='',input_gear_hint='',output_gear_hint='',stationary_component_hints=None,assembly_intent=None,connection_intent=None,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint='',assembly_sequence='',auto_plan=False,group_seeds=None,
              verification_mode='independent_joint_trials',output_component_hints=None,initial_translation_limit_mm=.001,validated_assembly_task_id='',mate_changes=None,
-             target_openings_mm=None,aperture_output_hints=None,aperture_tip_end='axis_min',coaxial_groups=None,continue_verified_batch=False):
+             target_openings_mm=None,aperture_output_hints=None,aperture_tip_end='axis_min',coaxial_groups=None,continue_verified_batch=False,
+             material_assignments=None):
         t=self.tasks[task_id]
+        if material_assignments is not None:
+            if (t.get('task_kind')!='assembly_constraints' or initial_state!='saved' or alignment_mode!='strict'
+                or completion_scope!='declared' or verification_mode!='independent_joint_trials' or initial_translation_limit_mm!=.001
+                or any((candidate_id,moving_component_hint,reference_component_hint,gear_ratio_numerator,gear_ratio_denominator,
+                        input_shaft_hint,output_shaft_hint,input_gear_hint,output_gear_hint,assembly_scope_hint,assembly_sequence,
+                        auto_plan,validated_assembly_task_id,aperture_tip_end!='axis_min',continue_verified_batch))
+                or any(v is not None for v in (stationary_component_hints,assembly_intent,connection_intent,rigid_groups,
+                                              release_fixed_components,group_seeds,output_component_hints,mate_changes,
+                                              target_openings_mm,aperture_output_hints,coaxial_groups))):
+                raise core.StopBatch('PARAMETER_NOT_APPLICABLE','material_assignments随装配体检任务单独规划，不能与配合或求解参数同传。')
+            from . import material_task
+            return material_task.propose(self,t,material_assignments)
         if target_openings_mm is not None:
             if (t.get('task_kind')!='motion' or t.get('motion_parameters',{}).get('motion')!='linear' or initial_state!='saved' or
                 validated_assembly_task_id or type(target_openings_mm) is not list or len(target_openings_mm)!=2 or
@@ -402,10 +415,22 @@ class MotionTaskEngine(TaskEngine):
                     t['proposal'].pop(field,None)
                 t['proposal'].update(aperture_validation=aperture_card,scope=aperture_card['scope'],drive_profile='linear_displacement_open_close_open')
                 t['next_action']['instruction']='解释两组测点、开口上限、主输入闭合方向和最多20毫米试算范围。取得确认后分段试算并扫描干涉，通过才保存41帧开合算例和测量表。'
+            native_inspection=getattr(s,'motion_inspection',{})
+            if native_inspection.get('mates') is not None:
+                from ..mate_redundancy import drive_review
+                selected=s.motion_candidates[found[0]]
+                review=drive_review(native_inspection,selected['drive'],selected['reference'],t['motion_parameters']['motion'])
+                t['proposal']['pre_solve_constraint_review']=review
+                core.write(s.folder/'求解前约束复核.json',review)
+                if review['status']=='supported_direction_blocked_at_start' or review.get('reference_link_observed') is False:
+                    t['next_action']['instruction']+=' 求解前先复核可能受限的方向、驱动与参考的显式配合路径及另行报告的镜向依赖。'
         return self._submit(t,'planning',operation)
 
     def execute(self,task_id,plan_token,confirmed=False,scope_confirmed=False,alignment_confirmed=False):
         t=self.tasks[task_id]
+        if (t.get('proposal') or {}).get('task_operation')=='assign_part_materials':
+            from . import material_task
+            return material_task.execute(self,t,plan_token,confirmed,scope_confirmed,alignment_confirmed)
         if t.get('task_kind')=='assembly_constraints':
             from .connection_task import execute
             return execute(self,t,plan_token,confirmed,scope_confirmed,alignment_confirmed)
@@ -481,7 +506,9 @@ class MotionTaskEngine(TaskEngine):
                 if run.get('error_code'):
                     raise core.StopBatch(run['error_code'],run.get('failure') or '原生运动验证未完成；读取已保存诊断并恢复收尾，不重复求解。',
                         {'run_id':run.get('run_id'),'report_path':run.get('report_path'),
-                         'native_verification':run,'task_verification_path':str(s.folder/'运动验证.json')})
+                         'native_verification':run,'task_verification_path':str(s.folder/'运动验证.json'),
+                         'pre_solve_constraint_review':t['proposal'].get('pre_solve_constraint_review'),
+                         'constraint_review_instruction':'复核驱动参考、缺失连接和候选冗余，已证实需要的单项改变才以mate_changes单独规划；不自动压缩或重算。'})
                 t.update(phase='verification_failed',next_action={'tool':'finish_mechanism_task','arguments':{'task_id':task_id},
                     'instruction':'原生判据、恢复或源文件核对未全部通过；读取运动验证记录后安全收尾，不导出为成功曲线，不自动重算。'})
                 return
@@ -537,7 +564,9 @@ class MotionTaskEngine(TaskEngine):
             with self.lock:
                 if task_id not in self.tasks:raise core.StopBatch('TASK_NOT_IN_CURRENT_SERVER')
                 t=self.tasks[task_id]
-                if t.get('task_kind')!='assembly_constraints':raise core.StopBatch('CONNECTION_INTENT_INVALID','装配快照/摘要仅用于assembly_constraints，其他任务使用原get。')
+                if snapshot_cursor and t.get('task_kind')!='assembly_constraints':
+                    raise core.StopBatch('PARAMETER_NOT_APPLICABLE','snapshot_cursor仅用于装配快照，当前任务可用summary_only或progress_only。',
+                        {'parameter':'snapshot_cursor','task_kind':t.get('task_kind'),'cad_dispatched':False})
                 from . import assembly_snapshot
                 if snapshot_cursor:return assembly_snapshot.page(t,snapshot_cursor,task_id in self.sessions and t.get('server_instance_id')==self.server_instance_id,snapshot_page_size)
                 result=assembly_snapshot.summary(t)
@@ -626,5 +655,5 @@ class MotionTaskEngine(TaskEngine):
                 'cleanup_status':'pass' if native.get('normal_zero_exit') is True else 'warning_nonzero_native_exit',
                 'result_assembly_path':str(result_path),
                 'result_assembly_sha256':core.digest(result_path),'includes_test_motion_study':t.get('task_kind')!='assembly_constraints',
-                'result_scope':aperture_result['scope'] if aperture_result else 'verified_declared_basic_joint_small_trials_not_global_DOF_or_full_travel' if t.get('task_kind')=='assembly_constraints' else 'verified_declared_motion_or_concentric_scope_not_whole_mechanism_or_DOF'},integrity)
+                'result_scope':t['verification'].get('scope') if t.get('proposal',{}).get('task_operation')=='assign_part_materials' else aperture_result['scope'] if aperture_result else 'verified_declared_basic_joint_small_trials_not_global_DOF_or_full_travel' if t.get('task_kind')=='assembly_constraints' else 'verified_declared_motion_or_concentric_scope_not_whole_mechanism_or_DOF'},integrity)
         return self._submit(t,'keeping_result',operation)
