@@ -61,6 +61,19 @@ class ApertureTests(unittest.TestCase):
         self.assertFalse(result['declared_scope_passed'])
         self.session.call.assert_called_with('_finish_aperture_cycle', model_id='model', study='temporary', keep=False)
 
+    def test_suppressed_mates_bind_the_discard_checkpoint_before_sampling(self):
+        self.session.initial_inspection = {'mates': [{'suppressed': True}]}
+        checkpoint = 'd' * 32
+        self.session.call.side_effect = [{'checkpoint_id': checkpoint}, {'run_id': 'b' * 32}]
+        initial = sample(0, 0, [70, 80])
+        collision = sample(10, 2.5, [55, 60], {'clip|rod': 6})
+        with patch.object(aperture, 'samples', return_value=([initial, collision], {})), patch.object(core, 'write'):
+            result = aperture.run(self.session, self.proposal, self.drive, self.reference)
+        self.assertFalse(result['declared_scope_passed'])
+        calls = self.session.call.call_args_list
+        self.assertEqual(calls[0].args, ('create_model_checkpoint',))
+        self.assertEqual(calls[1].kwargs['discard_checkpoint'], checkpoint)
+
 
 if __name__ == '__main__':
     unittest.main()

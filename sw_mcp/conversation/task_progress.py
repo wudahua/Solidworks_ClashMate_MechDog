@@ -79,6 +79,7 @@ def compact_status(task, session, owner):
 
 
 LABELS = {
+    'repair_dissolve_mirrors':'独立化已确认的镜向实例','repair_save_and_verify':'保存并重开核对装配改造',
     'copy_files':'复制源文件到隔离副本','redirect_references':'重定向副本引用','verify_isolation':'核对副本依赖隔离',
     'open_registered_copy':'等待原生打开副本','checkpoint_snapshot':'记录原始恢复检查点',
     'create_checkpoint':'创建导入检查点','preflight_motion':'核对导入后的运动条件',
@@ -149,7 +150,7 @@ def _native_record(path, job_id, run_id, started):
 @contextmanager
 def watch_call(session, operation, arguments, interval=2):
     callback = getattr(session, 'on_progress', None)
-    if callback is None or operation not in {'_survey_assembly_connections','_apply_assembly_connections','_probe_assembly_connection_pose','run_user_study','_apply_external_gear_pair','_apply_gear_transmission','restore_model_checkpoint','import_assembly','_import_gear_assembly','_import_constraint_assembly','_run_aperture_cycle'}:
+    if callback is None or operation not in {'_survey_assembly_connections','_apply_assembly_connections','_probe_assembly_connection_pose','run_user_study','_apply_external_gear_pair','_apply_gear_transmission','restore_model_checkpoint','import_assembly','_import_gear_assembly','_import_constraint_assembly','_run_aperture_cycle','_apply_assembly_repair'}:
         yield
         return
     started = time.time()
