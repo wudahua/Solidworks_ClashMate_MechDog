@@ -314,20 +314,28 @@ class MotionTaskEngine(TaskEngine):
              gear_ratio_numerator=0,gear_ratio_denominator=0,input_shaft_hint='',output_shaft_hint='',input_gear_hint='',output_gear_hint='',stationary_component_hints=None,assembly_intent=None,connection_intent=None,rigid_groups=None,release_fixed_components=None,completion_scope='declared',assembly_scope_hint='',assembly_sequence='',auto_plan=False,group_seeds=None,
              verification_mode='independent_joint_trials',output_component_hints=None,initial_translation_limit_mm=.001,validated_assembly_task_id='',mate_changes=None,
              target_openings_mm=None,aperture_output_hints=None,aperture_tip_end='axis_min',coaxial_groups=None,continue_verified_batch=False,
-             material_assignments=None):
+             material_assignments=None,independentize_mirrors=False):
         t=self.tasks[task_id]
-        if material_assignments is not None:
+        if type(independentize_mirrors) is not bool:
+            raise core.StopBatch('PARAMETER_NOT_APPLICABLE','independentize_mirrors 须为布尔值。')
+        standalone_mates=mate_changes is not None and connection_intent is None
+        if material_assignments is not None or standalone_mates or independentize_mirrors:
             if (t.get('task_kind')!='assembly_constraints' or initial_state!='saved' or alignment_mode!='strict'
                 or completion_scope!='declared' or verification_mode!='independent_joint_trials' or initial_translation_limit_mm!=.001
+                or (material_assignments is not None and (mate_changes is not None or independentize_mirrors))
+                or (independentize_mirrors and mate_changes is not None)
                 or any((candidate_id,moving_component_hint,reference_component_hint,gear_ratio_numerator,gear_ratio_denominator,
                         input_shaft_hint,output_shaft_hint,input_gear_hint,output_gear_hint,assembly_scope_hint,assembly_sequence,
                         auto_plan,validated_assembly_task_id,aperture_tip_end!='axis_min',continue_verified_batch))
                 or any(v is not None for v in (stationary_component_hints,assembly_intent,connection_intent,rigid_groups,
-                                              release_fixed_components,group_seeds,output_component_hints,mate_changes,
+                                              release_fixed_components,group_seeds,output_component_hints,
                                               target_openings_mm,aperture_output_hints,coaxial_groups))):
-                raise core.StopBatch('PARAMETER_NOT_APPLICABLE','material_assignments随装配体检任务单独规划，不能与配合或求解参数同传。')
-            from . import material_task
-            return material_task.propose(self,t,material_assignments)
+                raise core.StopBatch('PARAMETER_NOT_APPLICABLE','材质、单独配合状态调整和镜向独立化须在装配体检任务中分别规划，不能与连接目标或求解参数同传。')
+            if material_assignments is not None:
+                from . import material_task
+                return material_task.propose(self,t,material_assignments)
+            from . import assembly_repair
+            return assembly_repair.propose(self,t,mate_changes,independentize_mirrors)
         if target_openings_mm is not None:
             if (t.get('task_kind')!='motion' or t.get('motion_parameters',{}).get('motion')!='linear' or initial_state!='saved' or
                 validated_assembly_task_id or type(target_openings_mm) is not list or len(target_openings_mm)!=2 or
@@ -428,6 +436,9 @@ class MotionTaskEngine(TaskEngine):
 
     def execute(self,task_id,plan_token,confirmed=False,scope_confirmed=False,alignment_confirmed=False):
         t=self.tasks[task_id]
+        if (t.get('proposal') or {}).get('task_operation') in {'change_existing_mates','independentize_mirrors'}:
+            from . import assembly_repair
+            return assembly_repair.execute(self,t,plan_token,confirmed,scope_confirmed,alignment_confirmed)
         if (t.get('proposal') or {}).get('task_operation')=='assign_part_materials':
             from . import material_task
             return material_task.execute(self,t,plan_token,confirmed,scope_confirmed,alignment_confirmed)
@@ -508,7 +519,7 @@ class MotionTaskEngine(TaskEngine):
                         {'run_id':run.get('run_id'),'report_path':run.get('report_path'),
                          'native_verification':run,'task_verification_path':str(s.folder/'运动验证.json'),
                          'pre_solve_constraint_review':t['proposal'].get('pre_solve_constraint_review'),
-                         'constraint_review_instruction':'复核驱动参考、缺失连接和候选冗余，已证实需要的单项改变才以mate_changes单独规划；不自动压缩或重算。'})
+                         'constraint_review_instruction':'复核驱动参考、缺失连接及候选冗余。可在新装配体检任务用mate_changes预演单独调整旧配合，或用independentize_mirrors预演独立化；原生改造验证和运动验证分别核对。'})
                 t.update(phase='verification_failed',next_action={'tool':'finish_mechanism_task','arguments':{'task_id':task_id},
                     'instruction':'原生判据、恢复或源文件核对未全部通过；读取运动验证记录后安全收尾，不导出为成功曲线，不自动重算。'})
                 return
@@ -655,5 +666,5 @@ class MotionTaskEngine(TaskEngine):
                 'cleanup_status':'pass' if native.get('normal_zero_exit') is True else 'warning_nonzero_native_exit',
                 'result_assembly_path':str(result_path),
                 'result_assembly_sha256':core.digest(result_path),'includes_test_motion_study':t.get('task_kind')!='assembly_constraints',
-                'result_scope':t['verification'].get('scope') if t.get('proposal',{}).get('task_operation')=='assign_part_materials' else aperture_result['scope'] if aperture_result else 'verified_declared_basic_joint_small_trials_not_global_DOF_or_full_travel' if t.get('task_kind')=='assembly_constraints' else 'verified_declared_motion_or_concentric_scope_not_whole_mechanism_or_DOF'},integrity)
+                'result_scope':t['verification'].get('scope') if t.get('proposal',{}).get('task_operation') in {'assign_part_materials','change_existing_mates','independentize_mirrors'} else aperture_result['scope'] if aperture_result else 'verified_declared_basic_joint_small_trials_not_global_DOF_or_full_travel' if t.get('task_kind')=='assembly_constraints' else 'verified_declared_motion_or_concentric_scope_not_whole_mechanism_or_DOF'},integrity)
         return self._submit(t,'keeping_result',operation)

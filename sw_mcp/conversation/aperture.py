@@ -175,13 +175,19 @@ def run(session, proposal, drive, reference):
     direction = [binding['expected_sign_about_selected_native_axis'] * v for v in drive['axis_global']]
     trials_report = []
     best = None
+    inspection = getattr(session, 'initial_inspection', None) or {}
+    discard_checkpoint = None
+    if any(mate.get('suppressed') is True for mate in inspection.get('mates', [])):
+        checkpoint = session.call('create_model_checkpoint', model_id=session.model)
+        discard_checkpoint = checkpoint['checkpoint_id']
+        core.write(session.folder / '开口试算恢复检查点.json', checkpoint)
 
     def native_cycle(stroke, final):
         run_id = uuid.uuid4().hex
         native = session.call('_run_aperture_cycle', model_id=session.model, driver_id=drive['component_id'],
                               reference_id=reference['component_id'], entity_id=drive['entity_id'],
                               reverse=binding['native_reverse_direction'], stroke_mm=stroke, frame_step=1 if final else 5,
-                              candidate=final, run_id=run_id, job_id=run_id)
+                              candidate=final, run_id=run_id, job_id=run_id, discard_checkpoint=discard_checkpoint)
         return native
 
     for stroke in STROKES_MM:

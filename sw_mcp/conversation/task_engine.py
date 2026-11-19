@@ -90,7 +90,7 @@ class ConversationSession(mate_worker.Session):
         self.current_call_for_observation=dict(value['in_flight'] or {})
     def call(self,operation,**kw):
         if operation=='run_user_study':kw={**kw,'job_id':kw['run_id']}
-        if operation in {'_survey_assembly_connections','_apply_assembly_connections','_probe_assembly_connection_pose',
+        if operation in {'_survey_assembly_connections','_apply_assembly_connections','_probe_assembly_connection_pose','_apply_assembly_repair',
                          'import_assembly','_import_constraint_assembly','_import_gear_assembly'}:
             kw={**kw,'job_id':uuid.uuid4().hex}
         self.persist_ownership({'operation':operation,'started':time.time()})

@@ -307,6 +307,12 @@ def summary(task):
           'connection_status','task_owner_available','current_assembly_observation','validation_conclusions','orphan_review')
     result={k:task[k] for k in keys if k in task}
     result['validation_conclusions']=conclusions(task)
+    proposal=task.get('proposal') or {}
+    if proposal.get('task_operation') in {'change_existing_mates','independentize_mirrors'}:
+        result['assembly_repair_plan']={k:proposal[k] for k in ('task_operation','affected_component_pairs','mirror_features',
+            'independent_occurrences','expected_added_mates','motion_verified')}
+    if task.get('assembly_repair_review'):
+        result['assembly_repair_review']=task['assembly_repair_review']
     if task.get('connection_batch_history'):
         result['previously_verified_batch_count']=len(task['connection_batch_history'])
     if (task.get('proposal') or {}).get('task_operation')=='assign_part_materials':

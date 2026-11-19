@@ -69,7 +69,7 @@ def review(survey):
         row['root_source_candidates']=[{'component_id':c,'instance':names[c]} for c in sorted(origins or [])]
         unique_root=len(origins)==1
         row['root_source_status']='unique_root_of_observed_dependency_chain' if unique_root else 'mirror_chain_requires_review'
-        row['supported_actions']=['review_source_goal','verify_declared_rigid_group'] if unique_root else ['review_original_mirror_definition']
+        row['supported_actions']=['review_source_goal','verify_declared_rigid_group','preview_mirror_independence'] if unique_root else ['review_original_mirror_definition']
         if unique_root:
             family={row['component_id']};pending=list(family)
             while pending:

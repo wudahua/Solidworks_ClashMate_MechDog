@@ -364,7 +364,7 @@ public partial class Cad {
         switch(op) {
             case "_survey_connection_layers": return SurveyConnectionLayers((string)p["model_id"]);
             case "_aperture_vertices": return ApertureVertices((string)p["model_id"],Json.Deserialize<string[]>((string)p["components_json"]));
-            case "_run_aperture_cycle": return RunApertureCycle((string)p["model_id"],(string)p["driver_id"],(string)p["reference_id"],(string)p["entity_id"],Convert.ToBoolean(p["reverse"]),Convert.ToDouble(p["stroke_mm"]),Convert.ToInt32(p["frame_step"]),Convert.ToBoolean(p["candidate"]),(string)p["run_id"],(string)p["job_id"]);
+            case "_run_aperture_cycle": return RunApertureCycle((string)p["model_id"],(string)p["driver_id"],(string)p["reference_id"],(string)p["entity_id"],Convert.ToBoolean(p["reverse"]),Convert.ToDouble(p["stroke_mm"]),Convert.ToInt32(p["frame_step"]),Convert.ToBoolean(p["candidate"]),(string)p["run_id"],(string)p["job_id"],p.ContainsKey("discard_checkpoint")?(string)p["discard_checkpoint"]:null);
             case "_finish_aperture_cycle": return FinishApertureCycle((string)p["model_id"],(string)p["study"],Convert.ToBoolean(p["keep"]));
             case "_select_connection_layer": return SelectConnectionLayer((string)p["model_id"],(string)p["instance"]);
             case "_verify_connection_layer": return VerifyConnectionLayer((string)p["model_id"],p.ContainsKey("rebuild_root")&&Convert.ToBoolean(p["rebuild_root"]));
@@ -399,6 +399,8 @@ public partial class Cad {
             case "inspect_model": return InspectUserModel((string)p["model_id"],p.ContainsKey("detail_level")?(string)p["detail_level"]:"full");
             case "_preview_part_materials": return PreviewPartMaterials((string)p["model_id"],(string)p["assignments_json"]);
             case "_apply_part_materials": return ApplyPartMaterials((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));
+            case "_preview_assembly_repair": return PreviewAssemblyRepair((string)p["model_id"],(string)p["proposal_json"],Convert.ToBoolean(p["independentize_mirrors"]));
+            case "_apply_assembly_repair": return ApplyAssemblyRepair((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));
             case "list_motion_studies": return UserStudies((string)p["model_id"],p.ContainsKey("inspect_native_drives")&&Convert.ToBoolean(p["inspect_native_drives"]));
             case "probe_motion_compatibility": return ProbeUserCompatibility((string)p["model_id"],(string)p["study"],Convert.ToDouble(p["duration_s"]),Convert.ToInt32(p["output_fps"]),(string)p["run_id"],p.ContainsKey("checkpoint_id")?(string)p["checkpoint_id"]:"");
             case "preflight_motion": return PreflightUserMotion((string)p["model_id"],p.ContainsKey("study")?(string)p["study"]:null);
