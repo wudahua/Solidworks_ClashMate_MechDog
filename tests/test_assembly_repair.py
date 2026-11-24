@@ -111,6 +111,35 @@ class AssemblyRepairTests(unittest.TestCase):
         self.assertEqual(assembly_snapshot.summary(self.task)['material_input_review']['candidate_materials'],
                          ['6061-T6 (SS)'])
 
+    def test_material_write_requires_confirmation_and_verified_native_readback(self):
+        assignment={'part_file':'part.sldprt','configuration':'Default','database':'base.sldmat','material':'AISI 304'}
+        self.task.update(phase='awaiting_confirmation',plan_token='token',
+            proposal={'task_operation':'assign_part_materials','plan_id':'native','assignments':[assignment]})
+        with self.assertRaisesRegex(core.StopBatch,'CONFIRMATION_REQUIRED'):
+            self.engine.execute(self.task['task_id'],'token',confirmed=True)
+        self.session.call.assert_not_called()
+        self.session.call.return_value={'assignments':[assignment],'materials_verified':True,
+            'mates_and_poses_unchanged':True,'source_files_unchanged':True}
+        with patch.object(core,'write'):
+            self.engine.execute(self.task['task_id'],'token',confirmed=True,scope_confirmed=True)
+        self.session.call.assert_called_once_with('_apply_part_materials',plan_id='native',confirmed=True)
+        self.session.capture_applied_result.assert_called_once()
+        self.assertEqual(self.task['verification']['scope'],'verified_material_assignment_only')
+        self.assertTrue(self.session.committed)
+
+    def test_local_joint_validation_does_not_imply_whole_assembly_failed(self):
+        joint={'goal_index':0,'kind':'revolute','component_a':'p','component_b':'q'}
+        self.task.update(proposal={'completion_scope':'declared'},verification={
+            'declared_scope_passed':False,'whole_assembly_declared_targets_passed':False,
+            'trials':[{'passed':False,'joint':joint,'trial':'allowed','actual_travel':0,'requested_travel':.01}]})
+        result=assembly_snapshot.summary(self.task)
+        self.assertEqual(result['validation_conclusions']['declared_scope_validation'],'fail')
+        self.assertEqual(result['validation_conclusions']['whole_assembly_declared_joints'],'not_verified')
+        self.assertEqual(result['verification']['failed_joint_trials'][0]['actual_travel'],0)
+        self.assertEqual(result['verification']['failed_joint_trials'][0]['joint'],joint)
+        self.task['proposal']['completion_scope']='whole_assembly'
+        self.assertEqual(assembly_snapshot.summary(self.task)['validation_conclusions']['whole_assembly_declared_joints'],'fail')
+
     def test_stale_motion_keeps_solver_observations_in_poll_and_summary(self):
         self.session.motion_candidate = {'component_id':'p','entity_id':'axis'}
         self.session.motion_candidates = [{'drive':self.session.motion_candidate,'reference':{'component_id':'q'}}]

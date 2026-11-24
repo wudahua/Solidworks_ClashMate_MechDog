@@ -28,6 +28,12 @@ class Probe {
   C((string)MotionIntent.Evaluate(RelativeMotion.Samples(moving,null,point),RelativeMotion.Vector(moving[0],axis),"linear",15)["assertion"]=="fail");
   var negative=t.Select((v,i)=>Compose(reference[i],P(.1-.02*v,0,0,0))).ToArray();
   var reverse=RelativeMotion.DriveAudit(negative,reference,axis,point,"linear",20,1);C((string)reverse["status"]=="pass"&&Convert.ToDouble(reverse["observed_signed"])<0);C(!(bool)reverse["direction_verified"]);
+  var swing=t.Select(v=>P(-.010*v,.038151*v,0,v*4.13*Math.PI/180)).ToArray();
+  var swingAudit=RelativeMotion.DriveAudit(swing,null,axis,new double[3],"linear",5,2);
+  C((string)swingAudit["status"]=="inconclusive");
+  C(Math.Abs((double)swingAudit["off_axis_travel"]-38.151)<1e-8&&(double)swingAudit["off_axis_tolerance"]==.01);
+  C(Math.Abs((double)swingAudit["slide_rotation_deg"]-4.13)<1e-8&&(double)swingAudit["slide_rotation_tolerance_deg"]==.1);
+  C((double)swingAudit["off_axis_over_tolerance_ratio"]>3800&&(double)swingAudit["slide_rotation_over_tolerance_ratio"]>41);
   var ref3=t.Select(v=>X(.5*v)).ToArray();var rotary=t.Select((v,i)=>Compose(ref3[i],P(.1,0,0,.4*v))).ToArray();
   var ra=RelativeMotion.DriveAudit(rotary,ref3,new[]{0.0,0,1},new double[3],"rotary",.4*30/Math.PI,1);C((string)ra["status"]=="pass");C(Math.Abs(Convert.ToDouble(ra["observed_signed"])-.4*30/Math.PI)<1e-8);
   C((string)RelativeMotion.DriveAudit(rotary,null,new[]{0.0,0,1},new double[3],"rotary",.4*30/Math.PI,1)["status"]=="inconclusive");

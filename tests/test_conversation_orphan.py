@@ -40,6 +40,54 @@ class OrphanCloseTests(unittest.TestCase):
         self.assertEqual(e.exception.code,'ORPHAN_CLOSE_CONFIRMATION_REQUIRED')
         self.assertFalse(self.other.get(self.tid)['closed'])
 
+    def test_terminal_record_stays_open_and_mcp_recovery_tools_are_available_with_real_held_lease(self):
+        import motion_server
+        from sw_mcp.bridge import Bridge, CadError
+        from sw_mcp.conversation.formal_engine import FormalEngine
+        from sw_mcp.conversation.motion_tasks import MotionTaskEngine
+
+        previous=self.other.tasks[self.tid]
+        previous.update(phase='failed',busy=False,error={'code':'CONNECTION_EVIDENCE_FAILED'})
+        self.other.save(previous)
+        contender,holder=Bridge(self.root),Bridge(self.root)
+        self.addCleanup(holder.close)
+        self.addCleanup(contender.close)
+        holder._acquire_lease()
+        with (patch.object(motion_server,'bridge',contender),
+              patch.object(motion_server,'_task_engine',None),
+              patch.object(motion_server,'_formal_engine',None)):
+            restarted=FormalEngine(self.root,self.root/'work',HERE.parents[1]/'runs/cr')
+            try:
+                self.assertIsInstance(restarted.tasks,MotionTaskEngine)
+                self.assertFalse(restarted.tasks.tasks[self.tid]['closed'])
+                self.assertIsNone(contender._lease)
+                def tool(name,**args):
+                    return restarted.tool(name,args)['structuredContent']
+                read=tool('get_mechanism_task',task_id=self.tid,full_record=True)['result']
+                self.assertEqual(read['historical_recovery_access']['scope'],'read_and_proof_based_archive_only')
+                self.assertTrue(read['orphan_review']['archive_eligible'])
+                with self.assertRaisesRegex(core.StopBatch,'PRIOR_TASK_UNCONFIRMED'):
+                    tool('prepare_mechanism_task',assembly_path=str(self.source))
+                with self.assertRaisesRegex(core.StopBatch,'PRIOR_TASK_UNCONFIRMED'):
+                    tool('get_environment')
+                self.assertFalse(tool('finish_mechanism_task',task_id=self.tid)['ok'])
+                with patch('sw_mcp.conversation.orphan_close.same_process',
+                           side_effect=lambda identity:{'status':'same' if identity['pid']==101 else 'exited'}):
+                    refused=tool('finish_mechanism_task',task_id=self.tid,close_unrestored=True)
+                    self.assertEqual(refused['error']['code'],'ORPHAN_RESOURCE_NOT_CONFIRMED_EXITED')
+                self.assertFalse(restarted.tasks.tasks[self.tid]['closed'])
+                archived=tool('finish_mechanism_task',task_id=self.tid,close_unrestored=True)['result']
+                self.assertTrue(archived['closed'])
+                self.assertEqual(archived['result']['restoration_status'],'not_verified')
+                self.assertEqual(archived['result']['CAD_calls'],0)
+                self.assertTrue((Path(previous['directory'])/'关闭前原任务状态.json').is_file())
+                with self.assertRaises(CadError) as held:
+                    tool('prepare_mechanism_task',assembly_path=str(self.source))
+                self.assertEqual(held.exception.code,'MCP_OWNER_ALREADY_RUNNING')
+                self.assertIsNotNone(holder._lease)
+            finally:
+                restarted.shutdown()
+
     def test_safe_exit_closes_failed_record_without_claiming_restore(self):
         with patch.object(FakeSession,'restore') as restore:
             value=self.other.finish(self.tid,True)

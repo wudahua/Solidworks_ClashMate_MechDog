@@ -72,7 +72,7 @@ class FinishBridgeTests(unittest.TestCase):
 
 
 class MotionFailureTests(unittest.TestCase):
-    def fixture(self,answer):
+    def fixture(self,answer,speed=1,output_fps=30):
         p=folder();(p/'models').mkdir();source=p/'models/fixture.SLDASM';source.write_bytes(b'offline only')
         class Session(FakeSession):
             def discover(s,path):
@@ -96,7 +96,7 @@ class MotionFailureTests(unittest.TestCase):
                 time.sleep(.005)
             self.fail('fixture timeout')
         with patch('sw_mcp.conversation.startup_gate.require_idle'):
-            tid=engine.prepare(str(source),motion='linear',speed=1,duration_s=2)['task_id']
+            tid=engine.prepare(str(source),motion='linear',speed=speed,duration_s=2,output_fps=output_fps)['task_id']
         self.assertEqual(wait(tid)['phase'],'proposal_ready');engine.plan(tid);planned=wait(tid)
         return p,engine,tid,planned,wait
 
@@ -128,6 +128,39 @@ class MotionFailureTests(unittest.TestCase):
         with self.assertRaises(core.StopBatch) as error:e.execute(tid,plan['plan_token'],True,True)
         self.assertEqual(error.exception.code,'TASK_ALREADY_EXECUTED')
         e.finish(tid);self.assertTrue(wait(tid)['closed'])
+
+    def test_short_native_prefix_explains_nominal_travel_and_never_dispatches_reverse(self):
+        axis={'finite':True,'strictly_increasing':True,'configuration_changed_during_native_solve':False,
+              'first_time_s':0,'last_time_s':.7,'expected_count':21,'actual_count':8,'maximum_grid_error_s':0.0}
+        for changed in (False,True):
+            with self.subTest(changed=changed):
+                answer={'run_id':'a'*32,'assertion':'inconclusive','error_code':'MOTION_RESULTS_INCOMPLETE',
+                        'failure_diagnostics':{'time_axis':{**axis,'configuration_changed_during_native_solve':changed}},
+                        'restoration_status':'restored','source_files_unchanged':True}
+                p,e,tid,plan,wait=self.fixture(answer,speed=5,output_fps=10)
+                session=e.sessions[tid]
+                with patch.object(session,'call',wraps=session.call) as calls:
+                    e.execute(tid,plan['plan_token'],True,True)
+                    state=wait(tid)
+                operations=[c.args[0] for c in calls.call_args_list]
+                self.assertEqual(operations.count('create_motion_study'),1)
+                self.assertEqual(operations.count('verify_motion_preservation'),1)
+                self.assertEqual(state['phase'],'failed')
+                review=state['error']['diagnostics']['incomplete_travel']
+                self.assertEqual((review['observed_frames'],review['requested_frames']),(8,21))
+                self.assertEqual(review['last_native_time_s'],.7)
+                self.assertEqual(review['requested_commanded_travel'],10)
+                self.assertEqual(review['nominal_commanded_travel_at_last_frame'],None if changed else 3.5)
+                self.assertIsNone(review['measured_travel'])
+                self.assertEqual(review['cause_status'],'not_proven')
+                self.assertEqual(review['direction_comparison']['status'],
+                                 'not_suggested_for_this_evidence' if changed else 'separate_task_option')
+                if not changed:
+                    self.assertTrue(review['direction_comparison']['requires_new_confirmation'])
+                    self.assertFalse(review['direction_comparison']['reverse_result_can_satisfy_original_task'])
+                self.assertEqual(e.get(tid,summary_only=True)['error']['incomplete_travel'],review)
+                self.assertEqual(e.get(tid,progress_only=True)['incomplete_travel'],review)
+                e.finish(tid);self.assertTrue(wait(tid)['closed'])
 
     def test_failed_motion_criterion_without_native_error_does_not_read_missing_poses(self):
         answer={'run_id':'b'*32,'assertion':'fail','signed_net_travel':0,

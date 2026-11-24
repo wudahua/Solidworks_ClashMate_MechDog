@@ -7,6 +7,7 @@ import uuid
 from . import core, geometry_audit as geometry
 from .task_engine import matching_components, short_name
 from .. import connection_trials as trials
+from ..bridge import CadError
 
 
 STROKES_MM = (5., 10., 20.)
@@ -184,11 +185,22 @@ def run(session, proposal, drive, reference):
 
     def native_cycle(stroke, final):
         run_id = uuid.uuid4().hex
-        native = session.call('_run_aperture_cycle', model_id=session.model, driver_id=drive['component_id'],
-                              reference_id=reference['component_id'], entity_id=drive['entity_id'],
-                              reverse=binding['native_reverse_direction'], stroke_mm=stroke, frame_step=1 if final else 5,
-                              candidate=final, run_id=run_id, job_id=run_id, discard_checkpoint=discard_checkpoint)
-        return native
+        try:
+            return session.call('_run_aperture_cycle', model_id=session.model, driver_id=drive['component_id'],
+                                reference_id=reference['component_id'], entity_id=drive['entity_id'],
+                                reverse=binding['native_reverse_direction'], stroke_mm=stroke, frame_step=1 if final else 5,
+                                candidate=final, run_id=run_id, job_id=run_id, discard_checkpoint=discard_checkpoint)
+        except CadError as error:
+            details = error.diagnostics.get('details') or {}
+            if error.code=='RESTORATION_FAILED':
+                original = details.get('original_failure') or {}
+                details = original.get('details') or {}
+            if details.get('run_id')==run_id and details.get('reason') in {
+                    'aperture_initial_pose_changed','aperture_cycle_did_not_return_to_saved_pose'} and isinstance(details.get('endpoint'),dict):
+                error.diagnostics['aperture_endpoint'] = {**details['endpoint'],'run_id':run_id,'stroke_mm':stroke,
+                    'reason':details['reason'],'endpoint_artifact':details.get('endpoint_artifact'),
+                    'trial_restoration_status':error.restoration_status}
+            raise
 
     for stroke in STROKES_MM:
         session.state('solving', f'正在试算 {stroke:g} mm 行程并扫描新增干涉。')

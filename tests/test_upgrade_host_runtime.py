@@ -73,6 +73,14 @@ class UpgradeHostRuntimeTests(unittest.TestCase):
         with patch.object(Path,'unlink',denied):
             self.assertFalse(updater.file_api_observation()['standard_path_unlink_observed'])
 
+    def test_known_runtime_shim_failure_gives_maintenance_route_without_disabling_protection(self):
+        error = updater.UpgradeFailure('UPGRADE_FILE_API_CHECK_FAILED','check failed',diagnostics={
+            'python_runtime':{'path_unlink':{'code_file':r'C:\host\sandbox-center-runtime-kit\shim\sitecustomize.py'}}})
+        action = error.payload()['error']['next_action']
+        self.assertFalse(action['automatic_retry'])
+        self.assertIn('宿主运行时文件保护层',action['instruction'])
+        self.assertIn('runs/upgrade-api-checks',action['instruction'])
+
     def test_functional_host_wrapper_is_kept_and_upgrade_can_commit(self):
         original=Path.unlink;calls=[]
         def host_policy(path,*a,**k):

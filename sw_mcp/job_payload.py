@@ -32,6 +32,8 @@ EVIDENCE_DROP_PRIORITY = ('sampling_api_batch','sampling_performance','solve_per
                           'time_selection_audit','review_items')
 CONCLUSION_FIELDS = {'status','kind','requested','observed_signed','unit','absolute_magnitude_error',
                      'magnitude_tolerance','axis_change_deg','direction_verified','applicability_reason',
+                     'off_axis_travel','off_axis_unit','off_axis_tolerance','off_axis_over_tolerance_ratio',
+                     'slide_rotation_deg','slide_rotation_tolerance_deg','slide_rotation_over_tolerance_ratio',
                      'native_motor_parameters_match','persistent_reference_error','persistent_reference_error_name',
                      'persistent_reference_resolved','identity_fallback_used','identity_source','inventory_complete',
                      'study_membership','native_feature_id','native_feature_name','component_id'}
@@ -126,7 +128,8 @@ def evidence_projection(job, digest):
                       (type(v) is not float or math.isfinite(v))}
             priority=('status','persistent_reference_resolved','identity_fallback_used','persistent_reference_error',
                       'persistent_reference_error_name','identity_source','inventory_complete','direction_verified',
-                      'kind','unit','requested','observed_signed','magnitude_tolerance','axis_change_deg')
+                      'kind','unit','requested','observed_signed','magnitude_tolerance','axis_change_deg',
+                      'off_axis_travel','off_axis_unit','off_axis_tolerance','slide_rotation_deg','slide_rotation_tolerance_deg')
             if wire_size(decision)>2000:
                 small={}
                 for key in priority:
