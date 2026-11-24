@@ -65,7 +65,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.54", instructions='日常只用AI对话和现有30个MCP工具。先get_mechanism_task找回任务，无任务再prepare；任务期间按next_action读取、规划、确认、执行和finish，收尾后再开始下一轮。装配任务默认get读紧凑当前状态及assembly_brief，full_record=true读原文；summary_only=true仅保存摘要、不协调原请求。按snapshot.queries只读已保存组件、几何、候选、目标和集中问题，不让用户逐面选引用或抄ID。分页保留所有集合待办；未完整搜索、几何截断、未知用途与不支持项不能说成配合完善。复用用户已明确用途；需要时一次说明各运动组及必要改动，取得具体方案授权。零配合先读mechanical_groups几何建议，按组复用或澄清用途；同轴不证明刚性。已明确完整连接、主直线输入和输出的闭环优先评估driven_loop，不把独立逐关节试验当唯一整机路线。整机completion_scope=whole_assembly一次确认后内部自动分批；不会批量固定未分配零件。方案复核快照与当前令牌绑定，读取全部非空集合后再解释和确认执行。只读结构仍受原写入门禁，不能把父级刚性当内部完善或擅改柔性。motion支持旋转/直线；external_gear_pair为两平行轴比例联动，不认证齿面接触或受力。小幅配合试验不等于完整Motion。名称/轴线歧义用机械用途澄清，几何排名不证明设计意图。未知、超时或断连只读取原任务和恢复记录，不重放写入、强制清理或重建COM；已明确未导入的创建失败按任务指引安全收尾。默认finish恢复导入检查点；仅用户明确要保留已验证副本时keep_result=true。旧owner丢失须资源身份/退出证据及明确同意才异常归档，不能冒充恢复通过。低层工具需要时仍先import副本，再体检/查询/预演/确认写入；几何续查保留兄弟队列。所有结果区分本机/跨机、快照/当前原生、有限试验/全行程；失败证据保留。')
+mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.55", instructions='日常只用AI对话和现有30个MCP工具。先get_mechanism_task找回任务，无任务再prepare；任务期间按next_action读取、规划、确认、执行和finish，收尾后再开始下一轮。装配任务默认get读紧凑当前状态及assembly_brief，full_record=true读原文；summary_only=true仅保存摘要、不协调原请求。按snapshot.queries只读已保存组件、几何、候选、目标和集中问题，不让用户逐面选引用或抄ID。分页保留所有集合待办；未完整搜索、几何截断、未知用途与不支持项不能说成配合完善。复用用户已明确用途；需要时一次说明各运动组及必要改动，取得具体方案授权。零配合先读mechanical_groups几何建议，按组复用或澄清用途；同轴不证明刚性。已明确完整连接、主直线输入和输出的闭环优先评估driven_loop，不把独立逐关节试验当唯一整机路线。整机completion_scope=whole_assembly一次确认后内部自动分批；不会批量固定未分配零件。方案复核快照与当前令牌绑定，读取全部非空集合后再解释和确认执行。只读结构仍受原写入门禁，不能把父级刚性当内部完善或擅改柔性。motion支持旋转/直线；external_gear_pair为两平行轴比例联动，不认证齿面接触或受力。小幅配合试验不等于完整Motion。名称/轴线歧义用机械用途澄清，几何排名不证明设计意图。未知、超时或断连只读取原任务和恢复记录，不重放写入、强制清理或重建COM；已明确未导入的创建失败按任务指引安全收尾。默认finish恢复导入检查点；仅用户明确要保留已验证副本时keep_result=true。旧owner丢失须资源身份/退出证据及明确同意才异常归档，不能冒充恢复通过。低层工具需要时仍先import副本，再体检/查询/预演/确认写入；几何续查保留兄弟队列。所有结果区分本机/跨机、快照/当前原生、有限试验/全行程；失败证据保留。')
 
 _task_engine=None
 _formal_engine=None
@@ -232,9 +232,17 @@ async def list_models() -> CallToolResult:
 
 
 @mcp.tool()
-async def inspect_model(model_id: str, detail_level: Literal["full", "components", "materials", "mass_properties", "summary", "page"] = "summary", wait_for_completion: bool = True,
-        cursor:str="", page_size:Annotated[int,Field(ge=1,le=100)]=50) -> CallToolResult:
-    """默认summary返回紧凑体检及分页入口，page使用原样返回的游标。显式full获取原有完整结构和assembly_constraint_review；components只读组件，跳过配合几何；materials按零件文件和引用配置盘点材质与已安装材质库；mass_properties读原生质量、体积、质心和主惯量。活跃受管任务须同一model_id且同步查询摘要、材质或质量。其他摘要和原生查询可用wait_for_completion=False获取job_id；page只读冻结快照且同步。受支持顶层面核验并登记后可用于配合或驱动，不隐式重建，不以局部秩证明全局自由度。"""
+async def inspect_model(model_id: str, detail_level: Literal["full", "components", "materials", "material_names", "mass_properties", "summary", "page"] = "summary", wait_for_completion: bool = True,
+        cursor:str="", page_size:Annotated[int,Field(ge=1,le=100)]=50,
+        material_database:Annotated[str,Field(max_length=255)]="", material_query:Annotated[str,Field(max_length=256)]="") -> CallToolResult:
+    """默认summary返回紧凑体检及分页入口，page使用原样返回的游标。full返回原有结构和约束复核；components跳过配合几何；materials盘点零件配置及本机已安装材质库；material_names在指定material_database中同步查询准确名称，可按material_query搜索并续传next_cursor；mass_properties读原生质量、体积、质心和主惯量。活跃任务须同步查询同一副本。page只读冻结快照；受支持顶层面核验并登记后可供配合或驱动，不隐式重建，不以局部秩证明全局自由度。"""
+    if detail_level=='material_names':
+        if not material_database.strip() or not wait_for_completion:
+            raise InputRefusal('INVALID_ARGUMENT','材质名查询须同步调用，并使用材质盘点中的库文件名。')
+        return await call('inspect_model',model_id=model_id,detail_level=detail_level,material_database=material_database,
+                          material_query=material_query,cursor=cursor,page_size=page_size)
+    if material_database or material_query:
+        raise InputRefusal('INVALID_ARGUMENT','material_database 和 material_query 仅用于 material_names。')
     if detail_level in {'summary','page'}:
         from sw_mcp import inspection_snapshot
         if (detail_level=='page')!=bool(cursor) or (detail_level=='summary' and page_size!=50):

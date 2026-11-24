@@ -396,7 +396,12 @@ public partial class Cad {
             case "_import_constraint_assembly": return ImportConstraintAssembly((string)p["path"],p.ContainsKey("materialize_virtual_components")&&Convert.ToBoolean(p["materialize_virtual_components"]),p.ContainsKey("import_id")?(string)p["import_id"]:null);
             case "import_assembly": return ImportUserAssembly((string)p["path"],p.ContainsKey("configuration")?(string)p["configuration"]:null,null,null,p.ContainsKey("import_id")?(string)p["import_id"]:null,p.ContainsKey("materialize_virtual_components")&&Convert.ToBoolean(p["materialize_virtual_components"]));
             case "list_models": return UserListModels();
-            case "inspect_model": return InspectUserModel((string)p["model_id"],p.ContainsKey("detail_level")?(string)p["detail_level"]:"full");
+            case "inspect_model":
+                string detail=p.ContainsKey("detail_level")?(string)p["detail_level"]:"full";
+                if(detail=="material_names")
+                    return InspectMaterialNames((string)p["model_id"],(string)p["material_database"],(string)p["material_query"],
+                        (string)p["cursor"],Convert.ToInt32(p["page_size"]));
+                return InspectUserModel((string)p["model_id"],detail);
             case "_preview_part_materials": return PreviewPartMaterials((string)p["model_id"],(string)p["assignments_json"]);
             case "_apply_part_materials": return ApplyPartMaterials((string)p["plan_id"],Convert.ToBoolean(p["confirmed"]));
             case "_preview_assembly_repair": return PreviewAssemblyRepair((string)p["model_id"],(string)p["proposal_json"],Convert.ToBoolean(p["independentize_mirrors"]));

@@ -320,10 +320,19 @@ def summary(task):
             'requires_explicit_confirmation':True,
             'query':{'tool':'get_mechanism_task','arguments':{'task_id':task['task_id'],'full_record':True}}}
     if task.get('material_input_review'):
-        result['material_input_review']={k:task['material_input_review'][k] for k in ('code','message')}
+        material_review=task['material_input_review']
+        details=(material_review.get('diagnostics') or {}).get('details') or {}
+        result['material_input_review']={k:material_review[k] for k in ('code','message')}
+        for key in ('database_status','material_status','requested_database','requested_material','candidate_materials'):
+            if key in details:
+                result['material_input_review'][key]=details[key]
     for key in ('error','previous_failure'):
         if isinstance(result.get(key),dict):
-            result[key]={k:result[key][k] for k in ('code','message','assertion','restoration_status','native_unknown','retry_write_allowed') if k in result[key]}
+            failure=result[key]
+            result[key]={k:failure[k] for k in ('code','message','assertion','restoration_status','native_unknown','retry_write_allowed') if k in failure}
+            solver_context=(failure.get('diagnostics') or {}).get('solver_context')
+            if solver_context:
+                result[key]['solver_context']=solver_context
             result[key]['details_in_full_task']=True
     if isinstance(task.get('verification'),dict):
         result['verification']={k:v for k,v in task['verification'].items() if v is None or type(v) in (str,int,float,bool)}

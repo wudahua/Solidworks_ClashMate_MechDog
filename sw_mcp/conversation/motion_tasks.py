@@ -354,8 +354,31 @@ class MotionTaskEngine(TaskEngine):
             if candidate_id or (verification_mode!='driven_loop' and (moving_component_hint or reference_component_hint or alignment_mode!='strict')) or initial_state!='saved' or assembly_intent is not None or stationary_component_hints is not None or gear_ratio_numerator or gear_ratio_denominator or input_shaft_hint or output_shaft_hint or input_gear_hint or output_gear_hint:
                 raise core.StopBatch('CONNECTION_INTENT_INVALID','通用连接目标使用connection_intent，不混用齿轮分组、运动初态或圆边对齐参数。')
             if assembly_sequence or continue_verified_batch:
-                if mate_changes is not None or connection_intent is not None or rigid_groups is not None or release_fixed_components is not None or coaxial_groups is not None or completion_scope!='declared' or assembly_scope_hint or auto_plan or group_seeds is not None or verification_mode!='independent_joint_trials' or output_component_hints is not None or initial_translation_limit_mm!=.001 or (assembly_sequence and continue_verified_batch):
-                    raise core.StopBatch('CONNECTION_INTENT_INVALID','分层序列或同副本开始下一批需要单独调用，未忽略任何目标。')
+                conflicts=[name for name,present in (
+                    ('mate_changes',mate_changes is not None),('connection_intent',connection_intent is not None),
+                    ('rigid_groups',rigid_groups is not None),('release_fixed_components',release_fixed_components is not None),
+                    ('coaxial_groups',coaxial_groups is not None),('completion_scope',completion_scope!='declared'),
+                    ('assembly_scope_hint',assembly_scope_hint),('auto_plan',auto_plan),('group_seeds',group_seeds is not None),
+                    ('verification_mode',verification_mode!='independent_joint_trials'),('output_component_hints',output_component_hints is not None),
+                    ('initial_translation_limit_mm',initial_translation_limit_mm!=.001),('moving_component_hint',moving_component_hint),
+                    ('reference_component_hint',reference_component_hint),('alignment_mode',alignment_mode!='strict')) if present]
+                if assembly_sequence and continue_verified_batch:
+                    conflicts.extend(('assembly_sequence','continue_verified_batch'))
+                if conflicts:
+                    steps=[]
+                    if continue_verified_batch:
+                        steps.append({'arguments':{'task_id':task_id,'continue_verified_batch':True},
+                            'prerequisite':'verified_declared_batch_with_continue_in_same_copy',
+                            'instruction':'单独调用后查询同一任务，等到 constraint_review_ready 再提交本批 connection_intent。'})
+                    if assembly_sequence in {'start','continue','stop'}:
+                        instruction={
+                            'start':'对新总装体检单独启动序列，查询返回的任务并按当前层提示规划。',
+                            'continue':'完成当前层验证、保存和关闭后单独调用，查询返回的新 task_id，再按该层提示规划。',
+                            'stop':'当前层空闲时单独停止后续层；仍需按任务指引完成当前副本的收尾。'}
+                        steps.append({'arguments':{'task_id':task_id,'assembly_sequence':assembly_sequence},
+                            'instruction':instruction[assembly_sequence]})
+                    raise core.StopBatch('CONNECTION_INTENT_INVALID','批次控制须单独调用。按当前任务的续批入口处理冲突字段。',
+                        {'conflicting_fields':conflicts,'control_call_options':steps})
                 if continue_verified_batch:
                     from .connection_task import continue_batch
                     return continue_batch(self,t)
@@ -515,11 +538,15 @@ class MotionTaskEngine(TaskEngine):
                 'curve_status':'not_exported_native_verification_not_passed','whole_mechanism_or_DOF_certified':False}
             if not native_ok:
                 if run.get('error_code'):
-                    raise core.StopBatch(run['error_code'],run.get('failure') or '原生运动验证未完成；读取已保存诊断并恢复收尾，不重复求解。',
-                        {'run_id':run.get('run_id'),'report_path':run.get('report_path'),
+                    review=t['proposal'].get('pre_solve_constraint_review')
+                    diagnostics={'run_id':run.get('run_id'),'report_path':run.get('report_path'),
                          'native_verification':run,'task_verification_path':str(s.folder/'运动验证.json'),
-                         'pre_solve_constraint_review':t['proposal'].get('pre_solve_constraint_review'),
-                         'constraint_review_instruction':'复核驱动参考、缺失连接及候选冗余。可在新装配体检任务用mate_changes预演单独调整旧配合，或用independentize_mirrors预演独立化；原生改造验证和运动验证分别核对。'})
+                         'pre_solve_constraint_review':review,
+                         'constraint_review_instruction':'安全收尾后可在新装配体检复核驱动与参考的配合路径、镜向依赖及候选冗余。先核对关节用途，再对已明确影响范围的单项调整进行预演并确认。'}
+                    if run['error_code']=='RESULTS_STALE':
+                        from ..mate_redundancy import stale_motion_context
+                        diagnostics['solver_context']=stale_motion_context(review)
+                    raise core.StopBatch(run['error_code'],run.get('failure') or '原生运动验证未完成；读取已保存诊断并恢复收尾，不重复求解。',diagnostics)
                 t.update(phase='verification_failed',next_action={'tool':'finish_mechanism_task','arguments':{'task_id':task_id},
                     'instruction':'原生判据、恢复或源文件核对未全部通过；读取运动验证记录后安全收尾，不导出为成功曲线，不自动重算。'})
                 return

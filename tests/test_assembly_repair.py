@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import motion_server
 from sw_mcp.bridge import CadError
-from sw_mcp.conversation import assembly_repair, core
+from sw_mcp.conversation import assembly_repair, assembly_snapshot, core, task_progress
 from sw_mcp.conversation.motion_tasks import MotionTaskEngine
 
 
@@ -82,3 +82,74 @@ class AssemblyRepairTests(unittest.TestCase):
         with self.assertRaisesRegex(core.StopBatch, 'MATE_CHANGE_REVIEW_REQUIRED'):
             assembly_repair.propose(self.engine, self.task, self.requests, False)
         self.session.call.assert_not_called()
+
+    def test_batch_controls_return_separate_entry_points(self):
+        task_id = self.task['task_id']
+        with self.assertRaises(core.StopBatch) as raised:
+            self.engine.plan(task_id, continue_verified_batch=True, assembly_sequence='continue',
+                             connection_intent=[], completion_scope='whole_assembly', initial_translation_limit_mm=.002)
+        self.assertEqual(raised.exception.code, 'CONNECTION_INTENT_INVALID')
+        review = raised.exception.diagnostics
+        self.assertEqual(set(review['conflicting_fields']), {'connection_intent','completion_scope',
+            'initial_translation_limit_mm','continue_verified_batch','assembly_sequence'})
+        same, layered = review['control_call_options']
+        self.assertEqual(same['arguments'], {'task_id':task_id,'continue_verified_batch':True})
+        self.assertIn('constraint_review_ready', same['instruction'])
+        self.assertEqual(layered['arguments'], {'task_id':task_id,'assembly_sequence':'continue'})
+        self.assertIn('新 task_id', layered['instruction'])
+        self.session.call.assert_not_called()
+        self.engine._submit.assert_not_called()
+
+    def test_material_name_mismatch_keeps_exact_name_candidates_in_summary(self):
+        details = {'requested_database':'base.sldmat','requested_material':'6061 Alloy',
+                   'material_status':'no_exact_match','candidate_materials':['6061-T6 (SS)']}
+        self.session.call.side_effect = CadError('PARAMETER_NOT_APPLICABLE', 'material mismatch', diagnostics={'details':details})
+        assignment = {'part_file':'part.sldprt','configuration':'Default','database':'base.sldmat','material':'6061 Alloy'}
+        self.engine.plan(self.task['task_id'], material_assignments=[assignment])
+        self.assertEqual(self.task['phase'], 'constraint_review_ready')
+        self.assertFalse(self.task.get('plan_token'))
+        self.assertEqual(assembly_snapshot.summary(self.task)['material_input_review']['candidate_materials'],
+                         ['6061-T6 (SS)'])
+
+    def test_stale_motion_keeps_solver_observations_in_poll_and_summary(self):
+        self.session.motion_candidate = {'component_id':'p','entity_id':'axis'}
+        self.session.motion_candidates = [{'drive':self.session.motion_candidate,'reference':{'component_id':'q'}}]
+        self.session.motion_signature = 'original'
+        self.session.initial_inspection = {'components':[]}
+        self.session.state = Mock()
+        self.session.call.side_effect = lambda operation, **kwargs: {
+            '_circular_reference_state': {'signature':'original'}, 'inspect_model': {'components':[]},
+            'create_motion_study': {}, 'verify_motion_preservation': {'error_code':'RESULTS_STALE',
+                'assertion':'inconclusive','solver_messages_status':'not_available_from_verified_native_interface'}}[operation]
+        self.task.update(task_kind='motion', phase='awaiting_confirmation', plan_token='token', selected_index=0,
+            motion_parameters={'motion':'linear','speed':1,'duration_s':1,'output_fps':30,'minimum_travel':.001},
+            proposal={'reset_studies_before_drive':[],'direction_binding':{'native_reverse_direction':False},
+                      'initial_state':'saved','pre_solve_constraint_review':{'reference_link_observed':False,
+                          'reference_path_appears_only_with_observed_mirror_dependencies':True,
+                          'driven_mate_island_size':12,'omitted_constraint_count':3}})
+        with (patch.object(core, 'write'),
+              patch('sw_mcp.conversation.motion_tasks.motion_direction_binding',
+                    return_value={'native_reverse_direction':False,'expected_sign_about_selected_native_axis':1}),
+              self.assertRaises(core.StopBatch) as raised):
+            self.engine.execute(self.task['task_id'], 'token', confirmed=True, scope_confirmed=True)
+        failure = raised.exception
+        self.assertEqual(failure.code, 'RESULTS_STALE')
+        self.assertEqual(failure.diagnostics['native_verification']['solver_messages_status'],
+                         'not_available_from_verified_native_interface')
+        context = failure.diagnostics['solver_context']
+        self.assertFalse(context['solver_root_cause_proven'])
+        self.assertFalse(context['automatic_constraint_change_allowed'])
+        self.assertEqual(context['observations'], ['DRIVE_REFERENCE_MATE_PATH_NOT_OBSERVED',
+            'REFERENCE_PATH_OBSERVED_ONLY_WITH_MIRROR_DEPENDENCIES'])
+        self.assertEqual(context['omitted_constraint_count'], 3)
+        self.task.update(phase='failed',error={'code':failure.code,'diagnostics':failure.diagnostics})
+        self.assertEqual(assembly_snapshot.summary(self.task)['error']['solver_context'], context)
+        self.assertEqual(task_progress.compact_status(self.task, None, 'test')['solver_context'], context)
+
+    def test_progress_only_keeps_nonzero_native_exit_warning(self):
+        self.task.update(phase='closed_with_cleanup_warning',closed=True,
+            finish={'cleanup_status':'warning_nonzero_native_exit','native_exit':{
+                'native_process_exited':True,'normal_zero_exit':False,'exit_code':1}})
+        warning = task_progress.compact_status(self.task, None, 'test')['cleanup_warning']
+        self.assertEqual(warning, {'cleanup_status':'warning_nonzero_native_exit',
+            'native_process_exited':True,'normal_zero_exit':False,'exit_code':1})
