@@ -193,7 +193,7 @@ def continue_batch(engine,task):
     engine._require_session(task_id)
     session=engine.sessions[task_id]
     if not can_continue(task,session):
-        raise core.StopBatch('TASK_NOT_READY_FOR_PLAN','续批需要仍由原会话持有、已通过局部验证的平坦装配副本。')
+        raise core.StopBatch('TASK_NOT_READY_FOR_PLAN','仅已通过局部验证并明确提示 continue_in_same_copy 的活副本可在同一任务续批。请查询当前任务的 next_action。')
 
     def operation():
         history=task.get('connection_batch_history',[])

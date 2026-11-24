@@ -63,7 +63,8 @@ def compact_status(task, session, owner):
     stage_started = task.get('stage_started_at') if busy else None
     elapsed = progress.get('operation_elapsed_s') if current else (
         max(0, time.time()-stage_started) if available and type(stage_started) in (int,float) and math.isfinite(stage_started) else None)
-    error = (task.get('error') or {}).get('code')
+    failure = task.get('error') or {}
+    error = failure.get('code')
     result = {'task_id':task['task_id'], 'phase':task['phase'], 'busy':busy, 'closed':task.get('closed') is True,
               'stage':view.get('native_stage'), 'elapsed_s':round(elapsed,2) if elapsed is not None else None,
               'elapsed_basis':'native_request' if current else 'task_stage' if elapsed is not None else None,
@@ -75,6 +76,15 @@ def compact_status(task, session, owner):
         result.update(completed_files=progress.get('completed_files'), total_files=progress['total_files'])
     if error:
         result['error_code'] = error
+        solver_context=(failure.get('diagnostics') or {}).get('solver_context')
+        if solver_context:
+            result['solver_context']=solver_context
+    if result['phase']=='closed_with_cleanup_warning':
+        finish=task.get('finish') or {}
+        native_exit=finish.get('native_exit') or {}
+        result['cleanup_warning']={'cleanup_status':finish.get('cleanup_status'),
+            'native_process_exited':native_exit.get('native_process_exited'),
+            'normal_zero_exit':native_exit.get('normal_zero_exit'),'exit_code':native_exit.get('exit_code')}
     return result
 
 

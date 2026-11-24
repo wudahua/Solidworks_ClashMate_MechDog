@@ -62,7 +62,7 @@ class FormalEngine:
             validate_prepare_arguments(arguments)
         recovery_session=self.tasks.sessions.get(self.tasks.active) if self.tasks.active and name in {'get_recovery_state','restore_model_checkpoint'} else None
         material_session=None
-        if self.tasks.active and name=='inspect_model' and arguments.get('detail_level','summary') in {'materials','mass_properties','summary'}:
+        if self.tasks.active and name=='inspect_model' and arguments.get('detail_level','summary') in {'materials','material_names','mass_properties','summary'}:
             self.tasks._require_session(self.tasks.active)
             session=self.tasks.sessions[self.tasks.active]
             if (not session.bridge or not session.model or arguments.get('model_id')!=session.model

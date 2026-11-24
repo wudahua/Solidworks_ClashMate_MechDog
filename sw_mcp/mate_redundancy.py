@@ -84,6 +84,26 @@ def axial_variations(inspection):
     return result
 
 
+def stale_motion_context(review):
+    """Expose bounded observations without turning the supported graph into solver proof."""
+    review=review or {}
+    observations=[]
+    if review.get('reference_link_observed') is False:
+        observations.append('DRIVE_REFERENCE_MATE_PATH_NOT_OBSERVED')
+    if review.get('reference_path_appears_only_with_observed_mirror_dependencies') is True:
+        observations.append('REFERENCE_PATH_OBSERVED_ONLY_WITH_MIRROR_DEPENDENCIES')
+    if review.get('status')=='supported_direction_blocked_at_start':
+        observations.append('DIRECTION_BLOCKED_IN_SUPPORTED_LOCAL_PROJECTION')
+    if (review.get('redundancy_candidate_count') or 0)>0:
+        observations.append('LOCAL_REDUNDANCY_CANDIDATES')
+    return {'observations':observations,'constraint_review_status':review.get('status'),
+            'driven_mate_island_size':review.get('driven_mate_island_size'),
+            'reference_is_native_fixed':review.get('reference_is_native_fixed'),
+            'omitted_constraint_count':review.get('omitted_constraint_count'),
+            'redundancy_candidate_count':review.get('redundancy_candidate_count'),
+            'solver_root_cause_proven':False,'automatic_constraint_change_allowed':False}
+
+
 def drive_review(inspection, drive, reference, motion):
     """Relate the selected drive coordinate to the supported constraint rows."""
     from . import constraint_graph,mirror_connections
