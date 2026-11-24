@@ -1,10 +1,14 @@
 from pathlib import Path
 from types import SimpleNamespace
 import asyncio
+import os
+import subprocess
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
 from sw_mcp.conversation import aperture, core
+from sw_mcp.bridge import CadError
 
 
 def sample(frame, stroke, gaps, collisions=None):
@@ -73,6 +77,42 @@ class ApertureTests(unittest.TestCase):
         calls = self.session.call.call_args_list
         self.assertEqual(calls[0].args, ('create_model_checkpoint',))
         self.assertEqual(calls[1].kwargs['discard_checkpoint'], checkpoint)
+
+    def test_endpoint_failure_stops_the_sweep_and_preserves_cleanup_status_in_views(self):
+        from sw_mcp.conversation import assembly_snapshot, task_progress
+        for failure_code, restoration in (('CONNECTION_EVIDENCE_FAILED','restored'),('RESTORATION_FAILED','unknown')):
+            def rejected(operation, **args):
+                details={'reason':'aperture_cycle_did_not_return_to_saved_pose','run_id':args['run_id'],
+                    'endpoint':{'frame':40,'maximum_translation_m':.04672,'maximum_rotation_rad':.38515}}
+                if failure_code=='RESTORATION_FAILED':
+                    details={'original_failure':{'details':details}}
+                raise CadError(failure_code,'endpoint failure',restoration,{'details':details})
+            self.session.call.reset_mock(side_effect=True)
+            self.session.call.side_effect=rejected
+            with self.subTest(failure_code=failure_code), self.assertRaises(CadError) as raised:
+                aperture.run(self.session,self.proposal,self.drive,self.reference)
+            self.session.call.assert_called_once()
+            self.assertEqual(raised.exception.code,failure_code)
+            endpoint=raised.exception.diagnostics['aperture_endpoint']
+            self.assertEqual(endpoint['maximum_translation_m'],.04672)
+            self.assertEqual(endpoint['trial_restoration_status'],restoration)
+            task={'task_id':'a'*32,'phase':'failed','error':{'code':failure_code,'diagnostics':raised.exception.diagnostics}}
+            self.assertEqual(assembly_snapshot.summary(task)['error']['aperture_endpoint'],endpoint)
+            self.assertEqual(task_progress.compact_status(task,None,'owner')['aperture_endpoint'],endpoint)
+
+    @unittest.skipUnless(os.name=='nt','Windows .NET Framework compiler required')
+    def test_production_endpoint_diagnostics_retain_strict_thresholds_and_rank_both_axes(self):
+        root=Path(__file__).resolve().parents[1]
+        compiler=Path(os.environ['WINDIR'])/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+        scratch=root/'runs/aperture-endpoint-tests'
+        scratch.mkdir(parents=True,exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch) as directory:
+            exe=Path(directory)/'aperture.exe'
+            files=('executor/AperturePoseReview.cs','executor/PoseValidation.cs','tests/AperturePoseReviewTests.cs')
+            result=subprocess.run([str(compiler),'/nologo','/out:'+str(exe),*(str(root/file) for file in files)],capture_output=True,timeout=30)
+            self.assertEqual(result.returncode,0,(result.stdout+result.stderr).decode(errors='replace'))
+            result=subprocess.run([str(exe)],capture_output=True,timeout=15)
+            self.assertEqual(result.returncode,0,(result.stdout+result.stderr).decode(errors='replace'))
 
 
 if __name__ == '__main__':

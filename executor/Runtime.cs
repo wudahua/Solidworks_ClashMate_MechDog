@@ -397,6 +397,8 @@ public partial class Cad {
             case "import_assembly": return ImportUserAssembly((string)p["path"],p.ContainsKey("configuration")?(string)p["configuration"]:null,null,null,p.ContainsKey("import_id")?(string)p["import_id"]:null,p.ContainsKey("materialize_virtual_components")&&Convert.ToBoolean(p["materialize_virtual_components"]));
             case "list_models": return UserListModels();
             case "inspect_model":
+                // MCP summary is a host-side snapshot. Native callers retain
+                // the original full inventory when they omit a detail level.
                 string detail=p.ContainsKey("detail_level")?(string)p["detail_level"]:"full";
                 if(detail=="material_names")
                     return InspectMaterialNames((string)p["model_id"],(string)p["material_database"],(string)p["material_query"],

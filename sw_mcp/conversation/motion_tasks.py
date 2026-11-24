@@ -6,6 +6,40 @@ from . import mate_motion,startup_gate,source_integrity,task_execution,task_prog
 from sw_mcp.native_grid import require_grid,MINIMUM_INTERVALS
 
 
+def incomplete_travel_review(run, parameters, proposal):
+    """Summarize native coverage without inferring a physical stop position."""
+    axis=(run.get('failure_diagnostics') or {}).get('time_axis') or {}
+    first,last=axis.get('first_time_s'),axis.get('last_time_s')
+    duration=parameters['duration_s']
+    expected,observed=axis.get('expected_count'),axis.get('actual_count')
+    rate=parameters['speed']*(6 if parameters['motion']=='rotary' else 1)
+    matched_prefix=(axis.get('finite') is True and axis.get('strictly_increasing') is True
+                    and axis.get('configuration_changed_during_native_solve') is False
+                    and expected==round(duration*parameters['output_fps'])+1
+                    and type(observed) is int and 1<observed<expected
+                    and all(type(v) in (int,float) and math.isfinite(v) for v in (first,last))
+                    and abs(first)<=1e-7 and 0<last<duration
+                    and type(axis.get('maximum_grid_error_s')) in (int,float)
+                    and 0<=axis['maximum_grid_error_s']<=1e-7)
+    comparison_available=(matched_prefix and run.get('restoration_status')=='restored'
+          and run.get('source_files_unchanged') is True and type(parameters.get('reverse_direction')) is bool
+          and proposal.get('initial_state')=='saved' and not proposal.get('working_stroke_validation'))
+    return {'requested_duration_s':duration,'last_native_time_s':last,
+            'requested_frames':expected,'observed_frames':observed,
+            'travel_unit':'deg' if parameters['motion']=='rotary' else 'mm',
+            'requested_commanded_travel':rate*duration,
+            'nominal_commanded_travel_at_last_frame':round(rate*last,9) if matched_prefix else None,
+            'measured_travel':None,'measured_travel_status':'not_sampled_on_incomplete_grid',
+            'cause_status':'not_proven','direction_comparison':{
+                'status':'separate_task_option' if comparison_available else 'not_suggested_for_this_evidence',
+                'original_task_retried':False,'reverse_result_can_satisfy_original_task':False,
+                **({'requested_reverse_direction':not parameters['reverse_direction'],
+                    'requires_finished_restored_original_task':True,'requires_matching_assembly_and_initial_pose':True,
+                    'requires_new_confirmation':True,
+                    'instruction':'恢复并正常收尾后，可另行确认同装配初态、轴线、参考和预算的反向对照。比较原生帧与测得姿态；相同停时不能定位死点或证明配合锁死。'}
+                  if comparison_available else {})}}
+
+
 def prepare_limits():
     """Public card limits, also consumed by gear admission. No CAD inspection."""
     grid={'minimum_intervals':MINIMUM_INTERVALS,'duration_times_fps_must_be_integer':True}
@@ -543,9 +577,11 @@ class MotionTaskEngine(TaskEngine):
                          'native_verification':run,'task_verification_path':str(s.folder/'运动验证.json'),
                          'pre_solve_constraint_review':review,
                          'constraint_review_instruction':'安全收尾后可在新装配体检复核驱动与参考的配合路径、镜向依赖及候选冗余。先核对关节用途，再对已明确影响范围的单项调整进行预演并确认。'}
-                    if run['error_code']=='RESULTS_STALE':
+                    if run['error_code'] in {'RESULTS_STALE','MOTION_RESULTS_INCOMPLETE'}:
                         from ..mate_redundancy import stale_motion_context
                         diagnostics['solver_context']=stale_motion_context(review)
+                    if run['error_code']=='MOTION_RESULTS_INCOMPLETE':
+                        diagnostics['incomplete_travel']=incomplete_travel_review(run,p,t['proposal'])
                     raise core.StopBatch(run['error_code'],run.get('failure') or '原生运动验证未完成；读取已保存诊断并恢复收尾，不重复求解。',diagnostics)
                 t.update(phase='verification_failed',next_action={'tool':'finish_mechanism_task','arguments':{'task_id':task_id},
                     'instruction':'原生判据、恢复或源文件核对未全部通过；读取运动验证记录后安全收尾，不导出为成功曲线，不自动重算。'})

@@ -591,7 +591,9 @@ def execute(engine,t,token,confirmed,scope_confirmed,alignment_confirmed):
                             previous=coupled_signs.setdefault(i,sign);coupled['signed_relation_consistent']=previous==sign;coupled['passed']=coupled['passed'] and previous==sign
                         audit['coupled_motion_checks']=coupled;audit['passed']=audit['passed'] and coupled['passed']
                 except (ValueError,KeyError,TypeError) as error:raise core.StopBatch('CONNECTION_EVIDENCE_FAILED','试验变换或证据范围无效。',{'reason':str(error),'artifact':receipt}) from error
-                audits.append({**audit,'request_target_binding':binding,'artifact':receipt})
+                audits.append({**audit,'joint':{'goal_index':i,'kind':goal['kind'],
+                    'component_a':goal['component_a'],'component_b':goal['component_b']},
+                    'request_target_binding':binding,'artifact':receipt})
                 if getattr(s,'selected_assembly_layer',None):
                     layer_audit=s.call('_verify_connection_layer',model_id=s.model)
                     core.write(s.folder/('内部试验总装守卫-'+str(len(audits))+'.json'),layer_audit)

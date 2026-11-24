@@ -8,7 +8,7 @@ from pathlib import Path
 from verify_release import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.3-alpha.55"
+VERSION = "0.4.3-alpha.56"
 
 
 def build(candidate=False):
@@ -20,11 +20,12 @@ def build(candidate=False):
     sources += [ROOT/'tests/test_executor_startup.py',ROOT/'tests/StartupEmptyControlTests.cs']
     sources += [ROOT/'tests/test_assembly_snapshot.py',ROOT/'tests/AssemblyGeometrySnapshotTests.cs']
     sources += [ROOT/'tests/test_assembly_repair.py']
+    sources += [ROOT/'tests/test_material_catalog.py',ROOT/'tests/MaterialCatalogTests.cs']
     sources += [ROOT/'tests/test_coupled_connections.py',ROOT/'tests/test_assembly_assessment.py',ROOT/'tests/test_partial_connection_goals.py',ROOT/'tests/test_dead_native_close.py',ROOT/'tests/test_group_review.py',ROOT/'tests/test_scoped_patterns.py']
     sources += [ROOT/'tests/test_mate_snapshot.py',ROOT/'tests/MateSnapshotReadTests.cs']
     sources += [ROOT/'tests/test_connection_signature_diff.py',ROOT/'tests/ConnectionSignatureDiffTests.cs']
     sources += [ROOT/'tests'/name for name in ('test_initial_translation.py','test_initial_translation_native_guard.py','InitialTranslationGuardFixture.cs','test_mechanism_loop.py','test_driven_loop_motion.py')]
-    sources += [ROOT/'tests/test_working_stroke.py', ROOT/'tests/test_aperture.py']
+    sources += [ROOT/'tests/test_working_stroke.py', ROOT/'tests/test_aperture.py', ROOT/'tests/AperturePoseReviewTests.cs']
     sources += [ROOT/'tests/test_feedback_alpha50.py', ROOT/'tests/RawDuplicateEnvironmentFixture.cs']
     sources += [ROOT/'tests/test_feedback_alpha51.py']
     sources += [ROOT/'tests/test_motor_reference_identity.py',ROOT/'tests/MotorReferenceIdentityTests.cs']

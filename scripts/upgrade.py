@@ -46,6 +46,10 @@ class UpgradeFailure(RuntimeError):
             instruction += ' 请使用Release的Assets中官方_source.zip及同名.sha256；GitHub自动生成的Source code (zip/tar.gz)不是升级资产。不要删除文件或手工改清单绕过校验。'
         if self.code == 'UPGRADE_FILE_API_CHECK_FAILED':
             instruction = '外部包装或来源未知的文件API未通过自建小文件检查，升级在源码写入前停止。请AI核对python_runtime、file_api_checks和预检记录，通过宿主支持的授权维护渠道处理兼容性；不自动清除PYTHONPATH、不替换API、不绕过删除保护或重试升级。'
+            runtime = self.diagnostics.get('python_runtime') or {}
+            code_path = ((runtime.get('path_unlink') or {}).get('code_file') or '').replace('\\','/').casefold().split('/')
+            if any(code_path[i:i+3]==['sandbox-center-runtime-kit','shim','sitecustomize.py'] for i in range(len(code_path)-2)):
+                instruction += ' 检查记录指向宿主运行时文件保护层。若宿主日志显示锁等待超时，请由宿主支持渠道确认文件保护恢复，再显式执行升级预检。失败探测及回执保留于 runs/upgrade-api-checks，交由该渠道处理。'
         stage = state.get('stage') or self.diagnostics.get('stage')
         return {'ok': False, 'schema_version': 2, 'receipt_schema_version': 2, 'upgrade_result_schema_version': 1, 'code': self.code,
                 **{key: state.get(key) for key in ('stage','failure_stage','python_started','target_mutation_started','backup_created','receipt_path','receipt_stage_persisted','receipt_write_error','committed','rollback_attempted','rollback_verified','rollback_status','recovery_journal_unchanged','installation_state')},

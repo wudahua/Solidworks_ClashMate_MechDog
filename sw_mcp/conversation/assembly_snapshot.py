@@ -330,14 +330,19 @@ def summary(task):
         if isinstance(result.get(key),dict):
             failure=result[key]
             result[key]={k:failure[k] for k in ('code','message','assertion','restoration_status','native_unknown','retry_write_allowed') if k in failure}
-            solver_context=(failure.get('diagnostics') or {}).get('solver_context')
-            if solver_context:
-                result[key]['solver_context']=solver_context
+            diagnostics=failure.get('diagnostics') or {}
+            for field in ('solver_context','incomplete_travel','aperture_endpoint'):
+                if diagnostics.get(field):
+                    result[key][field]=diagnostics[field]
             result[key]['details_in_full_task']=True
     if isinstance(task.get('verification'),dict):
         result['verification']={k:v for k,v in task['verification'].items() if v is None or type(v) in (str,int,float,bool)}
         for key in ('initial_openings_mm','achieved_openings_mm','final_openings_mm','target_openings_mm'):
             if key in task['verification']:result['verification'][key]=task['verification'][key]
+        failed_trials=[row for row in task['verification'].get('trials',[]) if row.get('passed') is False and row.get('joint')]
+        if failed_trials:
+            fields=('joint','trial','actual_travel','requested_travel','requested_travel_unit','travel_requirement_applicable','allowed_travel_verified')
+            result['verification']['failed_joint_trials']=[{k:row.get(k) for k in fields} for row in failed_trials[:8]]
         result['verification']['full_task_retains_detailed_evidence']=True
     if task.get('finish'):
         f=task['finish'];result['finish']={k:f.get(k) for k in ('cleanup_status','next_round_allowed','source_files_unchanged','result_assembly_path','result_assembly_sha256','native_exit','executor_exit')}

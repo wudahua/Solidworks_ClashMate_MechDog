@@ -7,10 +7,13 @@ def conclusions(value):
     v=value.get('verification') or {};f=value.get('finish') or {}
     mechanism=v.get('working_stroke') or v.get('driven_loop_review')
     declared=v.get('declared_scope_passed')
+    whole=v.get('whole_assembly_declared_targets_passed')
+    if value.get('task_kind')=='assembly_constraints' and (value.get('proposal') or {}).get('completion_scope')=='declared':
+        whole=None
     status=lambda passed:'pass' if passed is True else 'fail' if passed is False else 'not_verified'
     return {'declared_scope_validation':status(declared),
             'driver_direction_validation':status(v.get('direction_verified_about_selected_native_axis')),
-            'whole_assembly_declared_joints':status(v.get('whole_assembly_declared_targets_passed')),
+            'whole_assembly_declared_joints':status(whole),
             'mechanism_output_validation':status(declared) if mechanism else 'not_verified',
             'mechanism_output_basis':'declared_primary_input_and_outputs' if mechanism else 'no_complete_output_contract_verified',
             'restoration_status':f.get('restoration_status') or (f.get('restoration') or {}).get('restoration_status') or 'not_verified',

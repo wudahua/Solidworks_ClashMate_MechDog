@@ -76,9 +76,10 @@ def compact_status(task, session, owner):
         result.update(completed_files=progress.get('completed_files'), total_files=progress['total_files'])
     if error:
         result['error_code'] = error
-        solver_context=(failure.get('diagnostics') or {}).get('solver_context')
-        if solver_context:
-            result['solver_context']=solver_context
+        diagnostics=failure.get('diagnostics') or {}
+        for key in ('solver_context','incomplete_travel','aperture_endpoint'):
+            if diagnostics.get(key):
+                result[key]=diagnostics[key]
     if result['phase']=='closed_with_cleanup_warning':
         finish=task.get('finish') or {}
         native_exit=finish.get('native_exit') or {}

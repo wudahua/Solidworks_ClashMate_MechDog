@@ -1,6 +1,7 @@
 """One owner for the existing public tools and managed dialogue sessions."""
 import asyncio
 import sys
+from sw_mcp.bridge import CadError
 from .task_engine import core,release_executor
 from .motion_tasks import MotionTaskEngine,validate_prepare_arguments
 
@@ -26,8 +27,16 @@ class FormalEngine:
         product._formal_engine=self
         self.server_instance_id=self.tasks.server_instance_id
         self.managed_upgrade_guard=False
+        self.historical_lease_issue=None
         if self.tasks.prior_unfinished:
-            product.bridge._acquire_lease();self.managed_upgrade_guard=True
+            try:
+                product.bridge._acquire_lease()
+            except CadError as error:
+                if error.code not in {'MCP_OWNER_ALREADY_RUNNING','MCP_LEASE_UNAVAILABLE'}:
+                    raise
+                self.historical_lease_issue={'code':error.code,'message':str(error),'diagnostics':error.diagnostics}
+            else:
+                self.managed_upgrade_guard=True
 
     def continuation_gate(self):
         # Invoked only after sequence parameters and saved input bindings pass.
@@ -60,6 +69,8 @@ class FormalEngine:
             # Input errors are independent of service occupancy. Keep source
             # identity admission above, and every lease/native gate below.
             validate_prepare_arguments(arguments)
+            if self.tasks.prior_unfinished:
+                raise core.StopBatch('PRIOR_TASK_UNCONFIRMED','先查询并核对上次任务的收尾证据。',self.tasks.prior_task_diagnostics())
         recovery_session=self.tasks.sessions.get(self.tasks.active) if self.tasks.active and name in {'get_recovery_state','restore_model_checkpoint'} else None
         material_session=None
         if self.tasks.active and name=='inspect_model' and arguments.get('detail_level','summary') in {'materials','material_names','mass_properties','summary'}:
@@ -72,9 +83,13 @@ class FormalEngine:
         if self.tasks.prior_unfinished and name in {'get_recovery_state','restore_model_checkpoint'}:
             raise core.StopBatch('ORPHAN_NATIVE_SESSION_UNAVAILABLE','原活会话丢失；get_mechanism_task读取旧归属记录，不能用主安装日志冒充该任务状态。',
                 {'tasks':self.tasks.get(),'native_calls':False})
+        recovery_only = getattr(self,'historical_lease_issue',None) if self.tasks.prior_unfinished else None
+        if recovery_only and name not in offline|{'get_mechanism_task','finish_mechanism_task'}:
+            raise core.StopBatch('PRIOR_TASK_UNCONFIRMED','宿主只能读取旧任务和按证据归档，CAD 工作仍被阻断。',
+                {**self.tasks.prior_task_diagnostics(),'installation_lease':recovery_only})
         binding=self.artifact_binding(arguments) if name in offline|{'replay_motion_frame'} else None
         handoff=self.handoff_legacy() if name=='prepare_mechanism_task' else None
-        if name=='finish_mechanism_task' and arguments.get('close_unrestored') is True and not arguments.get('keep_result'):
+        if not recovery_only and name=='finish_mechanism_task' and arguments.get('close_unrestored') is True and not arguments.get('keep_result'):
             task=self.tasks.tasks.get(arguments.get('task_id'),{})
             if task and not task.get('closed') and task.get('server_instance_id')!=self.tasks.server_instance_id:
                 from .orphan_close import review
@@ -109,6 +124,11 @@ class FormalEngine:
                         raise core.StopBatch('MANAGED_REPLAY_REQUIRES_LIVE_IDLE_TASK','受管任务原生回放须为本次未关闭空闲任务，使用同步回放；已关闭任务只能读已有截图。')
                     session.require_live_idle();self.product.bridge=session.bridge;bridge_override=True
             result=asyncio.run(self.product.mcp.call_tool(name,arguments))
+            if recovery_only and name=='get_mechanism_task' and not result.is_error:
+                from sw_mcp.validation import packed
+                payload=result.structured_content
+                result=packed({**payload,'result':{**payload['result'],'historical_recovery_access':{
+                    'scope':'read_and_proof_based_archive_only','installation_lease_code':recovery_only['code'],'CAD_dispatched':False}}})
             if handoff:
                 from sw_mcp.validation import packed
                 result=packed({**result.structured_content,'legacy_session_handoff':handoff},result.is_error)
