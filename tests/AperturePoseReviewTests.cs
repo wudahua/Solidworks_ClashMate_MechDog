@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Web.Script.Serialization;
 
 class AperturePoseReviewTests {
     static object Field(object value,string name){return value.GetType().GetProperty(name).GetValue(value,null);}
@@ -8,7 +10,7 @@ class AperturePoseReviewTests {
         return new[]{c,s,0,-s,c,0,0,0,1,x,0,0,1,0,0,0};
     }
     static void Check(bool condition,string message){if(!condition)throw new Exception(message);}
-    static int Main(){
+    static int Main(string[] args){
         Console.OutputEncoding=new System.Text.UTF8Encoding(false);
         var initial=new Dictionary<string,double[]>{{"shift",Pose(0,0)},{"rotate",Pose(0,0)},{"invalid",Pose(0,0)}};
         var actual=new Dictionary<string,double[]>{{"shift",Pose(.04672,0)},{"rotate",Pose(0,.38515)},{"invalid",Pose(double.NaN,0)}};
@@ -23,6 +25,26 @@ class AperturePoseReviewTests {
         Check(!PoseValidation.Matches(Pose(0,0),Pose(5e-7,0))&&!PoseValidation.Matches(Pose(0,0),Pose(0,5e-6)),"10x looser threshold");
         Check(!(bool)Field(result,"root_cause_proven"),"cause inferred");
         Check((string)Field(AperturePoseReview.Describe(0,initial,actual),"comparison")=="first_frame_to_saved_pose","first frame");
+        Check(Math.Abs((double)Field(((Array)Field(result,"worst_rotation_components")).GetValue(0),"rotation_deg")-.38515*180/Math.PI)<1e-10,"degree diagnosis");
+        string folder=args[0],file=Path.Combine(folder,"aperture-endpoint-violation.json");
+        var json=new JavaScriptSerializer();
+        Action<string,object> save=(path,data)=>AtomicMetadata.Write(path,json.Serialize(data));
+        AperturePoseReview.RequireEndpoint(20,initial,actual,folder,"middle",5,save);
+        AperturePoseReview.RequireEndpoint(40,initial,initial,folder,"pass",5,save);
+        Check(!File.Exists(file),"diagnostic written for accepted frame");
+        try {AperturePoseReview.RequireEndpoint(0,initial,actual,folder,"first",5,save);throw new Exception("accepted wrong start");}
+        catch(CadFault error){
+            Check(error.Code=="CONNECTION_EVIDENCE_FAILED"&&(string)Field(error.Diagnostics,"reason")=="aperture_initial_pose_changed","start failure");
+            Check(File.Exists(file)&&File.ReadAllText(file).Contains("\"run_id\":\"first\""),"bound artifact missing");
+        }
+        string blocked=Path.Combine(folder,"blocked");
+        File.WriteAllText(blocked,"existing file");
+        try {AperturePoseReview.RequireEndpoint(40,initial,actual,blocked,"last",5,save);throw new Exception("accepted wrong endpoint");}
+        catch(CadFault error){
+            Check(error.Code=="CONNECTION_EVIDENCE_FAILED"&&(string)Field(error.Diagnostics,"reason")=="aperture_cycle_did_not_return_to_saved_pose","lost endpoint fault");
+            Check((string)Field(error.Diagnostics,"endpoint_artifact_status")=="write_failed"&&Field(error.Diagnostics,"endpoint_artifact")==null,"write failure contract");
+            Check((int)Field(Field(error.Diagnostics,"endpoint"),"frame")==40,"lost measured endpoint");
+        }
         return 0;
     }
 }

@@ -8,7 +8,7 @@ from pathlib import Path
 from verify_release import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.3-alpha.56"
+VERSION = "0.4.3-alpha.57"
 
 
 def build(candidate=False):

@@ -6,13 +6,13 @@ import re
 from .conversation import core
 
 
-SECTIONS = ('components', 'mates', 'geometry', 'mirror_dependencies', 'redundancy_candidates', 'axial_mate_variations')
+SECTIONS = ('components', 'mates', 'geometry', 'mirror_dependencies', 'redundancy_candidates', 'axial_mate_variations','connection_variations')
 PAGE_BUDGET = 12_000
 
 
 def store(root, value):
     from .mirror_connections import review
-    from .mate_redundancy import axial_variations,review as redundancy
+    from .mate_redundancy import axial_variations,connection_variations,review as redundancy
     components = value['components']
     mates = []
     geometry = []
@@ -25,8 +25,10 @@ def store(root, value):
                 'component_id':entity.get('component_id'),'geometry':entity.get('geometry'),
                 'constraint_geometry':entity.get('constraint_geometry')})
         mates.append(row)
-    sections = dict(components=components,mates=mates,geometry=geometry,mirror_dependencies=review(value),
-                    redundancy_candidates=redundancy(value),axial_mate_variations=axial_variations(value))
+    mirrors=review(value)
+    sections = dict(components=components,mates=mates,geometry=geometry,mirror_dependencies=mirrors,
+                    redundancy_candidates=redundancy(value),axial_mate_variations=axial_variations(value),
+                    connection_variations=list(connection_variations(value,mirrors)))
     record = {'model_id':value['model_id'],'sections':sections,'component_count':len(components),'mate_count':len(mates)}
     blob = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(',',':'), allow_nan=False).encode('utf-8')
     token = hashlib.sha256(blob).hexdigest()

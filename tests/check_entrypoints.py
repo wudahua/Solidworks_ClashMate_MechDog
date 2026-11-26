@@ -77,7 +77,7 @@ ENTRIES = {
   "v042a8_policy_checks": {"mode": "offline_suite"},
   "grid_protocol_checks": {"mode": "unittest", "caller": "test_v042a6.py"},
   "clock_time_selection_checks": {"mode": "manual_offline", "reason": "Historical standalone compiler evidence; no CAD."},
-  "relative_motion_checks": {"mode": "manual_offline", "reason": "Historical standalone compiler evidence; no CAD."},
+  "relative_motion_checks": {"mode": "offline_suite", "reason": "Production relative-motion measurements and diagnostics; no CAD."},
   "qzc_evidence_checks": {"mode": "manual_offline", "reason": "Requires local SolidWorks interop references for compilation; no CAD connection."},
   "recovery_evidence_checks": {"mode": "manual_offline", "reason": "Requires local SolidWorks interop references for compilation; no CAD connection."},
   "kulisse_evidence_checks": {"mode": "manual_offline", "reason": "Requires local SolidWorks interop references for compilation; no CAD connection."},

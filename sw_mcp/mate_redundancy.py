@@ -1,8 +1,10 @@
 """Single-mate leave-one-out review of supported local constraint rows."""
 import ntpath
-from collections import defaultdict
+from collections import Counter, defaultdict
 
-from . import assembly_constraints as ac
+from . import assembly_constraints as ac, mirror_connections
+
+MATE_TYPE_NAMES={0:'coincident',1:'concentric',2:'perpendicular',3:'parallel',5:'distance'}
 
 
 def _pair_rows(inspection):
@@ -82,6 +84,51 @@ def axial_variations(inspection):
                         'scope':'identical_part_configurations_local_candidate_may_be_intentional',
                         'automatic_suppression_allowed':False})
     return result
+
+
+def connection_variations(inspection, mirrors=None):
+    """Compare active mate inventories of observed pairs with the same part/configuration identities."""
+    components={c['component_id']:c for c in inspection['components']}
+    families={cid:(ntpath.normcase(c['path']),c['configuration']) for cid,c in components.items()
+              if c.get('path') and c.get('configuration') and not c.get('subassembly')
+              and not c.get('parent_component_id') and c.get('suppressed') is not True and c.get('loaded') is not False}
+    pairs=defaultdict(Counter)
+    excluded=set()
+    for mate in inspection.get('mates',[]):
+        entities=mate.get('entities') or []
+        members=tuple(sorted({e.get('component_id') for e in entities if e.get('component_id') in families}))
+        if len(members)!=2 or mate.get('suppressed') is True:continue
+        mate_type=mate.get('type')
+        if (len(entities)!=2 or mate.get('suppressed') is not False or mate.get('error')!=0
+                or mate.get('warning') or type(mate_type) is not int):
+            excluded.add(members)
+            continue
+        pairs[members][mate_type]+=1
+    groups=defaultdict(list)
+    for pair,counts in sorted(pairs.items()):
+        if pair not in excluded:
+            group=tuple(sorted(families[c] for c in pair))
+            groups[group].append((pair,tuple(sorted(counts.items()))))
+    mirrors=mirror_connections.review(inspection) if mirrors is None else mirrors
+    native_sources={frozenset((m['component_id'],m['source_candidates'][0]['component_id'])) for m in mirrors
+                    if m.get('source_binding_status')=='unique_native_source_observed' and len(m.get('source_candidates',[]))==1}
+    for group,occurrences in sorted(groups.items()):
+        signatures=defaultdict(list)
+        for pair,counts in occurrences:signatures[counts].append(pair)
+        if len(signatures)<2:continue
+        for pair,counts in occurrences:
+            other_signature,peers=next((key,items) for key,items in signatures.items() if key!=counts)
+            peer=peers[0]
+            confirmed_mirror_links=sorted((components[a]['instance'],components[b]['instance']) for a in pair for b in peer
+                                          if a!=b and frozenset((a,b)) in native_sources)
+            yield {'component_ids':list(pair),'components':[components[c]['instance'] for c in pair],
+                   'compared_component_ids':list(peer),'compared_components':[components[c]['instance'] for c in peer],
+                   'mate_type_counts':{MATE_TYPE_NAMES.get(t,f'native_type_{t}'):n for t,n in counts},
+                   'compared_mate_type_counts':{MATE_TYPE_NAMES.get(t,f'native_type_{t}'):n for t,n in other_signature},
+                   'observed_native_mirror_links':confirmed_mirror_links,
+                   'matching_part_configuration_pair_count':len(occurrences),'variant_count':len(signatures),
+                   'scope':'observed_active_mate_types_on_repeated_top_level_part_pairs',
+                   'design_symmetry_proven':False,'mechanical_DOF_proven':False,'automatic_constraint_change_allowed':False}
 
 
 def stale_motion_context(review):

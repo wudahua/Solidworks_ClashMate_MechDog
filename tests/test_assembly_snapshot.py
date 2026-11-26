@@ -13,6 +13,28 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_repeated_connection_types_are_paged_without_assuming_symmetry(self):
+        from sw_mcp import inspection_snapshot
+        rows=[{'component_id':i,'instance':name,'path':path,'configuration':'Default'}
+            for i,name,path in (('a','零件8-1','8.SLDPRT'),('b','零件8-3','8.SLDPRT'),
+                                ('c','零件12-6','12.SLDPRT'),('d','零件12-5','12.SLDPRT'))]
+        def observed(feature,kind,left,right,suppressed=False):
+            return {'native_feature_id':feature,'type':kind,'suppressed':suppressed,'error':0,
+                    'entities':[{'component_id':left},{'component_id':right}]}
+        value={'model_id':'pair-review','components':rows,'mates':[
+            observed(59,0,'a','c'),observed(73,0,'a','c'),observed(57,1,'b','d'),observed(78,0,'b','d',True)]}
+        summary=inspection_snapshot.store(self.folder,value)
+        query=summary['queries']['connection_variations']
+        first=inspection_snapshot.page(self.folder,value['model_id'],query['cursor'],1)
+        second=inspection_snapshot.page(self.folder,value['model_id'],first['next_cursor'],1)
+        a,b=first['rows'][0],second['rows'][0]
+        self.assertEqual(a['mate_type_counts'],{'coincident':2})
+        self.assertEqual(b['mate_type_counts'],{'concentric':1})
+        self.assertEqual(a['compared_components'],['零件8-3','零件12-5'])
+        self.assertFalse(a['design_symmetry_proven']);self.assertFalse(a['mechanical_DOF_proven'])
+        self.assertEqual(a['observed_native_mirror_links'],[])
+        self.assertFalse(first['cad_dispatched'])
+
     def test_public_inspection_sections_are_frozen_and_model_bound(self):
         from sw_mcp import inspection_snapshot
         result=inspection_snapshot.store(self.folder, self.survey)

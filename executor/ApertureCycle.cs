@@ -205,18 +205,7 @@ public partial class Cad {
                         ApertureRequire(Math.Abs(study.GetTime()-time)<1e-7&&!study.IsPlaying,"aperture_frame_clock_unverified");
                         var poses=Transforms(doc);
                         ApertureRequire(poses.Count==state.Initial.Count&&state.Initial.Keys.All(poses.ContainsKey),"aperture_fixed_component_or_scope_changed");
-                        if((frame==0||frame==40)&&state.Initial.Any(p=>!PoseValidation.Matches(p.Value,poses[p.Key]))) {
-                            string reason=frame==0?"aperture_initial_pose_changed":"aperture_cycle_did_not_return_to_saved_pose";
-                            var endpoint=AperturePoseReview.Describe(frame,state.Initial,poses);
-                            string evidence=Path.Combine(directory,"aperture-endpoint-violation.json");
-                            string persistence="written";
-                            try {AtomicJson(evidence,new{run_id=runId,stroke_mm=strokeMm,reason,endpoint});}
-                            catch(IOException) {persistence="write_failed";}
-                            catch(UnauthorizedAccessException) {persistence="write_failed";}
-                            throw new CadFault("CONNECTION_EVIDENCE_FAILED","开口仿真的首帧或末帧偏离保存姿态。",
-                                new{reason,run_id=runId,stroke_mm=strokeMm,endpoint,endpoint_artifact_status=persistence,
-                                    endpoint_artifact=persistence=="written"?evidence:null});
-                        }
+                        AperturePoseReview.RequireEndpoint(frame,state.Initial,poses,directory,runId,strokeMm,AtomicJson);
                         ApertureRequire(fixedNames.All(n=>PoseValidation.Matches(state.Initial[n],poses[n])),"aperture_fixed_component_or_scope_changed");
                         foreach(var p in poses)writer.WriteLine(frame+","+ApertureNumber(time)+",\""+p.Key.Replace("\"","\"\"")+"\","+
                             string.Join(",",p.Value.Skip(9).Take(3).Concat(p.Value.Take(9)).Select(ApertureNumber)));

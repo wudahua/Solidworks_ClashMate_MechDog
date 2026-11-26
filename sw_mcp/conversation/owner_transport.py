@@ -16,6 +16,17 @@ from scripts.lease_access import open_lease_file, lock_lease_file
 METHODS = {'prepare', 'get', 'plan', 'execute', 'finish', 'status', 'shutdown_idle', 'tool'}
 
 
+def _recovery_route(method, args, kwargs):
+    if method in {'get', 'status'}:
+        return True
+    if method == 'finish':
+        return len(args)<=2 and 'keep_result' not in kwargs
+    if method == 'tool' and len(args)==2 and isinstance(args[1],dict):
+        return (args[0] in {'get_mechanism_task','get_recovery_state'}
+                or args[0]=='finish_mechanism_task' and args[1].get('keep_result',False) is False)
+    return False
+
+
 def source_manifest():
     root=HERE.parents[1]
     paths=sorted(HERE.glob('*.py'))+sorted(HERE.glob('*.ps1'))+sorted(HERE.glob('*.cs'))
@@ -45,14 +56,18 @@ class OwnerClient:
         core.write(self.work/'connections'/(uuid.uuid4().hex+'.json'),{'frontend':current,'owner_identity':info['identity'],
             'owner_generation':info['generation'],'source_fingerprint':info['source_fingerprint'],'same_desktop_session':True,'COM_called':False})
 
-    def connect(self):
+    def connect(self, allow_previous_owner=False):
+        current_fingerprint=fingerprint()
         if self.info:
             status=same_process(self.info['identity'])['status']
             if status in {'exited','pid_reused'}:
                 self.info=None  # New owner may read/retire old records; it never recreates COM handles.
             elif status != 'same':
                 raise core.StopBatch('TASK_OWNER_LOST', '任务持有进程不可确认，读取原记录，不重放写入。')
-            else:return
+            elif self.info['source_fingerprint']==current_fingerprint:
+                return self.info
+            else:
+                self.info=None
         lease = open_lease_file(self.work / 'owner-start.lock')
         try:
             if lease.seek(0, 2) == 0:
@@ -74,13 +89,20 @@ class OwnerClient:
                     if Path(info['project']) != self.project:
                         raise core.StopBatch('TASK_OWNER_BUILD_MISMATCH', '活任务持有进程属于另一源码或产品环境，未替换。')
                     self._verify_context(info)
-                    if info['source_fingerprint'] != fingerprint():
+                    if info['source_fingerprint'] != current_fingerprint:
+                        if allow_previous_owner:
+                            # A recovery RPC uses the previous owner's own protocol and
+                            # scope. Never cache it as the owner for a subsequent write.
+                            return info
                         # Upgrades may retire an idle old owner, but cannot dispose of a live CAD task.
-                        self.info=info
                         try:
-                            stopped=self.call('shutdown_idle')
+                            stopped=self._call_bound(info,'shutdown_idle',(),{})
                             if stopped.get('stopped_when_idle') is not True:raise core.StopBatch('TASK_OWNER_STOP_UNCONFIRMED')
-                        finally:self.info=None
+                        except core.StopBatch as error:
+                            if error.code!='TASK_SESSION_ACTIVE':raise
+                            raise core.StopBatch('HOST_SOURCE_CHANGED','旧宿主仍管理未收尾任务。先查询并收尾，随后重连启用新版本。',
+                                {'generation':info['generation'],'owner_shutdown_refusal':error.code,
+                                 'next_tool':'get_mechanism_task','new_owner_started':False,'launch_attempted':False}) from error
                         deadline=time.monotonic()+10
                         while same_process(info['identity'])['status']=='same' and time.monotonic()<deadline:time.sleep(.05)
                         if same_process(info['identity'])['status'] not in {'exited','pid_reused'}:
@@ -88,7 +110,7 @@ class OwnerClient:
                         retired_generation=info['generation']
                     else:
                         self.info = info
-                        return
+                        return info
             starting=self.work/'owner-starting.json'
             if starting.exists():
                 pending=core.read(core.no_links(starting))
@@ -135,7 +157,7 @@ class OwnerClient:
                     info = core.read(path)
                     if info.get('generation') == generation:
                         self._verify_context(info);self.info = info
-                        return
+                        return info
                 time.sleep(.05)
             raise core.StopBatch('TASK_OWNER_START_UNCONFIRMED', '只停止等待，未重复启动或结束持有进程。', {'generation': generation, 'log': str(log)})
         finally:
@@ -144,10 +166,13 @@ class OwnerClient:
     def call(self, method, *args, **kwargs):
         if method not in METHODS:
             raise core.StopBatch('INVALID_OWNER_OPERATION')
-        self.connect()
-        folder = core.no_links(self.work / 'ipc' / self.info['generation'])
+        info=self.connect(allow_previous_owner=_recovery_route(method,args,kwargs))
+        return self._call_bound(info,method,args,kwargs)
+
+    def _call_bound(self,info,method,args,kwargs):
+        folder = core.no_links(self.work / 'ipc' / info['generation'])
         identifier = uuid.uuid4().hex
-        request = {'id': identifier, 'secret': self.info['secret'], 'generation': self.info['generation'],
+        request = {'id': identifier, 'secret': info['secret'], 'generation': info['generation'],
                    'method': method, 'args': args, 'kwargs': kwargs}
         core.write(folder / 'requests' / (identifier + '.json'), request)
         response = folder / 'responses' / (identifier + '.json')
@@ -155,14 +180,14 @@ class OwnerClient:
         while time.monotonic() < deadline:
             if response.exists():
                 reply = core.read(core.no_links(response))
-                if not hmac.compare_digest(reply.get('secret', ''), self.info['secret']):
+                if not hmac.compare_digest(reply.get('secret', ''), info['secret']):
                     raise core.StopBatch('INVALID_OWNER_RESPONSE')
                 if not reply['ok']:
                     raise core.StopBatch(reply['error']['code'], reply['error']['message'], reply['error'].get('diagnostics'))
                 return reply['result']
             time.sleep(.05)
         raise core.StopBatch('TASK_OWNER_REQUEST_UNCONFIRMED', '请求已留存，AI查询任务状态；不重新提交执行。',
-                             {'request_id': identifier, 'generation': self.info['generation'],
+                             {'request_id': identifier, 'generation': info['generation'],
                               'next_tool': 'get_mechanism_task', 'retry_write_allowed': False})
 
     def prepare(self, *args, **kw): return self.call('prepare', *args, **kw)
