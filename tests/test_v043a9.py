@@ -148,6 +148,38 @@ $rows | ConvertTo-Json -Depth 10
                 self.assertFalse(host_scheduler.control(spec,'query')['registered'])
 
 class StartupAndDiagnosticsTests(unittest.TestCase):
+    def test_live_previous_build_allows_read_and_finish_but_blocks_new_work(self):
+        p=folder();client=OwnerClient(ROOT,p,p/'runtime')
+        info={'project':str(client.project),'identity':{'pid':17},'generation':'a'*32,'source_fingerprint':'previous'}
+        core.write(p/'owner.json',info)
+        requests=[]
+        def old_owner(bound,method,args,kwargs):
+            self.assertEqual(bound,info)
+            requests.append((method,args))
+            if method=='shutdown_idle':raise core.StopBatch('TASK_SESSION_ACTIVE')
+            return {'old_owner_replied':True}
+        with (patch('sw_mcp.conversation.owner_transport.fingerprint',return_value='current'),
+              patch('sw_mcp.conversation.owner_transport.same_process',return_value={'status':'same'}),
+              patch('sw_mcp.conversation.owner_transport.start_host') as launch,
+              patch.object(client,'_verify_context') as verify,
+              patch.object(client,'_call_bound',side_effect=old_owner)):
+            for tool,args in (('get_mechanism_task',{}),('get_recovery_state',{}),
+                              ('finish_mechanism_task',{'task_id':'b'*32,'close_unrestored':True})):
+                self.assertTrue(client.call('tool',tool,args)['old_owner_replied'])
+                self.assertIsNone(client.info)
+            for name,args in (('prepare_mechanism_task',{}),('execute_mechanism_task',{}),
+                              ('finish_mechanism_task',{'keep_result':True})):
+                with self.assertRaises(core.StopBatch) as raised:client.call('tool',name,args)
+                self.assertEqual(raised.exception.code,'HOST_SOURCE_CHANGED')
+                self.assertEqual(raised.exception.diagnostics['owner_shutdown_refusal'],'TASK_SESSION_ACTIVE')
+                action=transport_refusal(raised.exception).structured_content['error']['next_action']
+                self.assertEqual(action['arguments'],{})
+                self.assertEqual(action['options_status'],'previous_owner_task_review_required')
+            launch.assert_not_called()
+            self.assertEqual(verify.call_count,6)
+        self.assertEqual([n for n,_ in requests],['tool','tool','tool','shutdown_idle','shutdown_idle','shutdown_idle'])
+        self.assertEqual(core.read(p/'owner.json'),info)
+
     def test_definite_pre_RunEx_refusal_does_not_become_30_second_start_wait(self):
         p=folder();client=OwnerClient(ROOT,p,p/'runtime')
         error=core.StopBatch('HOST_TASK_COLLISION',diagnostics={'launch_attempted':False})

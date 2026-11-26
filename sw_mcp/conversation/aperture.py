@@ -169,6 +169,32 @@ def clear_prefix(rows):
     return safe, None
 
 
+def endpoint_connections(inspection, endpoint):
+    """Report direct observed mate links between measured outliers only."""
+    by_name={row['instance']:row for row in inspection.get('components',[])}
+    ranked=(endpoint.get('worst_translation_components') or [])+(endpoint.get('worst_rotation_components') or [])
+    affected={}
+    for row in ranked:
+        if ((row.get('translation_m') or 0)>(endpoint.get('allowed_translation_m') or 0)
+                or (row.get('rotation_rad') or 0)>(endpoint.get('allowed_rotation_rad') or 0)):
+            observed=by_name.get(row['instance'])
+            if observed and observed.get('component_id'):
+                affected[observed['component_id']]=observed
+    links=[]
+    for mate in inspection.get('mates',[]):
+        entities=mate.get('entities') or []
+        if len(entities)!=2 or mate.get('suppressed') is not False or mate.get('error')!=0 or mate.get('warning'):
+            continue
+        ids={entity.get('component_id') for entity in entities}
+        if len(ids)==2 and ids<=affected.keys():
+            links.append({'native_feature_id':mate.get('native_feature_id'),'name':mate.get('name'),
+                          'components':[affected[cid]['instance'] for cid in sorted(ids)]})
+    return {'affected_instances':sorted(c['instance'] for c in affected.values()),
+            'fixed_affected_instances':sorted(c['instance'] for c in affected.values() if c.get('fixed_component') is True),
+            'observed_links':links[:8],'observed_link_count':len(links),
+            'scope':'healthy_active_mates_between_reported_outliers_only','root_cause_proven':False}
+
+
 def run(session, proposal, drive, reference):
     card = proposal['aperture_validation']
     targets = card['target_openings_mm']
@@ -199,7 +225,10 @@ def run(session, proposal, drive, reference):
                     'aperture_initial_pose_changed','aperture_cycle_did_not_return_to_saved_pose'} and isinstance(details.get('endpoint'),dict):
                 error.diagnostics['aperture_endpoint'] = {**details['endpoint'],'run_id':run_id,'stroke_mm':stroke,
                     'reason':details['reason'],'endpoint_artifact':details.get('endpoint_artifact'),
+                    'endpoint_artifact_status':details.get('endpoint_artifact_status'),
                     'trial_restoration_status':error.restoration_status}
+                if details['endpoint'].get('frame')==40:
+                    error.diagnostics['aperture_endpoint']['observed_offset_connections']=endpoint_connections(inspection,details['endpoint'])
             raise
 
     for stroke in STROKES_MM:

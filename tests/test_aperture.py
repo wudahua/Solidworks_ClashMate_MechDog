@@ -108,11 +108,27 @@ class ApertureTests(unittest.TestCase):
         scratch.mkdir(parents=True,exist_ok=True)
         with tempfile.TemporaryDirectory(dir=scratch) as directory:
             exe=Path(directory)/'aperture.exe'
-            files=('executor/AperturePoseReview.cs','executor/PoseValidation.cs','tests/AperturePoseReviewTests.cs')
-            result=subprocess.run([str(compiler),'/nologo','/out:'+str(exe),*(str(root/file) for file in files)],capture_output=True,timeout=30)
+            files=('executor/AperturePoseReview.cs','executor/PoseValidation.cs','executor/CadFault.cs','executor/AtomicMetadata.cs',
+                   'tests/AperturePoseReviewTests.cs')
+            result=subprocess.run([str(compiler),'/nologo','/out:'+str(exe),'/reference:System.Web.Extensions.dll',
+                                   *(str(root/file) for file in files)],capture_output=True,timeout=30)
             self.assertEqual(result.returncode,0,(result.stdout+result.stderr).decode(errors='replace'))
-            result=subprocess.run([str(exe)],capture_output=True,timeout=15)
+            result=subprocess.run([str(exe),directory],capture_output=True,timeout=15)
             self.assertEqual(result.returncode,0,(result.stdout+result.stderr).decode(errors='replace'))
+
+    def test_endpoint_connections_only_name_observed_links_between_ranked_outliers(self):
+        inspection={'components':[{'component_id':'a','instance':'jaw'}, {'component_id':'b','instance':'link','fixed_component':True},
+                                  {'component_id':'c','instance':'outside'}]}
+        def mate(name,a,b,suppressed=False):
+            return {'name':name,'suppressed':suppressed,'error':0,'entities':[{'component_id':a},{'component_id':b}]}
+        inspection['mates']=[mate('healthy','a','b'),mate('hidden','a','b',True),mate('outside','a','c')]
+        endpoint={'allowed_translation_m':1e-7,'allowed_rotation_rad':1e-6,
+                  'worst_translation_components':[{'instance':'jaw','translation_m':.0467}],
+                  'worst_rotation_components':[{'instance':'link','rotation_rad':.385}]}
+        note=aperture.endpoint_connections(inspection,endpoint)
+        self.assertEqual(note['fixed_affected_instances'],['link'])
+        self.assertEqual([m['name'] for m in note['observed_links']],['healthy'])
+        self.assertFalse(note['root_cause_proven'])
 
 
 if __name__ == '__main__':

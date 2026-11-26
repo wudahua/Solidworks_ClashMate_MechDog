@@ -200,7 +200,11 @@ def task_failure(code, message, diagnostics=None, *, task_id='', asynchronous=Fa
                 previous_role_ratio_and_group_arguments_must_be_preserved=True,
                 initial_state_change_is_not_execution_authorization=True,
                 recovery_state_query={'tool':'get_mechanism_task','arguments':{'task_id':selected}})
-    if host:
+    if code=='HOST_SOURCE_CHANGED':
+        action.update(tool='get_mechanism_task',arguments={},recovery_state_query={'tool':'get_mechanism_task','arguments':{}},
+            options_status='previous_owner_task_review_required',
+            instruction='查询原宿主管理的任务。按原任务指引安全收尾后重连启用新源码；仅在原生状态已确认时执行恢复。')
+    elif host:
         action['recovery_state_query'] = {'tool': 'get_mechanism_task', 'arguments': {'collect_evidence': True}}
     elif code == 'PRIOR_TASK_UNCONFIRMED' or code.startswith('ORPHAN_'):
         selected=task_id or diag.get('task_id') or ((diag.get('blocking_tasks') or [{}])[0].get('task_id',''))

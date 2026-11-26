@@ -8,7 +8,7 @@ PAGE_BYTES=8000
 PAGE_ROWS=16
 EXPANDED_PAGE_BYTES=14000
 RECOMMENDED_PAGE_ROWS=50
-KINDS=('components','candidates','goals','questions','geometry','actions','groups','fixed_changes','mechanical_groups','mate_changes','mates','mirror_dependencies','redundancy_candidates')
+KINDS=('components','candidates','goals','questions','geometry','actions','groups','fixed_changes','mechanical_groups','mate_changes','mates','mirror_dependencies','redundancy_candidates','connection_variations')
 _READ_CACHE=OrderedDict()
 _READ_LOCK=threading.RLock()
 
@@ -161,9 +161,11 @@ def publish_prepare(task,session):
     mirrors=mirror_connections.review(survey)
     if mirrors:collections['mirror_dependencies']=mirrors
     if not readonly:
-        from ..mate_redundancy import review as redundancy_review
+        from ..mate_redundancy import connection_variations,review as redundancy_review
         redundant=redundancy_review(survey)
         if redundant:collections['redundancy_candidates']=redundant
+        differences=list(connection_variations(survey,mirrors))
+        if differences:collections['connection_variations']=differences
     entry=_persist(task,session,'prepare',collections,source,additional)
     search=assessment.get('candidate_search') or {}
     task['assembly_brief']={'schema_version':1,'observation_stage':'prepare_snapshot_before_native_preview',
