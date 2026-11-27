@@ -150,7 +150,9 @@ def publish_prepare(task,session):
     mates=[]
     for m in survey.get('mates',[]):
         bindings=[e.get('component_id') for e in m.get('entities',[])]
+        lock=m.get('rotation_lock_observation')
         mates.append({**{k:m.get(k) for k in ('native_feature_id','name','type','suppressed','error','warning')},
+            **({'rotation_lock_observation':{'status':lock.get('status'),'locked':lock.get('locked')}} if isinstance(lock,dict) else {}),
             'component_instances':[names.get(cid) for cid in bindings[:8]],
             'entity_count':len(bindings),'component_bindings_complete':len(bindings)<=8 and all(cid in names for cid in bindings),
             'state_scope':'prepared_snapshot_revalidated_by_native_plan_not_live_observation',

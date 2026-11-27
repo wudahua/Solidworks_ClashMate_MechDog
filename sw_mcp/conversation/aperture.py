@@ -108,14 +108,15 @@ def bind(session, candidate, targets, hints, tip_end):
             'gap_tolerance_mm': GAP_TOLERANCE_MM, 'scope': 'four_tip_projected_aperture_on_fixed_reference'}
 
 
-def samples(session, native, card, expected_axis, stroke, step):
+def cycle_artifacts(session, native):
     directory = core.no_links(session.runtime / 'runs' / native['run_id'])
     poses_path = core.no_links(native['poses_path'])
     clashes_path = core.no_links(native['interference_path'])
     require(poses_path == directory / 'aperture-poses.csv' and clashes_path == directory / 'aperture-interference.json', 'native_aperture_artifact_binding_invalid')
-    require(native.get('initial_restored') is True and native.get('frame_count') == 40 // step + 1 and native.get('stroke_mm') == stroke and
-            native.get('driver') == card['driver_name'] and native.get('reference') == card['reference_name'], 'native_aperture_receipt_mismatch')
-    initial = {r['instance']: r['transform'] for r in session.initial_inspection['components']}
+    return poses_path, clashes_path
+
+
+def read_cycle_poses(poses_path):
     poses = {}
     with poses_path.open(encoding='utf-8-sig', newline='') as file:
         for row in csv.DictReader(file):
@@ -123,6 +124,15 @@ def samples(session, native, card, expected_axis, stroke, step):
             frame = poses.setdefault(index, {})
             require(row['instance'] not in frame and abs(float(row['time_s']) - index / 10) < 1e-7, 'aperture_frame_scope_mismatch')
             frame[row['instance']] = [float(row[f'r{i}{j}']) for i in range(3) for j in range(3)] + [float(row[k]) for k in ('x_m', 'y_m', 'z_m')] + [1., 0., 0., 0.]
+    return poses
+
+
+def samples(session, native, card, expected_axis, stroke, step):
+    poses_path, clashes_path = cycle_artifacts(session, native)
+    require(native.get('initial_restored') is True and native.get('frame_count') == 40 // step + 1 and native.get('stroke_mm') == stroke and
+            native.get('driver') == card['driver_name'] and native.get('reference') == card['reference_name'], 'native_aperture_receipt_mismatch')
+    initial = {r['instance']: r['transform'] for r in session.initial_inspection['components']}
+    poses = read_cycle_poses(poses_path)
     scan = core.read(clashes_path)
     indices = list(range(0, 41, step))
     require(sorted(poses) == indices and [s['frame'] for s in scan['rows']] == indices and scan['threshold_mm3'] == .01, 'aperture_frame_grid_mismatch')
@@ -152,6 +162,63 @@ def samples(session, native, card, expected_axis, stroke, step):
         require(all(direction * (a['tip_radii_mm'][name] - value) >= -.01 for name, value in b['tip_radii_mm'].items()),
                 'aperture_jaw_motion_not_synchronous')
     return result, scan['baseline_mm3']
+
+
+def endpoint_return_review(session, details, card, expected_axis, step):
+    if not details.get('poses_path') or not details.get('interference_path'):
+        return {'status': 'artifacts_unavailable'}
+    try:
+        poses_path, clashes_path = cycle_artifacts(session, details)
+        poses = read_cycle_poses(poses_path)
+        scan = core.read(clashes_path)
+        indices = list(range(0, 41, step))
+        require(sorted(poses) == indices and [row['frame'] for row in scan['rows']] == indices
+                and scan['threshold_mm3'] == .01, 'aperture_frame_grid_mismatch')
+        initial = {row['instance']: row['transform'] for row in session.initial_inspection['components']}
+        last = poses[40]
+        require(poses[0].keys() == last.keys() == initial.keys(), 'aperture_component_scope_mismatch')
+        from .motion_tasks import require_same_poses
+        require_same_poses({key: value[:12] for key, value in initial.items()},
+                           {key: value[:12] for key, value in poses[0].items()}, 'aperture_failure_saved_start')
+        driver = card['driver_name']
+        tips = card['tip_local_points_m']
+        initial_gaps, _ = measure(initial, tips, card['projection_axis_global'], driver, card['pairs'])
+        last_gaps, _ = measure(last, tips, card['projection_axis_global'], driver, card['pairs'])
+        endpoint = details['endpoint']
+        translation_limit = endpoint['allowed_translation_m']
+        rotation_limit = endpoint['allowed_rotation_rad']
+        require(translation_limit == 1e-7 and rotation_limit == 1e-6, 'aperture_endpoint_threshold_mismatch')
+        differences = {}
+        for name, before in initial.items():
+            after = last[name]
+            trials.validate(before)
+            trials.validate(after)
+            q = geometry.quat(geometry.mm(geometry.transpose(trials.rotation(before)), trials.rotation(after)))
+            distance = math.dist(before[9:12], after[9:12])
+            angle = 2 * math.atan2(geometry.norm(q[1:]), abs(q[0]))
+            differences[name] = {'instance': name, 'translation_mm': 1000 * distance,
+                                 'rotation_deg': math.degrees(angle),
+                                 'within_saved_pose_tolerance': distance <= translation_limit and angle <= rotation_limit}
+        others = [row for name, row in differences.items() if name != driver and name not in tips]
+        return {
+            'status': 'measured', 'frame': 40, 'time_s': 4.0,
+            'driver': {**differences[driver], 'signed_axis_residual_mm': 1000 * geometry.dot(
+                geometry.sub(last[driver][9:12], initial[driver][9:12]), expected_axis)},
+            'openings': [{'components': list(pair), 'initial_mm': before, 'final_mm': after,
+                          'signed_residual_mm': after - before, 'within_gap_tolerance': abs(after - before) <= GAP_TOLERANCE_MM}
+                         for pair, before, after in zip(card['pairs'], initial_gaps, last_gaps)],
+            'gap_tolerance_mm': GAP_TOLERANCE_MM,
+            'output_components': [differences[name] for name in tips],
+            'other_components': {'count': len(others),
+                                 'out_of_tolerance_count': sum(not row['within_saved_pose_tolerance'] for row in others),
+                                 'worst_translation': max(others, key=lambda row: row['translation_mm'], default=None),
+                                 'worst_rotation': max(others, key=lambda row: row['rotation_deg'], default=None)},
+            'final_frame_new_or_increased_interference_count': len(scan['rows'][-1]['new_or_increased']),
+            'poses_path': str(poses_path), 'interference_path': str(clashes_path),
+            'all_component_return_required': True,
+        }
+    except (OSError, ValueError, TypeError, KeyError, IndexError, ArithmeticError, core.StopBatch) as error:
+        return {'status': 'artifacts_unverified', 'error_type': type(error).__name__}
 
 
 def reached(row, targets):
@@ -229,6 +296,8 @@ def run(session, proposal, drive, reference):
                     'trial_restoration_status':error.restoration_status}
                 if details['endpoint'].get('frame')==40:
                     error.diagnostics['aperture_endpoint']['observed_offset_connections']=endpoint_connections(inspection,details['endpoint'])
+                    error.diagnostics['aperture_endpoint']['return_review'] = endpoint_return_review(
+                        session, details, card, direction, 1 if final else 5)
             raise
 
     for stroke in STROKES_MM:

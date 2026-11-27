@@ -196,26 +196,35 @@ public partial class Cad {
                 ApertureRequire(results!=null&&!results.IsOutOfDate()&&properties.GetFrameRate()==10&&Math.Abs(study.GetDuration()-4)<1e-8,"aperture_solved_grid_unverified");
                 var rows=new List<object>();
                 var posesPath=Path.Combine(directory,"aperture-poses.csv");
-                using(var writer=new StreamWriter(posesPath)) {
-                    writer.WriteLine("frame,time_s,instance,x_m,y_m,z_m,r00,r01,r02,r10,r11,r12,r20,r21,r22");
-                    for(int frame=0;frame<=40;frame+=frameStep) {
-                        double time=frame/10.0;
-                        Progress(jobId,"aperture_interference_sampling",frame/frameStep,40/frameStep+1,runId);
-                        study.SetTime(Argument(time,4));Application.DoEvents();
-                        ApertureRequire(Math.Abs(study.GetTime()-time)<1e-7&&!study.IsPlaying,"aperture_frame_clock_unverified");
-                        var poses=Transforms(doc);
-                        ApertureRequire(poses.Count==state.Initial.Count&&state.Initial.Keys.All(poses.ContainsKey),"aperture_fixed_component_or_scope_changed");
-                        AperturePoseReview.RequireEndpoint(frame,state.Initial,poses,directory,runId,strokeMm,AtomicJson);
-                        ApertureRequire(fixedNames.All(n=>PoseValidation.Matches(state.Initial[n],poses[n])),"aperture_fixed_component_or_scope_changed");
-                        foreach(var p in poses)writer.WriteLine(frame+","+ApertureNumber(time)+",\""+p.Key.Replace("\"","\"\"")+"\","+
-                            string.Join(",",p.Value.Skip(9).Take(3).Concat(p.Value.Take(9)).Select(ApertureNumber)));
-                        var intersections=NativePairTotals(doc,.001,new string[0]);
-                        rows.Add(new{frame,time_s=time,new_or_increased=intersections.Where(p=>p.Value-(basePairs.ContainsKey(p.Key)?basePairs[p.Key]:0)>.01)
-                            .ToDictionary(p=>p.Key,p=>p.Value)});
-                    }
-                }
                 var interferences=Path.Combine(directory,"aperture-interference.json");
-                AtomicJson(interferences,new{baseline_mm3=basePairs,rows,threshold_mm3=.01});
+                IDictionary<string,double[]> lastPoses=null;
+                try {
+                    using(var writer=new StreamWriter(posesPath)) {
+                        writer.WriteLine("frame,time_s,instance,x_m,y_m,z_m,r00,r01,r02,r10,r11,r12,r20,r21,r22");
+                        for(int frame=0;frame<=40;frame+=frameStep) {
+                            double time=frame/10.0;
+                            Progress(jobId,"aperture_interference_sampling",frame/frameStep,40/frameStep+1,runId);
+                            study.SetTime(Argument(time,4));Application.DoEvents();
+                            ApertureRequire(Math.Abs(study.GetTime()-time)<1e-7&&!study.IsPlaying,"aperture_frame_clock_unverified");
+                            var poses=Transforms(doc);
+                            ApertureRequire(poses.Count==state.Initial.Count&&state.Initial.Keys.All(poses.ContainsKey),"aperture_fixed_component_or_scope_changed");
+                            if(frame==0)AperturePoseReview.RequireEndpoint(frame,state.Initial,poses,directory,runId,strokeMm,AtomicJson);
+                            if(frame==40)lastPoses=poses;
+                            else ApertureRequire(fixedNames.All(n=>PoseValidation.Matches(state.Initial[n],poses[n])),"aperture_fixed_component_or_scope_changed");
+                            foreach(var p in poses)writer.WriteLine(frame+","+ApertureNumber(time)+",\""+p.Key.Replace("\"","\"\"")+"\","+
+                                string.Join(",",p.Value.Skip(9).Take(3).Concat(p.Value.Take(9)).Select(ApertureNumber)));
+                            var intersections=NativePairTotals(doc,.001,new string[0]);
+                            rows.Add(new{frame,time_s=time,new_or_increased=intersections.Where(p=>p.Value-(basePairs.ContainsKey(p.Key)?basePairs[p.Key]:0)>.01)
+                                .ToDictionary(p=>p.Key,p=>p.Value)});
+                        }
+                    }
+                    AtomicJson(interferences,new{baseline_mm3=basePairs,rows,threshold_mm3=.01});
+                } catch(Exception evidenceFailure) {
+                    if(lastPoses!=null&&(evidenceFailure is IOException||evidenceFailure is UnauthorizedAccessException))
+                        AperturePoseReview.RequireEndpoint(40,state.Initial,lastPoses,directory,runId,strokeMm,AtomicJson);
+                    throw;
+                }
+                AperturePoseReview.RequireEndpoint(40,state.Initial,lastPoses,directory,runId,strokeMm,AtomicJson,posesPath,interferences);
                 study.SetTime(0);Application.DoEvents();
                 VerifyNewStudyMateState(doc,state.MateMask,state.Initial,"aperture_trial_after_sampling_and_reset");
                 VerifyUserSources(model);

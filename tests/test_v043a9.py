@@ -4,7 +4,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
 from sw_mcp.conversation import core,host_scheduler
-from sw_mcp.conversation.owner_transport import OwnerClient
+from sw_mcp.conversation.owner_transport import OwnerClient,_recovery_route,fingerprint
 from sw_mcp.conversation.frontend import transport_refusal,attach
 from sw_mcp.validation import StrictMCPServer
 from sw_mcp.errors import operational_error,NATIVE_ACTION_CLASSES
@@ -148,6 +148,83 @@ $rows | ConvertTo-Json -Depth 10
                 self.assertFalse(host_scheduler.control(spec,'query')['registered'])
 
 class StartupAndDiagnosticsTests(unittest.TestCase):
+    def test_previous_owner_finish_route_argument_boundaries(self):
+        for method,args,kwargs,allowed in (
+            ('finish',('task',),{},True), ('finish',('task',True),{},True),
+            ('finish',(),{'task_id':'task','close_unrestored':False},True),
+            ('finish',('task',True,True),{},False), ('finish',('task',True),{'keep_result':True},False),
+            ('finish',('task',),{'keep_result':False},False),
+            ('tool',('finish_mechanism_task',{'keep_result':False}),{},True),
+            ('tool',('finish_mechanism_task',{'keep_result':True}),{},False),
+            ('tool',('finish_mechanism_task',{'keep_result':0}),{},False),
+        ):
+            with self.subTest(method=method,args=args,kwargs=kwargs):
+                self.assertIs(_recovery_route(method,args,kwargs),allowed)
+
+    @unittest.skipUnless(os.name=='nt','Windows owner lease and process identity required')
+    def test_previous_generation_get_and_direct_finish_use_real_file_rpc(self):
+        from sw_mcp.conversation.process_context import snapshot
+        from sw_mcp.conversation.process_identity import same_process
+        p=folder()
+        work,runtime=p/'work',p/'runtime'
+        generation=uuid.uuid4().hex
+        ipc=work/'ipc'/generation
+        source=p/'fixture.SLDASM'
+        source.write_bytes(b'no CAD in fixture')
+        core.write(ipc/'launch.json',{'generation':generation,'secret':uuid.uuid4().hex,
+            'project':str(ROOT),'runtime':str(runtime),'source_fingerprint':fingerprint()})
+        client=OwnerClient(ROOT,work,runtime,timeout=8)
+        # Session 0 can run the file RPC fixture but has no interactive desktop.
+        context = nullcontext() if snapshot().get('session_id') else patch.object(client,'_verify_context')
+        task_id=None
+        with (p/'owner.log').open('wb') as log, context:
+            process=subprocess.Popen([sys.executable,'-X','utf8',str(ROOT/'tests/dialogue_fixture_owner.py'),
+                '--work',str(work),'--generation',generation,'--direct'],cwd=ROOT,stdin=subprocess.DEVNULL,
+                stdout=log,stderr=log,creationflags=subprocess.CREATE_NO_WINDOW)
+            def wait_for(check):
+                deadline=time.monotonic()+15
+                while time.monotonic()<deadline:
+                    self.assertIsNone(process.poll(),(p/'owner.log').read_text(encoding='utf8',errors='replace'))
+                    value=check()
+                    if value is not None:return value
+                    time.sleep(.05)
+                self.fail('Timed out waiting for fixture owner')
+            def settled():
+                value=client.get(task_id)
+                return value if not value['busy'] else None
+            try:
+                wait_for(lambda: True if (work/'owner.json').exists() else None)
+                owner=core.read(work/'owner.json')
+                self.assertEqual(owner['generation'],generation)
+                self.assertEqual(same_process(owner['identity'])['status'],'same')
+                task_id=client.prepare(str(source))['task_id']
+                self.assertEqual(wait_for(settled)['phase'],'proposal_ready')
+                with patch('sw_mcp.conversation.owner_transport.fingerprint',return_value='new-build'):
+                    self.assertEqual(client.call('status')['owner_pid'],owner['identity']['pid'])
+                    self.assertEqual(wait_for(settled)['phase'],'proposal_ready')
+                    with self.assertRaisesRegex(core.StopBatch,'HOST_SOURCE_CHANGED'):
+                        client.finish(task_id,keep_result=True)
+                    client.finish(task_id,False)
+                    self.assertTrue(wait_for(settled)['closed'])
+                    self.assertIsNone(client.info)
+                    self.assertEqual(core.read(work/'owner.json')['generation'],generation)
+                accepted=[core.read(path)['method'] for path in (ipc/'accepted').glob('*.json')]
+                self.assertEqual(accepted.count('finish'),1)
+                self.assertIn('get',accepted)
+            finally:
+                try:
+                    if process.poll() is None and (work/'owner.json').exists():
+                        if task_id and not wait_for(settled)['closed']:
+                            client.finish(task_id)
+                            wait_for(settled)
+                        self.assertTrue(client.call('shutdown_idle')['stopped_when_idle'])
+                    self.assertEqual(process.wait(timeout=10),0)
+                except Exception:
+                    if process.poll() is None:
+                        process.kill()  # This child is a Python-only fixture.
+                        process.wait(timeout=10)
+                    raise
+
     def test_live_previous_build_allows_read_and_finish_but_blocks_new_work(self):
         p=folder();client=OwnerClient(ROOT,p,p/'runtime')
         info={'project':str(client.project),'identity':{'pid':17},'generation':'a'*32,'source_fingerprint':'previous'}

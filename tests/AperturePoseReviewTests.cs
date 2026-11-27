@@ -45,6 +45,13 @@ class AperturePoseReviewTests {
             Check((string)Field(error.Diagnostics,"endpoint_artifact_status")=="write_failed"&&Field(error.Diagnostics,"endpoint_artifact")==null,"write failure contract");
             Check((int)Field(Field(error.Diagnostics,"endpoint"),"frame")==40,"lost measured endpoint");
         }
+        string posesPath=Path.Combine(folder,"aperture-poses.csv");
+        string interferencePath=Path.Combine(folder,"aperture-interference.json");
+        try {AperturePoseReview.RequireEndpoint(40,initial,actual,folder,"final",5,save,posesPath,interferencePath);throw new Exception("accepted wrong endpoint");}
+        catch(CadFault error){
+            Check((string)Field(error.Diagnostics,"poses_path")==posesPath&&
+                (string)Field(error.Diagnostics,"interference_path")==interferencePath,"lost full-cycle artifacts");
+        }
         return 0;
     }
 }

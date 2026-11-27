@@ -1,5 +1,8 @@
 import asyncio
 import json
+import threading
+import time
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -82,6 +85,71 @@ class AssemblyRepairTests(unittest.TestCase):
         with self.assertRaisesRegex(core.StopBatch, 'MATE_CHANGE_REVIEW_REQUIRED'):
             assembly_repair.propose(self.engine, self.task, self.requests, False)
         self.session.call.assert_not_called()
+
+    def test_standalone_concentric_lock_maps_replacement_and_keeps_motion_unverified(self):
+        mate = self.session.connection_survey['mates'][0]
+        mate.update(type=1,name='concentric',rotation_lock_observation={'status':'observed','locked':False})
+        change={'native_feature_id':12,'name':'concentric','type':1,'before':False,'after':True,'action':'set_lock_rotation'}
+        self.session.call.return_value={**self.native_plan,'mate_changes':[change]}
+        with patch.object(core,'write'):
+            self.engine.plan(self.task['task_id'],mate_changes=[{'native_feature_id':12,'lock_rotation':True}])
+        self.assertEqual(self.task['proposal']['affected_component_pairs'][0]['after_lock_rotation'],True)
+        self.assertEqual(json.loads(self.session.call.call_args.kwargs['proposal_json']),{'mate_changes':[change]})
+        self.session.call.return_value={**{k:True for k in ('mate_inventory_verified','poses_references_fixed_flags_verified',
+            'reopened_verified','source_files_unchanged')}, 'added_mates':0,'motion_verified':False,'mate_changes':[change],
+            'mirror_feature_ids':[],'independent_occurrences':[],'replaced_native_feature_ids':[{'requested':12,'replacement':19}]}
+        readback={**mate,'native_feature_id':19,'rotation_lock_observation':{'status':'observed','locked':True}}
+        self.session.result_inspection={'mates':[readback]}
+        with patch.object(core,'write'):
+            self.engine.execute(self.task['task_id'],self.task['plan_token'],confirmed=True,scope_confirmed=True)
+        self.assertFalse(self.task['verification']['motion_verified'])
+        self.assertTrue(self.session.committed)
+        for replacements,mates in (([{'requested':12,'replacement':19}],[mate,readback]),([], [readback]),
+                                   ([{'requested':12,'replacement':19}],[{**readback,'suppressed':True}])):
+            with self.assertRaisesRegex(core.StopBatch,'CONNECTION_EVIDENCE_FAILED'):
+                assembly_repair.require_lock_readback([change],replacements,mates)
+
+    def test_lock_rotation_is_strict_and_standalone(self):
+        from pydantic import ValidationError
+        from sw_mcp.connection_mate_changes import prepare
+        for args in ({},{'suppressed':True,'lock_rotation':False},{'suppressed':None,'lock_rotation':True},
+                     {'lock_rotation':1},{'lock_rotation':'true'}):
+            with self.subTest(args=args), self.assertRaises(ValidationError):
+                motion_server.MateChangeIntent(native_feature_id=12,**args)
+        self.assertEqual(motion_server.MateChangeIntent(native_feature_id=12,lock_rotation=False).model_dump(exclude_none=True),
+                         {'native_feature_id':12,'lock_rotation':False})
+        request=[{'native_feature_id':12,'lock_rotation':True}]
+        survey=self.session.connection_survey
+        with self.assertRaisesRegex(ValueError,'standalone'):
+            prepare(survey,request)
+        with self.assertRaisesRegex(ValueError,'active_concentric'):
+            prepare(survey,request,allow_lock_rotation=True)
+
+    def test_virtual_import_file_progress_keeps_labels_and_copy_counts(self):
+        runtime=Path(__file__).resolve().parents[1]/'runs/virtual-progress-tests'/uuid.uuid4().hex
+        job='b'*32
+        path=runtime/'runs/progress'/f'{job}.json'
+        self.task.update(busy=True,server_instance_id='owner')
+        observer=SimpleNamespace(lock=threading.Lock(),save=Mock())
+        session=SimpleNamespace(runtime=runtime,on_progress=lambda value: task_progress.observe_call(observer,self.task,value))
+        stages=(('scan_dependencies',0,0),('copy_files',0,3),('copy_files',3,3),('redirect_references',0,0),
+                ('native_virtual_classification',0,0),('externalize_virtual_part',0,1),
+                ('save_externalized_assembly',0,0),('verify_mate_reference_migration',0,0),
+                ('reopen_verify_externalized_copy',0,0),('import_complete',0,0))
+        for stage,completed,total in stages:
+            with self.subTest(stage=stage,completed=completed):
+                stamp=time.time()
+                core.write(path,{'job_id':job,'run_id':None,'stage':stage,'completed':completed,'total':total,
+                                 'updated_at':stamp,'stage_started_at':stamp})
+                session.current_call_for_observation={'operation':'import_assembly','started':stamp}
+                with task_progress.watch_call(session,'import_assembly',{'job_id':job}):
+                    progress=task_progress.compact_status(self.task,session,'owner')
+                    self.assertEqual(progress['stage'],stage)
+                    self.assertTrue(progress['native_progress_observed'])
+                    self.assertIn(progress['stage_label'],self.task['message'])
+                    self.assertNotIn('等待本次原生调用返回',self.task['message'])
+                    self.assertEqual(progress.get('completed_files'),completed if total else None)
+                    self.assertEqual(progress.get('total_files'),total or None)
 
     def test_batch_controls_return_separate_entry_points(self):
         task_id = self.task['task_id']

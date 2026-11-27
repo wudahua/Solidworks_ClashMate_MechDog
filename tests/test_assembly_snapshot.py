@@ -50,6 +50,48 @@ class SnapshotTests(unittest.TestCase):
         self.assertTrue(all('native_feature_id' in x for x in section['rows']))
         self.assertFalse(section['cad_dispatched'])
 
+    def test_mirror_binding_is_directed_and_peers_stable_across_both_snapshots(self):
+        from sw_mcp import inspection_snapshot
+        value={'model_id':self.session.model,'components':[],'mates':[]}
+        for index in range(8):
+            for name in ('a','b'):
+                component={'component_id':f'{name}{index}','instance':f'{name}{index}',
+                           'configuration':'Default','path':f'{name}.SLDPRT'}
+                if index==6:component['parent_component_id']='sub'
+                if index==7:component['suppressed']=True
+                value['components'].append(component)
+            row={'native_feature_id':100+index,'type':index,'suppressed':index==3,'error':int(index==4),
+                 'warning':'fixture warning' if index==5 else None,
+                 'entities':[{'component_id':f'{name}{index}'} for name in ('a','b')]}
+            value['mates'].append(row)
+        value['structural_relations']={
+            'feature_inventory_truncated':False,'issues':[],
+            'components':[{'component_id':'a0','native_feature_id':20,'is_pattern_instance':False},
+                          {'component_id':'a1','native_feature_id':21,'is_pattern_instance':True,
+                           'parent_features':[{'type':'MirrorCompFeat','native_feature_id':22,'name':'mirror A'}]},
+                          {'component_id':'b1','native_feature_id':31,'is_pattern_instance':True,
+                           'parent_features':[{'type':'MirrorCompFeat','native_feature_id':32,'name':'unbound mirror B'}]}],
+            'mirrors':[{'native_feature_id':22,'definition_available':True,'suppressed':False,
+                        'definition_source_component_ids':['a0'],'child_features':[{'native_feature_id':21}]},
+                       {'native_feature_id':32,'definition_available':False,'suppressed':False,
+                        'definition_source_component_ids':['b0'],'child_features':[{'native_feature_id':31}]}]}
+        self.session.connection_survey=value
+        core.write(self.session_dir/'通用配合原生调查.json',value)
+        prepared=self.collect(self.publish(),'connection_variations')
+        inspected=inspection_snapshot.store(self.folder,value)
+        cursor=inspected['queries']['connection_variations']['cursor']
+        live=inspection_snapshot.page(self.folder,value['model_id'],cursor,100)
+        self.assertEqual(prepared,live['rows'])
+        self.assertFalse(live['cad_dispatched'])
+        self.assertEqual([row['component_ids'] for row in prepared],[['a0','b0'],['a1','b1'],['a2','b2']])
+        self.assertEqual([row['compared_component_ids'] for row in prepared],[['a1','b1'],['a0','b0'],['a0','b0']])
+        directed={'source_component_id':'a0','derived_component_id':'a1','source_instance':'a0','derived_instance':'a1'}
+        for row in prepared[:2]:
+            self.assertEqual(row['observed_native_mirror_bindings'],[directed])
+            self.assertFalse(row['design_symmetry_proven'])
+            self.assertFalse(row['mechanical_DOF_proven'])
+        self.assertEqual(prepared[2]['observed_native_mirror_bindings'],[])
+
     def test_readonly_motion_summary_preserves_aperture_result_and_offers_full_record(self):
         from sw_mcp.conversation import assembly_snapshot
         record={'task_id':'1'*32,'task_kind':'motion','phase':'verified',

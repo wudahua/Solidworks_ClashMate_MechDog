@@ -49,6 +49,7 @@ public partial class Cad {
         public RepairState Before;
         public Dictionary<string,string> InputHashes;
         public List<Dictionary<string,object>> MateChanges;
+        public Dictionary<int,string[]> PlannedLockReferences;
         public RepairMirror[] Mirrors;
     }
     readonly Dictionary<string,AssemblyRepairPlan> assemblyRepairPlans=new Dictionary<string,AssemblyRepairPlan>();
@@ -131,14 +132,23 @@ public partial class Cad {
         return expected.Count==actual.Count&&expected.All(p=>actual.ContainsKey(p.Key)&&actual[p.Key]==p.Value);
     }
 
-    void VerifyAssemblyRepairState(UserModel model,IModelDoc2 doc,RepairState before,string expectedMates,int[] removed,bool requireIndependent) {
+    void VerifyAssemblyRepairState(UserModel model,IModelDoc2 doc,RepairState before,string expectedMates,int[] removed,bool requireIndependent,
+        Dictionary<int,int> replacements=null,Dictionary<int,string[]> lockReferences=null) {
         var after=AssemblyRepairState(model,doc);
-        RequireAssemblyRepair(RepairInventoryMatches(before.Parts,after.Parts)&&RepairInventoryMatches(before.Mates,after.Mates)&&
+        var expectedIds=replacements==null||replacements.Count==0?before.Mates:
+            before.Mates.ToDictionary(p=>replacements.ContainsKey(p.Key)?replacements[p.Key]:p.Key,p=>p.Value);
+        RequireAssemblyRepair(RepairInventoryMatches(before.Parts,after.Parts)&&RepairInventoryMatches(expectedIds,after.Mates)&&
             RepairInventoryMatches(before.Mirrors.Where(p=>!removed.Contains(p.Key)).ToDictionary(p=>p.Key,p=>p.Value),after.Mirrors)&&
             before.StudyClocks==after.StudyClocks&&expectedMates==after.MateParameters&&
             (requireIndependent?after.PatternOccurrences.Length==0:after.PatternOccurrences.SequenceEqual(before.PatternOccurrences))&&
             before.Poses.Count==after.Poses.Count&&before.Poses.All(p=>after.Poses.ContainsKey(p.Key)&&PoseValidation.Matches(p.Value,after.Poses[p.Key])),
             "assembly_repair_changed_unapproved_state");
+        if(lockReferences!=null&&lockReferences.Count>0) {
+            var features=EGAllMates(doc).ToDictionary(f=>f.GetID());
+            RequireAssemblyRepair(lockReferences.All(p=>features.ContainsKey(p.Key)&&
+                p.Value.SequenceEqual(ConcentricRepairReferences(doc,(IMate2)features[p.Key].GetSpecificFeature2()))),
+                "concentric_reference_identity_changed");
+        }
         RequireMatesHealthy(doc);
     }
 
@@ -148,11 +158,13 @@ public partial class Cad {
         using(var scope=new Scope(this,model.Path,null)) {
             var doc=scope.Doc;Fingerprint(doc,model.Path);VerifyUserSources(model);RequireMatesHealthy(doc);
             var before=AssemblyRepairState(model,doc);
-            var changes=ReadConnectionMateChanges(doc,data);
+            var plannedLockReferences=new Dictionary<int,string[]>();
+            var changes=ReadConnectionMateChanges(doc,data,plannedLockReferences);
             RequireAssemblyRepair(independentizeMirrors?changes.Count==0:changes.Count>0,"one_distinct_repair_operation_required");
             ConnectionExpectedMateParameters(before.MateParameters,changes);
             var mirrors=independentizeMirrors?PlanAssemblyMirrorIndependence(doc,before):new RepairMirror[0];
             var plan=new AssemblyRepairPlan{ModelId=id,Revision=model.Revision,Before=before,MateChanges=changes,Mirrors=mirrors,
+                PlannedLockReferences=plannedLockReferences,
                 InputHashes=model.Files.ToDictionary(p=>p,FileHash,StringComparer.OrdinalIgnoreCase)};
             var planId=Guid.NewGuid().ToString("N");assemblyRepairPlans[planId]=plan;
             return new{plan_id=planId,model_id=id,mate_changes=changes,
@@ -189,7 +201,7 @@ public partial class Cad {
         var expectedMates=ConnectionExpectedMateParameters(before.MateParameters,plan.MateChanges);
         using(var scope=new Scope(this,model.Path,null)) {
             VerifyUserSources(model);
-            VerifyAssemblyRepairState(model,scope.Doc,before,before.MateParameters,new int[0],false);
+            VerifyAssemblyRepairState(model,scope.Doc,before,before.MateParameters,new int[0],false,lockReferences:plan.PlannedLockReferences);
             if(removed.Length>0)
                 RequireAssemblyRepair(PlanAssemblyMirrorIndependence(scope.Doc,before).Select(m=>m.native_feature_id).SequenceEqual(removed),
                     "mirror_dependency_order_changed");
@@ -197,6 +209,8 @@ public partial class Cad {
         var checkpoint=Json.Deserialize<Dictionary<string,object>>(Json.Serialize(CreateUserCheckpoint(model.Id)));
         string checkpointId=(string)checkpoint["checkpoint_id"];
         var completedMirrors=new List<int>();
+        var lockReferences=new Dictionary<int,string[]>();
+        Dictionary<int,int> replacements=null;
         plan.Consumed=true;
         LastOperationRestoration="pending";
         try {
@@ -205,23 +219,24 @@ public partial class Cad {
                 try {
                     PrepareConnectionModelScope(model,doc);
                     VerifyAssemblyRepairState(model,doc,before,before.MateParameters,new int[0],false);
-                    ApplyConnectionMateChanges(doc,plan.MateChanges);
+                    replacements=ApplyConnectionMateChanges(doc,plan.MateChanges,plan.PlannedLockReferences,lockReferences);
+                    if(replacements.Count>0)expectedMates=ConnectionExpectedMateParameters(before.MateParameters,plan.MateChanges,replacements);
                     foreach(var item in plan.Mirrors) {
                         Progress(activeJobId,"repair_dissolve_mirrors",completedMirrors.Count,removed.Length,null);
                         DissolveAssemblyRepairMirror(doc,item);
                         completedMirrors.Add(item.native_feature_id);
                     }
                     RequireAssemblyRepair(doc.EditRebuild3(),"assembly_repair_rebuild_failed");
-                    VerifyAssemblyRepairState(model,doc,before,expectedMates,removed,removed.Length>0);
+                    VerifyAssemblyRepairState(model,doc,before,expectedMates,removed,removed.Length>0,replacements,lockReferences);
                     Progress(activeJobId,"repair_save_and_verify",0,0,null);
                     Save(doc,model.Path);
-                    VerifyAssemblyRepairState(model,doc,before,expectedMates,removed,removed.Length>0);
+                    VerifyAssemblyRepairState(model,doc,before,expectedMates,removed,removed.Length>0,replacements,lockReferences);
                 } catch(Exception error) {scope.DeferRestoration(error);throw;}
             }
             CloseUserDocuments(model.Files);
             using(var reopened=new Scope(this,model.Path,null)) {
                 Fingerprint(reopened.Doc,model.Path);
-                VerifyAssemblyRepairState(model,reopened.Doc,before,expectedMates,removed,removed.Length>0);
+                VerifyAssemblyRepairState(model,reopened.Doc,before,expectedMates,removed,removed.Length>0,replacements,lockReferences);
             }
             VerifyUserSources(model);
             RequireAssemblyRepair(plan.InputHashes.Where(p=>!p.Key.Equals(model.Path,StringComparison.OrdinalIgnoreCase))
@@ -230,6 +245,7 @@ public partial class Cad {
             return new{model_id=model.Id,checkpoint_id=checkpointId,mate_changes=plan.MateChanges,mirror_feature_ids=removed,
                 independent_occurrences=removed.Length>0?before.PatternOccurrences:new string[0],added_mates=0,
                 mate_inventory_verified=true,poses_references_fixed_flags_verified=true,reopened_verified=true,
+                replaced_native_feature_ids=replacements.Select(p=>new{requested=p.Key,replacement=p.Value}).ToArray(),
                 source_files_unchanged=true,motion_verified=false};
         } catch(Exception failure) {
             if(failure is COMException||failure is NativeCommandStateException||LastContextRestoration=="unknown") {

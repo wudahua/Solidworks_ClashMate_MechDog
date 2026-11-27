@@ -1,10 +1,11 @@
 from pathlib import Path
 from types import SimpleNamespace
 import asyncio
+import csv
 import os
 import subprocess
-import tempfile
 import unittest
+import uuid
 from unittest.mock import Mock, patch
 
 from sw_mcp.conversation import aperture, core
@@ -104,17 +105,16 @@ class ApertureTests(unittest.TestCase):
     def test_production_endpoint_diagnostics_retain_strict_thresholds_and_rank_both_axes(self):
         root=Path(__file__).resolve().parents[1]
         compiler=Path(os.environ['WINDIR'])/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
-        scratch=root/'runs/aperture-endpoint-tests'
-        scratch.mkdir(parents=True,exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=scratch) as directory:
-            exe=Path(directory)/'aperture.exe'
-            files=('executor/AperturePoseReview.cs','executor/PoseValidation.cs','executor/CadFault.cs','executor/AtomicMetadata.cs',
-                   'tests/AperturePoseReviewTests.cs')
-            result=subprocess.run([str(compiler),'/nologo','/out:'+str(exe),'/reference:System.Web.Extensions.dll',
-                                   *(str(root/file) for file in files)],capture_output=True,timeout=30)
-            self.assertEqual(result.returncode,0,(result.stdout+result.stderr).decode(errors='replace'))
-            result=subprocess.run([str(exe),directory],capture_output=True,timeout=15)
-            self.assertEqual(result.returncode,0,(result.stdout+result.stderr).decode(errors='replace'))
+        directory=root/'runs/aperture-endpoint-tests'/uuid.uuid4().hex[:10]
+        directory.mkdir(parents=True)
+        exe=directory/'aperture.exe'
+        files=('executor/AperturePoseReview.cs','executor/PoseValidation.cs','executor/CadFault.cs','executor/AtomicMetadata.cs',
+               'tests/AperturePoseReviewTests.cs')
+        result=subprocess.run([str(compiler),'/nologo','/utf8output','/out:'+str(exe),'/reference:System.Web.Extensions.dll',
+                               *(str(root/file) for file in files)],capture_output=True,timeout=30)
+        self.assertEqual(result.returncode,0,(result.stdout+result.stderr).decode('utf-8',errors='replace'))
+        result=subprocess.run([str(exe),str(directory)],capture_output=True,timeout=15)
+        self.assertEqual(result.returncode,0,(result.stdout+result.stderr).decode('utf-8',errors='replace'))
 
     def test_endpoint_connections_only_name_observed_links_between_ranked_outliers(self):
         inspection={'components':[{'component_id':'a','instance':'jaw'}, {'component_id':'b','instance':'link','fixed_component':True},
@@ -129,6 +129,59 @@ class ApertureTests(unittest.TestCase):
         self.assertEqual(note['fixed_affected_instances'],['link'])
         self.assertEqual([m['name'] for m in note['observed_links']],['healthy'])
         self.assertFalse(note['root_cause_proven'])
+
+    def test_failed_terminal_frame_is_measured_without_relaxing_the_full_assembly_gate(self):
+        root = Path(__file__).resolve().parents[1] / 'runs/aperture-endpoint-tests'
+        root.mkdir(parents=True, exist_ok=True)
+        cases = ((.000732, .0017, .0007, 1), (0., 0., 0., 0))
+        for driver_offset, first_gap, second_gap, hits in cases:
+            with self.subTest(driver_offset=driver_offset):
+                self.session.runtime = root / uuid.uuid4().hex[:10]
+                card = self.proposal['aperture_validation']
+                tips = dict.fromkeys('abcd', [0., 0., 0.])
+                card.update(driver_name='drive', pairs=[('a', 'b'), ('c', 'd')],
+                            tip_local_points_m=tips, projection_axis_global=[0., 0., 1.])
+                xyz = {'drive':(0.,0.,0.), 'a':(-.02,0.,0.), 'b':(.02,0.,0.),
+                       'c':(0.,-.025,0.), 'd':(0.,.025,0.), 'outside':(0.,0.,0.)}
+                rotation = [1.,0.,0.,0.,1.,0.,0.,0.,1.]
+                self.session.initial_inspection = {'components':[
+                    {'instance':name, 'transform':rotation+list(point)+[1.,0.,0.,0.]} for name, point in xyz.items()]}
+
+                def reply(operation, **args):
+                    folder = self.session.runtime / 'runs' / args['run_id']
+                    folder.mkdir(parents=True)
+                    poses = folder / 'aperture-poses.csv'
+                    clashes = folder / 'aperture-interference.json'
+                    with poses.open('w', newline='', encoding='utf8') as output:
+                        writer = csv.writer(output)
+                        writer.writerow(['frame','time_s','instance','x_m','y_m','z_m']
+                                        + [f'r{i}{j}' for i in range(3) for j in range(3)])
+                        for frame in range(0, 41, 5):
+                            for name, point in xyz.items():
+                                end_pose = {'drive':(0.,0.,driver_offset), 'b':(.02-first_gap,0.,0.),
+                                            'd':(0.,.025-second_gap,0.), 'outside':(.04672,0.,0.)}
+                                writer.writerow([frame,frame/10,name,*(end_pose.get(name, point) if frame==40 else point),*rotation])
+                    core.write(clashes, {'threshold_mm3':.01, 'rows':[
+                        {'frame':f, 'new_or_increased':{'outside|c':.02} if f==40 and hits else {}}
+                        for f in range(0, 41, 5)]})
+                    details = {'run_id':args['run_id'], 'poses_path':str(poses), 'interference_path':str(clashes),
+                               'reason':'aperture_cycle_did_not_return_to_saved_pose',
+                               'endpoint':{'frame':40, 'allowed_translation_m':1e-7, 'allowed_rotation_rad':1e-6}}
+                    raise CadError('CONNECTION_EVIDENCE_FAILED', 'drift', 'restored', {'details':details})
+
+                self.session.call.side_effect = reply
+                with self.assertRaises(CadError) as failure:
+                    aperture.run(self.session, self.proposal, self.drive, self.reference)
+                review = failure.exception.diagnostics['aperture_endpoint']['return_review']
+                self.assertEqual(review['status'], 'measured')
+                self.assertEqual(review['frame'], 40)
+                self.assertAlmostEqual(review['driver']['signed_axis_residual_mm'], 1000 * driver_offset)
+                self.assertAlmostEqual(review['openings'][0]['signed_residual_mm'], -1000 * first_gap)
+                self.assertAlmostEqual(review['openings'][1]['signed_residual_mm'], -1000 * second_gap)
+                self.assertAlmostEqual(review['other_components']['worst_translation']['translation_mm'], 46.72)
+                self.assertEqual(review['final_frame_new_or_increased_interference_count'], hits)
+                self.assertTrue(review['all_component_return_required'])
+                self.assertEqual(failure.exception.restoration_status, 'restored')
 
 
 if __name__ == '__main__':

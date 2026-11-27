@@ -1,2 +1,2 @@
 """Formal dialogue metadata; release consistency is checked before packaging."""
-VERSION = "0.4.3-alpha.57"
+VERSION = "0.4.3-alpha.58"

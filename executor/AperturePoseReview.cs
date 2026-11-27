@@ -5,18 +5,19 @@ using System.Linq;
 
 internal static class AperturePoseReview {
     public static void RequireEndpoint(int frame, IDictionary<string,double[]> initial, IDictionary<string,double[]> actual,
-        string directory,string runId,double strokeMm,Action<string,object> save) {
+        string directory,string runId,double strokeMm,Action<string,object> save,
+        string posesPath=null,string interferencePath=null) {
         if((frame!=0&&frame!=40)||initial.All(p=>PoseValidation.Matches(p.Value,actual[p.Key])))return;
         string reason=frame==0?"aperture_initial_pose_changed":"aperture_cycle_did_not_return_to_saved_pose";
         var endpoint=Describe(frame,initial,actual);
         string evidence=Path.Combine(directory,"aperture-endpoint-violation.json");
         string persistence="written";
-        try {save(evidence,new{run_id=runId,stroke_mm=strokeMm,reason,endpoint});}
+        try {save(evidence,new{run_id=runId,stroke_mm=strokeMm,reason,endpoint,poses_path=posesPath,interference_path=interferencePath});}
         catch(IOException) {persistence="write_failed";}
         catch(UnauthorizedAccessException) {persistence="write_failed";}
         throw new CadFault("CONNECTION_EVIDENCE_FAILED","开口仿真的首帧或末帧偏离保存姿态。",
             new{reason,run_id=runId,stroke_mm=strokeMm,endpoint,endpoint_artifact_status=persistence,
-                endpoint_artifact=persistence=="written"?evidence:null});
+                endpoint_artifact=persistence=="written"?evidence:null,poses_path=posesPath,interference_path=interferencePath});
     }
 
     public static object Describe(int frame, IDictionary<string,double[]> initial, IDictionary<string,double[]> actual) {
