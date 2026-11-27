@@ -9,7 +9,7 @@ import re
 import os
 from pathlib import Path
 from typing import Annotated,Literal
-from pydantic import BaseModel,ConfigDict,Field
+from pydantic import BaseModel,ConfigDict,Field,StrictBool,model_validator
 
 class ConnectionIntent(BaseModel):
     model_config=ConfigDict(extra='forbid')
@@ -29,7 +29,14 @@ class PartMaterialAssignment(BaseModel):
 class MateChangeIntent(BaseModel):
     model_config=ConfigDict(extra='forbid')
     native_feature_id:int=Field(gt=0)
-    suppressed:bool
+    suppressed:StrictBool|None=None
+    lock_rotation:StrictBool|None=None
+
+    @model_validator(mode='after')
+    def check_action(self):
+        if len(self.model_fields_set & {'suppressed','lock_rotation'}) != 1 or (self.suppressed is None and self.lock_rotation is None):
+            raise ValueError('exactly_one_boolean_mate_change_required')
+        return self
 
 class RigidGroupIntent(BaseModel):
     model_config=ConfigDict(extra='forbid')
@@ -65,7 +72,7 @@ bridge = Bridge(ROOT)
 jobs = Jobs(bridge, ROOT)
 artifacts = Artifacts(ROOT)
 atexit.register(bridge.close)
-mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.57", instructions='日常只用AI对话和现有30个MCP工具。先get_mechanism_task找回任务，无任务再prepare；任务期间按next_action读取、规划、确认、执行和finish，收尾后再开始下一轮。装配任务默认get读紧凑当前状态及assembly_brief，full_record=true读原文；summary_only=true仅保存摘要、不协调原请求。按snapshot.queries只读已保存组件、几何、候选、目标和集中问题，不让用户逐面选引用或抄ID。分页保留所有集合待办；未完整搜索、几何截断、未知用途与不支持项不能说成配合完善。复用用户已明确用途；需要时一次说明各运动组及必要改动，取得具体方案授权。零配合先读mechanical_groups几何建议，按组复用或澄清用途；同轴不证明刚性。已明确完整连接、主直线输入和输出的闭环优先评估driven_loop，不把独立逐关节试验当唯一整机路线。整机completion_scope=whole_assembly一次确认后内部自动分批；不会批量固定未分配零件。方案复核快照与当前令牌绑定，读取全部非空集合后再解释和确认执行。只读结构仍受原写入门禁，不能把父级刚性当内部完善或擅改柔性。motion支持旋转/直线；external_gear_pair为两平行轴比例联动，不认证齿面接触或受力。小幅配合试验不等于完整Motion。名称/轴线歧义用机械用途澄清，几何排名不证明设计意图。未知、超时或断连只读取原任务和恢复记录，不重放写入、强制清理或重建COM；已明确未导入的创建失败按任务指引安全收尾。默认finish恢复导入检查点；仅用户明确要保留已验证副本时keep_result=true。旧owner丢失须资源身份/退出证据及明确同意才异常归档，不能冒充恢复通过。低层工具需要时仍先import副本，再体检/查询/预演/确认写入；几何续查保留兄弟队列。所有结果区分本机/跨机、快照/当前原生、有限试验/全行程；失败证据保留。')
+mcp = StrictMCPServer("SolidWorks ClashMate MechDog", version="0.4.3-alpha.58", instructions='日常只用AI对话和现有30个MCP工具。先get_mechanism_task找回任务，无任务再prepare；任务期间按next_action读取、规划、确认、执行和finish，收尾后再开始下一轮。装配任务默认get读紧凑当前状态及assembly_brief，full_record=true读原文；summary_only=true仅保存摘要、不协调原请求。按snapshot.queries只读已保存组件、几何、候选、目标和集中问题，不让用户逐面选引用或抄ID。分页保留所有集合待办；未完整搜索、几何截断、未知用途与不支持项不能说成配合完善。复用用户已明确用途；需要时一次说明各运动组及必要改动，取得具体方案授权。零配合先读mechanical_groups几何建议，按组复用或澄清用途；同轴不证明刚性。已明确完整连接、主直线输入和输出的闭环优先评估driven_loop，不把独立逐关节试验当唯一整机路线。整机completion_scope=whole_assembly一次确认后内部自动分批；不会批量固定未分配零件。方案复核快照与当前令牌绑定，读取全部非空集合后再解释和确认执行。只读结构仍受原写入门禁，不能把父级刚性当内部完善或擅改柔性。motion支持旋转/直线；external_gear_pair为两平行轴比例联动，不认证齿面接触或受力。小幅配合试验不等于完整Motion。名称/轴线歧义用机械用途澄清，几何排名不证明设计意图。未知、超时或断连只读取原任务和恢复记录，不重放写入、强制清理或重建COM；已明确未导入的创建失败按任务指引安全收尾。默认finish恢复导入检查点；仅用户明确要保留已验证副本时keep_result=true。旧owner丢失须资源身份/退出证据及明确同意才异常归档，不能冒充恢复通过。低层工具需要时仍先import副本，再体检/查询/预演/确认写入；几何续查保留兄弟队列。所有结果区分本机/跨机、快照/当前原生、有限试验/全行程；失败证据保留。')
 
 _task_engine=None
 _formal_engine=None
@@ -127,7 +134,7 @@ async def plan_mechanism_task(task_id:str,candidate_id:str='',moving_component_h
     target_openings_mm:list[float]|None=Field(default=None,min_length=2,max_length=2),aperture_output_hints:list[str]|None=Field(default=None,min_length=4,max_length=4),aperture_tip_end:Literal['axis_min','axis_max']='axis_min',
     coaxial_groups:list[CoaxialGroupIntent]|None=Field(default=None,min_length=1,max_length=16),continue_verified_batch:bool=False,
     material_assignments:list[PartMaterialAssignment]|None=Field(default=None,min_length=1,max_length=64),independentize_mirrors:bool=False):
-    '只规划，不执行。按当前任务next_action和推荐填写，机械歧义集中澄清。四指往复走motion任务，在plan传target_openings_mm和可选的aperture_output_hints。material_assignments随装配体检任务单独规划，按盘点的零件文件和配置选择本机材质库，写入前须明确确认。\n圆柱副cylindrical保留轴向移动及绕轴转动，须使用真实材料轴线。mate_changes可以独立规划最多16项旧配合压缩或解除压缩，执行时仅改状态，等待原生重开核对。与显式连接目标合用时，declared仅调整目标零件对，跨零件对用whole_assembly。AI从mates快照取身份，按零件对解释后确认。单独传independentize_mirrors=true可在根装配预演镜向实例独立化，核对范围后确认，随后用保留的副本继续补配合。\n装配auto_plan可合并少量connection_intent；whole_assembly最多128目标/512新增，内部8/64分批。group_seeds只读推荐归组；rigid_groups及解除固定须明确用途，未分配件不默认静止。\ndriven_loop仅用于完整平坦基础关节机构：moving/reference_component_hint明确主直线输入和接地参考，output_component_hints明确各输出；正反各0.1mm临时Motion检查所有组件和关节，不承诺每个铰接能独立运动。可用small_translation预测零配合模型的无旋转微量初态平移，默认预算0.001mm、最高0.01mm，execute另需alignment_confirmed。\n普通linear motion可用validated_assembly_task_id复用已验证并保留的driven_loop整机成果，核对全部原目标；输入最多20mm、组件位移50mm/转角15度，不认证设计全行程或接触力。\ncoaxial_groups声明同一材料轴的两件以上成员，分别保留轴向自由free或轴向定位located，均保留转动；轴有歧义时AI核对材料点。已验证的declared平坦装配可单独调用continue_verified_batch=true复用同一副本；后续仍需新方案及明确确认。\n运动、齿轮初态和分层序列按阶段指引；small_translation另需初态调整确认。核对完整目标、逐项改动、组成员和验证范围后才确认执行。几何和局部秩不证明设计意图、全局自由度或运动通过。'
+    '只规划，不执行。按当前任务next_action和推荐填写，机械歧义集中澄清。四指往复走motion任务，在plan传target_openings_mm和可选的aperture_output_hints。material_assignments随装配体检任务单独规划，按盘点的零件文件和配置选择本机材质库，写入前须明确确认。\n圆柱副cylindrical保留轴向移动及绕轴转动，须使用真实材料轴线。mate_changes可独立规划最多16项已有配合状态变更，每项仅传布尔suppressed或lock_rotation。已有同心的lock_rotation只用于独立改造，执行后核对保存重开和替换ID，运动需另行验证。压缩调整可与显式连接目标合用，declared仅调整目标零件对，跨零件对用whole_assembly。AI从mates快照取身份，按零件对解释后确认。单独传independentize_mirrors=true可在根装配预演镜向实例独立化，核对范围后确认，随后用保留的副本继续补配合。\n装配auto_plan可合并少量connection_intent；whole_assembly最多128目标/512新增，内部8/64分批。group_seeds只读推荐归组；rigid_groups及解除固定须明确用途，未分配件不默认静止。\ndriven_loop仅用于完整平坦基础关节机构：moving/reference_component_hint明确主直线输入和接地参考，output_component_hints明确各输出；正反各0.1mm临时Motion检查所有组件和关节，不承诺每个铰接能独立运动。可用small_translation预测零配合模型的无旋转微量初态平移，默认预算0.001mm、最高0.01mm，execute另需alignment_confirmed。\n普通linear motion可用validated_assembly_task_id复用已验证并保留的driven_loop整机成果，核对全部原目标；输入最多20mm、组件位移50mm/转角15度，不认证设计全行程或接触力。\ncoaxial_groups声明同一材料轴的两件以上成员，分别保留轴向自由free或轴向定位located，均保留转动；轴有歧义时AI核对材料点。已验证的declared平坦装配可单独调用continue_verified_batch=true复用同一副本；后续仍需新方案及明确确认。\n运动、齿轮初态和分层序列按阶段指引；small_translation另需初态调整确认。核对完整目标、逐项改动、组成员和验证范围后才确认执行。几何和局部秩不证明设计意图、全局自由度或运动通过。'
     options={} if target_openings_mm is None and aperture_output_hints is None and aperture_tip_end=='axis_min' else {
         'target_openings_mm':target_openings_mm,'aperture_output_hints':aperture_output_hints,'aperture_tip_end':aperture_tip_end}
     if coaxial_groups is not None:options['coaxial_groups']=[g.model_dump() for g in coaxial_groups]
@@ -138,7 +145,7 @@ async def plan_mechanism_task(task_id:str,candidate_id:str='',moving_component_h
                                gear_ratio_numerator,gear_ratio_denominator,input_shaft_hint,output_shaft_hint,input_gear_hint,output_gear_hint,stationary_component_hints,assembly_intent,
                                [r.model_dump() for r in connection_intent] if connection_intent is not None else None,
                                [r.model_dump() for r in rigid_groups] if rigid_groups is not None else None,release_fixed_components,completion_scope,assembly_scope_hint=assembly_scope_hint,assembly_sequence=assembly_sequence,auto_plan=auto_plan,group_seeds=group_seeds,
-                               verification_mode=verification_mode,output_component_hints=output_component_hints,initial_translation_limit_mm=initial_translation_limit_mm,validated_assembly_task_id=validated_assembly_task_id,mate_changes=[r.model_dump() for r in mate_changes] if mate_changes is not None else None,**options)
+                               verification_mode=verification_mode,output_component_hints=output_component_hints,initial_translation_limit_mm=initial_translation_limit_mm,validated_assembly_task_id=validated_assembly_task_id,mate_changes=[r.model_dump(exclude_none=True) for r in mate_changes] if mate_changes is not None else None,**options)
 
 @mcp.tool()
 async def execute_mechanism_task(task_id:str,plan_token:str,confirmed:bool=False,scope_confirmed:bool=False,alignment_confirmed:bool=False):

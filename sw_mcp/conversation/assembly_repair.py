@@ -22,7 +22,7 @@ def propose(engine, task, requests, independentize_mirrors):
     affected_pairs = []
     if requests is not None:
         try:
-            _, changes = connection_mate_changes.prepare(survey, requests)
+            _, changes = connection_mate_changes.prepare(survey, requests, allow_lock_rotation=True)
             names = {c['component_id']: c['instance'] for c in survey['components']}
             mates = {m['native_feature_id']: m for m in survey['mates']}
             for change in changes:
@@ -30,8 +30,9 @@ def propose(engine, task, requests, independentize_mirrors):
                 components = [names.get(ref.get('component_id')) for ref in refs]
                 if len(components) != 2 or any(not name for name in components) or components[0] == components[1]:
                     raise ValueError('mate_change_requires_observed_component_pair')
-                affected_pairs.append({'name': change['name'], 'components': components,
-                                       'before_suppressed': change['before'], 'after_suppressed': change['after']})
+                field = 'lock_rotation' if change['action'] == 'set_lock_rotation' else 'suppressed'
+                affected_pairs.append({'name': change['name'], 'components': components, 'action': change['action'],
+                                       f'before_{field}': change['before'], f'after_{field}': change['after']})
         except (ValueError, TypeError, KeyError) as error:
             raise core.StopBatch('MATE_CHANGE_REVIEW_REQUIRED', '请从本次体检中选择身份明确的基础配合，复核受影响的零件对。',
                                  {'reason': str(error), 'write_dispatched': False}) from error
@@ -87,6 +88,10 @@ def execute(engine, task, token, confirmed, scope_confirmed, alignment_confirmed
                 or note.get('independent_occurrences') != proposal['independent_occurrences']):
             raise core.StopBatch('CONNECTION_EVIDENCE_FAILED', '改造回执与已确认的装配变更不一致。')
         session.capture_applied_result()
+        lock_edits = [change for change in proposal['mate_changes'] if change['action'] == 'set_lock_rotation']
+        if lock_edits:
+            replacements = note.get('replaced_native_feature_ids', [])
+            require_lock_readback(lock_edits, replacements, session.result_inspection['mates'])
         session.committed = True
         session.import_restored = False
         task.update(phase='verified', verification={'declared_scope_passed': True,
@@ -95,3 +100,23 @@ def execute(engine, task, token, confirmed, scope_confirmed, alignment_confirmed
                         'instruction': '核对改造范围和重开回执。经确认保留成果后，用成果副本继续体检、补配合或运动验证。'})
 
     return engine._submit(task, 'applying_assembly_repair', operation)
+
+
+def require_lock_readback(edits, replacements, mates):
+    expected = {change['native_feature_id']: change for change in edits}
+    mapped = {}
+    targets = set()
+    current = {mate['native_feature_id']: mate for mate in mates}
+    for row in replacements:
+        old, new = row.get('requested'), row.get('replacement')
+        if (old not in expected or old in mapped or type(new) is not int or new <= 0
+                or new in expected or new in targets or old in current):
+            raise core.StopBatch('CONNECTION_EVIDENCE_FAILED', '同心锁旋转的原生特征替换映射与确认方案不符。')
+        mapped[old] = new
+        targets.add(new)
+    for old, change in expected.items():
+        native = current.get(mapped.get(old, old)) or {}
+        lock = native.get('rotation_lock_observation') or {}
+        if (native.get('name') != change['name'] or native.get('type') != 1 or native.get('suppressed') is not False
+                or lock.get('status') != 'observed' or lock.get('locked') is not change['after']):
+            raise core.StopBatch('CONNECTION_EVIDENCE_FAILED', '保存重开后的同心锁态未通过独立读回。')

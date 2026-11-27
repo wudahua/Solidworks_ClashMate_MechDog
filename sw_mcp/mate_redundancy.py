@@ -110,8 +110,9 @@ def connection_variations(inspection, mirrors=None):
             group=tuple(sorted(families[c] for c in pair))
             groups[group].append((pair,tuple(sorted(counts.items()))))
     mirrors=mirror_connections.review(inspection) if mirrors is None else mirrors
-    native_sources={frozenset((m['component_id'],m['source_candidates'][0]['component_id'])) for m in mirrors
-                    if m.get('source_binding_status')=='unique_native_source_observed' and len(m.get('source_candidates',[]))==1}
+    bindings={(m['source_candidates'][0]['component_id'],m['component_id']) for m in mirrors
+              if m.get('source_binding_status')=='unique_native_source_observed' and len(m.get('source_candidates',[]))==1}
+    native_sources={frozenset(binding) for binding in bindings}
     for group,occurrences in sorted(groups.items()):
         signatures=defaultdict(list)
         for pair,counts in occurrences:signatures[counts].append(pair)
@@ -121,11 +122,16 @@ def connection_variations(inspection, mirrors=None):
             peer=peers[0]
             confirmed_mirror_links=sorted((components[a]['instance'],components[b]['instance']) for a in pair for b in peer
                                           if a!=b and frozenset((a,b)) in native_sources)
+            directional_links=[{'source_component_id':source,'derived_component_id':derived,
+                                'source_instance':components[source]['instance'],'derived_instance':components[derived]['instance']}
+                               for source,derived in sorted(bindings)
+                               if source!=derived and ((source in pair and derived in peer) or (source in peer and derived in pair))]
             yield {'component_ids':list(pair),'components':[components[c]['instance'] for c in pair],
                    'compared_component_ids':list(peer),'compared_components':[components[c]['instance'] for c in peer],
                    'mate_type_counts':{MATE_TYPE_NAMES.get(t,f'native_type_{t}'):n for t,n in counts},
                    'compared_mate_type_counts':{MATE_TYPE_NAMES.get(t,f'native_type_{t}'):n for t,n in other_signature},
                    'observed_native_mirror_links':confirmed_mirror_links,
+                   'observed_native_mirror_bindings':directional_links,
                    'matching_part_configuration_pair_count':len(occurrences),'variant_count':len(signatures),
                    'scope':'observed_active_mate_types_on_repeated_top_level_part_pairs',
                    'design_symmetry_proven':False,'mechanical_DOF_proven':False,'automatic_constraint_change_allowed':False}

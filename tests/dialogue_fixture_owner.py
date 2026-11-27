@@ -6,6 +6,7 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT));sys.path.i
 from sw_mcp.conversation import core
 from sw_mcp.conversation.conversation_owner import serve
 from sw_mcp.conversation.formal_engine import FormalEngine
+from sw_mcp.conversation.task_engine import TaskEngine
 from sw_mcp.bridge import Bridge
 from sw_mcp.jobs import Jobs
 from test_conversation_tasks import FakeSession
@@ -23,11 +24,12 @@ def factory(project,work,runtime):
     return engine
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--work',type=Path);p.add_argument('--generation');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--work',type=Path);p.add_argument('--generation');p.add_argument('--direct',action='store_true');a=p.parse_args()
     verdict={'scope_verification':{'scope_acceptance_passed':True},'passed':False,
         'baseline':{'run_id':'fixture-before'},'after':{'run_id':'fixture-after'},'mechanical_card':{'card_id':'fixture'}}
     with patch('sw_mcp.conversation.concentric_card.create',return_value={'card_id':'fixture'}), \
          patch('sw_mcp.conversation.mate_motion.baseline'), \
          patch('sw_mcp.conversation.mate_motion.verify',return_value=verdict), \
          patch('sw_mcp.conversation.startup_gate.require_idle'):
-        serve(a.work,a.generation,engine_factory=factory,idle_s=30)
+        engine_factory = (lambda project, work, runtime: TaskEngine(project, work, runtime, Session)) if a.direct else factory
+        serve(a.work,a.generation,engine_factory=engine_factory,idle_s=30)

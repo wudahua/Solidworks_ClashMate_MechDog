@@ -74,6 +74,10 @@ def compact_status(task, session, owner):
         result.update(completed_frames=progress.get('completed_frames'), total_frames=progress['total_frames'])
     if result['native_progress_observed'] and progress.get('total_files'):
         result.update(completed_files=progress.get('completed_files'), total_files=progress['total_files'])
+    if result['native_progress_observed'] and progress.get('operation') in {'import_assembly','_import_gear_assembly','_import_constraint_assembly'}:
+        label = LABELS.get(result['stage'])
+        if label:
+            result['stage_label'] = label
     if error:
         result['error_code'] = error
         diagnostics=failure.get('diagnostics') or {}
@@ -91,7 +95,11 @@ def compact_status(task, session, owner):
 
 LABELS = {
     'repair_dissolve_mirrors':'独立化已确认的镜向实例','repair_save_and_verify':'保存并重开核对装配改造',
-    'copy_files':'复制源文件到隔离副本','redirect_references':'重定向副本引用','verify_isolation':'核对副本依赖隔离',
+    'scan_dependencies':'扫描装配依赖','copy_files':'复制源文件到隔离副本',
+    'redirect_references':'重定向副本引用','verify_isolation':'核对副本依赖隔离',
+    'native_virtual_classification':'识别虚拟组件及其原生引用','externalize_virtual_part':'外部化副本中的虚拟零件',
+    'save_externalized_assembly':'保存外部化后的装配副本','verify_mate_reference_migration':'核对配合引用迁移',
+    'reopen_verify_externalized_copy':'重开并核对外部化副本','import_complete':'装配导入已完成原生核验',
     'open_registered_copy':'等待原生打开副本','checkpoint_snapshot':'记录原始恢复检查点',
     'create_checkpoint':'创建导入检查点','preflight_motion':'核对导入后的运动条件',
     'import_full_rebuild':'完整重建隔离副本', 'import_rebuild_snapshot':'核对重建前配合与姿态', 'prepare_gear_copy_metadata':'准备副本标准件标记',

@@ -1,7 +1,7 @@
 # 装配体检、旧配合复核与材质
 
 - `inspect_model` 默认读取紧凑体检，返回冻结几何和组件、配合、镜向依赖、冗余候选的分页入口。显式 `full` 保留原有详细结构。`summary_only=true` 和 `progress_only=true` 适用于各类受管任务。
-- `plan_mechanism_task(task_id=..., mate_changes=[...])` 可独立预演最多 16 项基础配合的压缩或解除压缩。AI 从 `mates` 快照获取身份，预演列出受影响零件对及前后状态。与显式连接目标合用时，局部模式仍只覆盖目标零件对，跨零件对使用整机范围。
+- `plan_mechanism_task(task_id=..., mate_changes=[...])` 可独立预演最多 16 项基础配合状态变更。每项携带 `native_feature_id`，以及单个布尔动作 `suppressed` 或 `lock_rotation`。已有同心配合的锁旋转需有原生锁态读回，只支持独立改造。保存重开时核对原生参考、配合清单、位姿与锁态，并返回发生的特征 ID 替换。运动效果需另行验证。与显式连接目标合用的压缩调整仍按原有作用范围执行。
 - `plan_mechanism_task(task_id=..., independentize_mirrors=true)` 单独预演完整镜向链独立化。AI 先复核镜向特征与受影响实例，取得确认再执行。当前限定单一装配配置、顶层已解析外部零件和完整镜向依赖。镜向派生件仍可随完整源件链声明为刚性组成员，由原生运动验证关系。
 - 两类改造只操作装配体检任务的根层副本，要求历史算例处于零时刻。确认后核对配合、姿态、固定状态、零件引用及保存重开。默认收尾恢复导入检查点。确认保留后，AI 使用成果路径继续体检、补配合和运动验证。改造通过表示装配状态通过核对，运动仍需独立验收。
 - `inspect_model(detail_level="materials")` 返回零件引用配置及材质库名。`inspect_model(detail_level="material_names", material_database=...)` 同步查询一个已登记材质库，可按 `material_query` 筛选并原样传回 `next_cursor`。后续页沿用同一副本、库和筛选词，库文件变化后从首页重查。材质名错误时，任务摘要最多给出五个名称候选。只有精确且唯一的材质名可用于 `plan_mechanism_task(material_assignments=...)`，须明确确认后写入并读回。`mass_properties` 返回原生质量、体积、质心和主惯量。`native_material_review_required` 指示核对材质盘点、读回和恢复证据。
@@ -19,7 +19,7 @@
 - 已验证局部批次如提示 `continue_in_same_copy`，单独调用 `plan_mechanism_task(task_id=..., continue_verified_batch=true)` 核对原副本的姿态、配合和固定状态。待同一任务进入 `constraint_review_ready` 后提交本批目标，复核最新方案并取得独立确认。支持的平坦装配每批最多 8 个目标，累计至多 128 个。后续批次的秩和原生小位移检查保护已验证连接。默认收尾恢复最初的导入检查点。保留成果仍须明确授权，并以最后一批验证结论为准。分层序列在当前层保存并关闭后，单独调用 `assembly_sequence="continue"`，使用返回的下一层任务 ID 继续。
 - `coaxial_groups` 用 `name`、`axis_component` 和 `members` 指定材料轴和成员，每个成员给出 `component` 和 `axial`。 `free` 保留绕轴转动和轴向滑移，`located` 保留绕轴转动和现有轴向位置。名称或几何有歧义时可用当前快照中的方向和材料点作为提示，必要时集中向用户澄清。
 - COM 诊断中的 `rot_registered_pids` 是可见 PID moniker，`process_snapshot` 是进程枚举，`selected_pid` 是选择值，`returned_com_object_pid` 是对象回报，`verified_attached_pid` 仅在完成身份和版本核验后填写。旧字段继续返回。
-- 普通直线 `motion` 的 `target_openings_mm=[上限A,上限B]` 使用已保存的起始姿态和两个对向输出。AI 先提出目标开口方案，执行后核对四指、相对开口、干涉及正常收尾。认证范围以实际通过的行程为准。
+- 普通直线 `motion` 的 `target_openings_mm=[上限A,上限B]` 使用已保存的起始姿态和两个对向输出。AI 先提出目标开口方案，执行后核对四指、相对开口、干涉及正常收尾。末帧全组件回位超差时，保留末帧轨迹与干涉工件。诊断分别列出驱动杆、对向开口、四个输出件和其余组件的回位偏差。认证范围以实际通过的行程为准。
 
 # alpha.51 圆柱副、既有配合调整及引用身份
 
